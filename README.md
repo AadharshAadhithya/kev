@@ -195,6 +195,8 @@ L = CrossEntropy(z, y)                                      all types
 
 Every training epoch re-shuffles the option order, and sometimes swaps the true option for `other: None of the above`, or adds an irrelevant distractor option.
 
+> **Note.** The run reported in section 3 (`runs/kev`) was trained with cross-entropy and data-level permutation only. The ordinal term and the permutation KL were added to `train.py` afterwards and are on by default for new runs. See [MODEL_CARD.md](MODEL_CARD.md) for the exact recipe of the reported checkpoint.
+
 The training data is six public datasets converted into TypeSafe-shaped requests: Banking77 (77-way Choice), AG News (Choice + derived Nouls), MNLI (3-way Choice), BoolQ (Noul), SST-5 and Yelp (5-level Score). About 9,000 requests, 13,500 questions, two epochs, 1h45m on an M5.
 
 ### 2.6 From API request to model input
@@ -398,6 +400,7 @@ tests/
 playground/     Next.js 16 demo (app router, shadcn/base-ui, Tailwind 4)
 runs/kev/eval.json   results of the run described in this README (weights are not committed)
 docs/playground.png
+MODEL_CARD.md   model card for the kev-0.5b checkpoint: recipe, data, metrics, limitations
 AGENTS.md       notes for coding agents: commands, gotchas
 ```
 

@@ -4,11 +4,11 @@ import type { Answer, Question } from "@/lib/kev";
 // Only the fill length varies between rows, so lengths are comparable across cards.
 const LANES = "grid grid-cols-[minmax(0,6.5rem)_minmax(0,1fr)_2.75rem] items-center gap-x-3";
 
-function Bar({ label, p, top, delta }: { label: string; p: number; top: boolean; delta?: number }) {
+function Bar({ label, p, top, delta, mono }: { label: string; p: number; top: boolean; delta?: number; mono?: boolean }) {
   const showDelta = delta !== undefined && Math.abs(delta) >= 0.01;
   return (
     <div className={`${LANES} text-[12px] leading-5`}>
-      <span className={`truncate ${top ? "text-foreground" : "text-muted-foreground"}`} title={label}>{label}</span>
+      <span className={`truncate ${mono ? "font-mono" : ""} ${top ? "text-foreground" : "text-muted-foreground"}`} title={label}>{label}</span>
       <span className="relative block h-1 min-w-0 rounded-full bg-muted" aria-hidden>
         <span className={`absolute inset-y-0 left-0 rounded-full ${top ? "bg-foreground" : "bg-muted-foreground/50"}`} style={{ width: `${Math.round(p * 100)}%` }} />
       </span>
@@ -45,7 +45,7 @@ export function AnswerCard({ id, question, answer, compare }: { id: string; ques
         </h3>
         {instr && <p className="mt-0.5 line-clamp-2 text-[13px] leading-5 text-foreground" title={instr}>{instr}</p>}
         <p className="mt-1.5 flex flex-wrap items-baseline gap-x-2">
-          <span className="text-base font-medium tracking-tight">{headline}</span>
+          <span className={`text-base font-medium tracking-tight ${answer.type === "choice" ? "font-mono" : ""}`}>{headline}</span>
           <span className="whitespace-nowrap text-[12px] tabular-nums text-muted-foreground">{detail}</span>
         </p>
       </div>
@@ -61,7 +61,7 @@ export function AnswerCard({ id, question, answer, compare }: { id: string; ques
           Object.entries(answer.probabilities)
             .sort((a, b) => b[1] - a[1])
             .map(([k, p]) => (
-              <Bar key={k} label={k} p={p} top={k === answer.choice} delta={compare?.type === "choice" ? p - (compare.probabilities[k] ?? 0) : undefined} />
+              <Bar key={k} label={k} mono p={p} top={k === answer.choice} delta={compare?.type === "choice" ? p - (compare.probabilities[k] ?? 0) : undefined} />
             ))}
         {answer.type === "score" &&
           Object.entries(answer.probabilities).map(([k, p]) => (

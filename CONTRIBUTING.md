@@ -41,4 +41,4 @@ Do not commit weights. Attach them to a GitHub Release if they need to be shared
 
 - Python: compact, few comments, type hints where they help. Follow the existing files.
 - Agent notes and gotchas go in `AGENTS.md`.
-- Write documentation in Simple Technical English: short sentences, one idea per sentence, consistent terms.
+- README is terse and conversational (nanoGPT style, lowercase sections). MODEL_CARD.md is formal. Keep numbers in both in sync.

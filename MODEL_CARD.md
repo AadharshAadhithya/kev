@@ -41,7 +41,7 @@ It is a LoRA adapter plus a small pointer head on top of `Qwen/Qwen2.5-0.5B`. It
 This checkpoint is a **research prototype** trained on a laptop. It shows that the mechanism works. It is not a production model and it is not Jev.
 
 - Code, training recipe, evaluation and demo: [github.com/jaredpalmer/kev](https://github.com/jaredpalmer/kev)
-- Checkpoint directory: `runs/kev/` (LoRA adapter `adapter_model.safetensors`, 35 MB; head `head.pt`, 1.8 MB; tokenizer files). Weights are not committed to git.
+- Weights: [GitHub release `v0.1.0`](https://github.com/jaredpalmer/kev/releases/tag/v0.1.0), `kev-0.5b.tar.gz` (38 MB; LoRA adapter `adapter_model.safetensors`, head `head.pt`, tokenizer files, `eval.json`, training log). SHA-256 `15639f79…6e12f8`, full digest in the sidecar `.sha256`. Extract to `runs/kev/`. Weights are not committed to git.
 
 ## Model details
 

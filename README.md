@@ -79,7 +79,14 @@ client = TypeSafeClient(api_key="local", base_url="http://127.0.0.1:8009", model
 
 ## reproducing kev-0.5b
 
-The real thing. Six public datasets are converted into TypeSafe-shaped requests (Banking77 as a 77-way Choice, AG News as a 4-way Choice plus derived yes/no Nouls, MNLI as a 3-way Choice, BoolQ as a Noul, SST-5 and Yelp as 5-level Scores), 1,500 records per source, two epochs:
+If you'd rather skip the 1h45m, the trained adapter + head (38 MB) is on the [releases page](https://github.com/jaredpalmer/kev/releases/tag/v0.1.0):
+
+```sh
+mkdir -p runs && gh release download v0.1.0 -R jaredpalmer/kev -p 'kev-0.5b.tar.gz' -O - | tar xz -C runs && mv runs/kev-0.5b runs/kev
+uv run --extra serve python -m kev.serve --run runs/kev --port 8009
+```
+
+The base model is not in the tarball; it downloads from the Hub on first load. To train it yourself instead: six public datasets are converted into TypeSafe-shaped requests (Banking77 as a 77-way Choice, AG News as a 4-way Choice plus derived yes/no Nouls, MNLI as a 3-way Choice, BoolQ as a Noul, SST-5 and Yelp as 5-level Scores), 1,500 records per source, two epochs:
 
 ```sh
 uv run python -m kev.train --n_per_source 1500 --epochs 2 --perm_kl 0 --ord_w 0 --out runs/kev
@@ -175,7 +182,6 @@ Don't run two training jobs at once on MPS; each gets ~10× slower and the API s
 - Soft-label sources (ChaosNLI, Jigsaw) so the model has legitimately-uncertain targets to learn from
 - Batched training with a packed block mask so a 7B / 30B-A3B backbone is feasible on a real GPU
 - Prefix KV cache across requests; bf16
-- Publish the `kev-0.5b` adapter (~37 MB) as a GitHub Release
 
 ## troubleshooting
 

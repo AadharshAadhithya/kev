@@ -39,6 +39,7 @@ serve = [
 [dependency-groups]
 dev = [
     "httpx>=0.28.1",
+    "matplotlib>=3.9",
     "pytest>=9.1.1",
 ]
 

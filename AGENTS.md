@@ -3,7 +3,7 @@
 Causal LM (Qwen2.5-0.5B + LoRA) run prefill-only with a block-causal mask (shared state prefix,
 isolated question branches) and a pointer readout over option boundary tokens, trained with log loss
 on converted public datasets (Banking77, BoolQ, AG News, MNLI, SST-5, Yelp). No text generation.
-See README.md (deep dive) and MODEL_CARD.md (checkpoint recipe + metrics). Docs are written in Simple Technical English.
+See README.md (deep dive) and MODEL_CARD.md (checkpoint recipe + metrics). README follows nanoGPT's style (terse, lowercase sections); MODEL_CARD.md is formal.
 
 ## Commands
 - Env: `uv sync` (torch MPS, transformers, peft, datasets)
@@ -13,6 +13,8 @@ See README.md (deep dive) and MODEL_CARD.md (checkpoint recipe + metrics). Docs 
 - Eval:  `uv run python -m kev.evaluate --run runs/kev --n_per_source 150 --baseline --baseline_instruct Qwen/Qwen2.5-0.5B-Instruct`
   -> `runs/kev/eval.json` (acc/ECE/NLL per source, temperature scaling, permutation, IIA, isolation, packed-vs-separate, held-out sources)
 - Smoke: `--n_per_source 40 --accum 4 --out runs/smoke` (~1 min)
+- Plot (README figure): `uv run python -m kev.plot --logs runs/logs/train_kev.log:kev-0.5b --eval runs/kev/eval.json --out docs/training.png`
+  Training logs to keep go in `runs/logs/train_*.log` (only path under runs/ besides eval.json that is committed).
 - Serve: `uv run --extra serve python -m kev.serve --run runs/kev --port 8008` (falls back to runs/smoke)
   - TypeSafe-compatible: `POST /v1/systemone`, `GET /v1/models` (no auth). Playground routes under `/api/*`.
   - SDK: `TypeSafeClient(api_key="local", base_url="http://127.0.0.1:8008", model="kev-latest")`
@@ -30,6 +32,7 @@ See README.md (deep dive) and MODEL_CARD.md (checkpoint recipe + metrics). Docs 
 - `kev/model.py`     encode(), branch_mask(), PointerHead, DecisionModel
 - `kev/train.py`     LoRA fine-tune, batch size 1 with grad accumulation (variable-length custom masks)
 - `kev/evaluate.py`  acc/ECE, permutation stability, IIA shift, isolation probe, packed-vs-separate
+- `kev/plot.py`      loss curve(s) from train logs + accuracy-vs-baselines bars from eval.json
 - `kev/api.py`       TypeSafe request/response models; Noul/Choice/Score -> pointer options; confidence formulas
 - `kev/serve.py`     FastAPI: /v1/systemone (+ /v1/models) and /api/* playground routes
 - `tests/test_api.py` conformance against the docs' example requests + official SDK

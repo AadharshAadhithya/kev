@@ -31,8 +31,9 @@ CI runs the first two. The server tests and any training need a machine with a G
 If a change alters `evaluate.py` output or you train a new reference checkpoint:
 
 1. Run the full evaluation and commit the new `runs/<name>/eval.json`.
-2. Update the numbers in `README.md` section 3 and in `MODEL_CARD.md`.
-3. Say in the pull request which run the numbers come from and what flags produced it.
+2. Update the numbers in `README.md` ("reproducing" section) and in `MODEL_CARD.md`.
+3. Copy the training log to `runs/logs/train_<name>.log` and regenerate `docs/training.png` with `python -m kev.plot`.
+4. Say in the pull request which run the numbers come from and what flags produced it.
 
 Do not commit weights. Attach them to a GitHub Release if they need to be shared.
 

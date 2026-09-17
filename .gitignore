@@ -4,14 +4,18 @@ __pycache__/
 .pytest_cache/
 *.pyc
 
-# model runs: weights are large; keep eval results
+# model runs: weights are large; keep eval results and training logs (for the plot)
 runs/*
 !runs/kev/
 runs/kev/*
 !runs/kev/eval.json
+!runs/logs/
+runs/logs/*
+!runs/logs/train_*.log
 
-# logs
+# logs elsewhere
 *.log
+!runs/logs/train_*.log
 
 # os
 .DS_Store

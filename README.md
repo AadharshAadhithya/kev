@@ -11,7 +11,7 @@ Jev-inspired decision model. Typed questions in, calibrated probabilities out, o
 
 ![kev playground](docs/playground.png)
 
-kev is a small language model that reads a document once and answers many typed questions about it in parallel. It does not generate text. Each answer is a probability distribution read directly from the model's hidden states and trained against outcomes with a proper scoring rule.
+kev is a LoRA adapter and a small readout head on top of Qwen2.5-0.5B. It reads a document once and answers many typed questions about it in parallel, in a single prefill pass with no decoding. The document and every question are packed into one sequence; a block-causal mask lets each question see the document but never another question. A pointer head then scores each question's options against its decision token and applies softmax. Those probabilities are the output. The head is trained with cross-entropy against labelled outcomes, so the probabilities are learned rather than generated as text.
 
 The architecture follows the reconstruction of TypeSafe's Jev in [Jev's Architecture Unmasked](https://archerhume.com/posts/jevs-architecture-unmasked). The API follows TypeSafe's [System One](https://docs.typesafe.ai/api) contract, so the official `typesafe-sdk` works against a local kev server with a `base_url` change.
 

@@ -1,0 +1,26 @@
+[project]
+name = "kev"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "accelerate>=1.15.0",
+    "datasets>=3.0",
+    "numpy>=2.5.3",
+    "peft>=0.15",
+    "scikit-learn>=1.9.1",
+    "torch>=2.6,<2.9",
+    "transformers>=4.51,<4.58",
+]
+
+[project.optional-dependencies]
+serve = [
+    "fastapi>=0.115",
+    "typesafe-sdk>=0.6.0",
+    "uvicorn>=0.30",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pytest>=9.1.1",
+]

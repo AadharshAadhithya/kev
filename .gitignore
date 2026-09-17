@@ -1,0 +1,17 @@
+# python
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+
+# model runs: weights are large; keep eval results
+runs/*
+!runs/kev/
+runs/kev/*
+!runs/kev/eval.json
+
+# logs
+*.log
+
+# os
+.DS_Store

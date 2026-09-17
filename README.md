@@ -262,7 +262,7 @@ KEV_BASE_URL=http://127.0.0.1:8009 uv run --extra serve python -m pytest tests/t
 cd playground && npm run lint && npx tsc --noEmit -p .
 ```
 
-`tests/test_api.py` runs the TypeSafe docs' example requests and the official SDK against the local server. See [CONTRIBUTING.md](CONTRIBUTING.md).
+`tests/test_api.py` runs the TypeSafe docs' example requests and the official SDK against the local server.
 
 <details>
 <summary>Troubleshooting</summary>

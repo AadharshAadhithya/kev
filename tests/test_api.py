@@ -4,6 +4,8 @@ Run with the server up:  uv run --extra serve python -m pytest tests -q
 import math, os
 import httpx, pytest
 
+pytestmark = pytest.mark.server
+
 BASE = os.environ.get("KEV_BASE_URL", "http://127.0.0.1:8008")
 
 DEPARTMENT = {"returns": "Exchanges, refunds, wrong or damaged items", "shipping": "Delivery status, delays, lost packages", "billing": "Charges, invoices, payment problems"}

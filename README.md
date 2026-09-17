@@ -1,5 +1,10 @@
 # kev
 
+[![ci](https://github.com/jaredpalmer/kev/actions/workflows/ci.yml/badge.svg)](https://github.com/jaredpalmer/kev/actions/workflows/ci.yml)
+[![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![model card](https://img.shields.io/badge/model%20card-kev--0.5b-informational)](MODEL_CARD.md)
+[![base model](https://img.shields.io/badge/base-Qwen2.5--0.5B-lightgrey)](https://huggingface.co/Qwen/Qwen2.5-0.5B)
+
 A small, open reconstruction of a **decision model**: a language model that answers many typed questions about one document in a single forward pass, and returns **probabilities** instead of generated text.
 
 It follows the architecture that Archer Hume inferred for TypeSafe's Jev in [*Jev's Architecture Unmasked*](https://archerhume.com/posts/jevs-architecture-unmasked). It implements TypeSafe's public [`/v1/systemone` API](https://docs.typesafe.ai/api), so the official `typesafe-sdk` works against it with only a `base_url` change.
@@ -7,6 +12,24 @@ It follows the architecture that Archer Hume inferred for TypeSafe's Jev in [*Je
 kev runs on a laptop. It was trained on a MacBook Pro (M5, 32 GB) in under two hours. It is **not** Jev: the base model is 0.5B parameters, and it knows much less. The goal is to test the *mechanism*, not to match the capability.
 
 ![kev playground](docs/playground.png)
+
+**Headline numbers** (held-out, in-distribution, 1,350 questions; details in [§3](#3-results) and the [model card](MODEL_CARD.md)):
+
+| accuracy | ECE | ECE after temperature scaling | question isolation | packed vs separate |
+|---|---|---|---|---|
+| **0.799** | 0.065 | **0.031** | secret in sibling `p=0.03`, in state `p=0.99` | max Δp **3.7e-6**, 2× faster |
+
+## Quickstart
+
+```bash
+git clone https://github.com/jaredpalmer/kev.git && cd kev
+uv sync --extra serve                                   # python deps
+uv run python -m kev.train --n_per_source 40 --accum 4 --out runs/smoke   # ~1 min, sanity model
+uv run --extra serve python -m kev.serve --run runs/smoke --port 8009 &   # TypeSafe-compatible API
+cd playground && npm install && npm run dev -- -p 3001  # open http://localhost:3001
+```
+
+For the real model, replace the smoke run with `--n_per_source 1500 --epochs 2 --out runs/kev` (~1h45m on an M5). Full instructions in [§5](#5-how-to-run).
 
 ---
 
@@ -25,6 +48,7 @@ kev runs on a laptop. It was trained on a MacBook Pro (M5, 32 GB) in under two h
 5. [How to run](#5-how-to-run)
 6. [Repository layout](#6-repository-layout)
 7. [Design notes](#7-design-notes)
+8. [Contributing, license, citation](#8-contributing-license-citation)
 
 ---
 
@@ -219,36 +243,26 @@ flowchart LR
 
 ## 3. Results
 
-All numbers are from `runs/kev/eval.json`. The evaluation uses 150 held-out records per source (1,350 questions). Baselines use the **same rendered text** and read the next-token logits over option letters.
+Checkpoint `kev-0.5b` (`runs/kev`). All numbers are from `runs/kev/eval.json`: 150 held-out records per source, 1,350 questions. Baselines use the **same rendered text** and read the next-token logits over option letters. The full per-source table, the training recipe, and the limitations are in the [model card](MODEL_CARD.md).
 
 ### Accuracy and calibration
 
-| source | K | zero-shot base acc / ECE | zero-shot Instruct acc / ECE | **kev acc / ECE / NLL** |
-|---|---|---|---|---|
-| banking77 | 77 | – | – | **0.860 / 0.057 / 0.56** |
-| agnews | 4 | 0.813 / 0.069 | 0.787 / 0.160 | **0.940 / 0.028 / 0.22** |
-| agnews yes/no | 2 | 0.780 / 0.103 | 0.853 / 0.062 | **0.960 / 0.017 / 0.10** |
-| boolq | 2 | 0.427 / 0.274 | 0.607 / 0.084 | **0.753 / 0.136 / 0.63** |
-| mnli | 3 | 0.460 / 0.225 | 0.433 / 0.390 | **0.747 / 0.100 / 0.63** |
-| sst5 (Score) | 5 | 0.373 / 0.083 | 0.447 / 0.344 | **0.533 / 0.121 / 1.17** · MAE 0.59 levels |
-| yelp (Score) | 5 | 0.313 / 0.043 | 0.353 / 0.078 | **0.553 / 0.118 / 0.95** · MAE 0.54 levels |
-| yelp yes/no | 2 | 0.833 / 0.129 | 0.833 / 0.066 | **0.887 / 0.084 / 0.33** |
-| **all** | | | | **0.799 / 0.065** |
+| | zero-shot base | zero-shot Instruct | **kev-0.5b** |
+|---|---|---|---|
+| Choice, 4-way (AG News) | 0.813 / 0.069 | 0.787 / 0.160 | **0.940 / 0.028** |
+| Choice, 3-way (MNLI) | 0.460 / 0.225 | 0.433 / 0.390 | **0.747 / 0.100** |
+| Choice, 77-way (Banking77) | – | – | **0.860 / 0.057** |
+| Noul (BoolQ) | 0.427 / 0.274 | 0.607 / 0.084 | **0.753 / 0.136** |
+| Score, 5 levels (Yelp) | 0.313 / 0.043 | 0.353 / 0.078 | **0.553 / 0.118** · MAE 0.54 levels |
+| **all sources** (1,350 q) | | | **0.799 / 0.065** |
 
-ECE = expected calibration error, 10 bins. Lower is better. NLL = negative log-likelihood of the true answer.
+Cells are `accuracy / ECE` (expected calibration error, 10 bins; lower is better).
 
-kev beats both zero-shot baselines on every source, by 10 to 30 points. It is also better calibrated than the Instruct model on every source. **These are in-distribution numbers**: the test sets come from the same datasets as the training data.
+kev beats both zero-shot baselines on every source, by 10 to 30 points, and is better calibrated than the Instruct model on every source. **These are in-distribution numbers**: the test sets come from the same datasets as the training data.
 
 ### Post-hoc temperature scaling
 
-One temperature `T` was fit on half of the evaluation set and tested on the other half.
-
-| | NLL | ECE |
-|---|---|---|
-| before (T = 1) | 0.505 | 0.057 |
-| after (T = 1.47) | 0.481 | **0.031** |
-
-The model is somewhat over-confident. One scalar fixes most of it.
+One temperature `T = 1.47` fit on half of the evaluation set, tested on the other half: NLL 0.505 → 0.481, ECE 0.057 → **0.031**. The model is somewhat over-confident. One scalar fixes most of it.
 
 ### Mechanism tests
 
@@ -290,7 +304,7 @@ Tested on macOS (Apple Silicon, 32 GB). CPU works but is slow. CUDA should work 
 ### 1. Install
 
 ```bash
-git clone <this repo> kev && cd kev
+git clone https://github.com/jaredpalmer/kev.git && cd kev
 uv sync --extra serve
 cd playground && npm install && cd ..
 ```
@@ -301,8 +315,11 @@ cd playground && npm install && cd ..
 # ~1 minute: check that everything works
 uv run python -m kev.train --n_per_source 40 --accum 4 --out runs/smoke
 
-# ~1h45m on an M5: the model used for the numbers above
+# ~1h45m on an M5: a full model (defaults now include the ordinal and permutation-KL terms)
 uv run python -m kev.train --n_per_source 1500 --epochs 2 --out runs/kev
+
+# the exact recipe of the reported kev-0.5b checkpoint (see MODEL_CARD.md)
+uv run python -m kev.train --n_per_source 1500 --epochs 2 --perm_kl 0 --ord_w 0 --out runs/kev
 ```
 
 Useful flags:
@@ -359,10 +376,14 @@ r = client.system_one(
 print(r.nouls["billing"].noul, r.choices["tone"].choice, r.scores["urgency"].score)
 ```
 
-Conformance tests (the server must be running):
+Tests:
 
 ```bash
-KEV_BASE_URL=http://127.0.0.1:8009 uv run --extra serve python -m pytest tests -q
+# unit tests: API mapping, confidence formulas, mask rule, delimiter sanitizing. No weights, no server. Runs in CI.
+uv run --extra serve python -m pytest tests/test_unit.py -q
+
+# conformance tests: the TypeSafe docs' examples and the official SDK against a running server
+KEV_BASE_URL=http://127.0.0.1:8009 uv run --extra serve python -m pytest tests/test_api.py -q
 ```
 
 ### 5. Run the playground
@@ -396,12 +417,15 @@ kev/
   evaluate.py   accuracy/ECE/NLL, temperature scaling, permutation, IIA, isolation, packed-vs-separate, baselines
   serve.py      FastAPI: /v1/systemone, /v1/models, /v1/systemone/{permute,separate}
 tests/
+  test_unit.py  API mapping, confidence formulas, mask rule, delimiter sanitizing (no weights; runs in CI)
   test_api.py   the TypeSafe docs' example requests + the official SDK, against a running server
 playground/     Next.js 16 demo (app router, shadcn/base-ui, Tailwind 4)
-runs/kev/eval.json   results of the run described in this README (weights are not committed)
+runs/kev/eval.json   results of the kev-0.5b run (weights are not committed)
 docs/playground.png
 MODEL_CARD.md   model card for the kev-0.5b checkpoint: recipe, data, metrics, limitations
+CONTRIBUTING.md how to run the checks and update results
 AGENTS.md       notes for coding agents: commands, gotchas
+.github/workflows/ci.yml   unit tests + playground lint/typecheck
 ```
 
 ---
@@ -419,4 +443,23 @@ Things that were learned the hard way. They are also in `AGENTS.md`.
 
 ---
 
-Built after reading [Jev's Architecture Unmasked](https://archerhume.com/posts/jevs-architecture-unmasked). The architecture claims tested here are his. The mistakes are ours.
+## 8. Contributing, license, citation
+
+**Contributing.** See [CONTRIBUTING.md](CONTRIBUTING.md). Unit tests and the playground lint/typecheck run in CI. Training and the server tests need a GPU. If you change results, commit the new `eval.json` and update both this README and the model card.
+
+**Weights.** The trained adapter and head (~37 MB) are not in git. Train them with the commands above, or check the [Releases](https://github.com/jaredpalmer/kev/releases) page.
+
+**License.** Code, adapter and head: [Apache-2.0](LICENSE). The base model `Qwen/Qwen2.5-0.5B` has its own license (Apache-2.0). The datasets carry their own licenses; see the [model card](MODEL_CARD.md#training-data).
+
+**Citation.**
+
+```bibtex
+@software{kev2026,
+  title  = {kev: a laptop-scale reconstruction of a Jev-style decision model},
+  author = {Palmer, Jared},
+  year   = {2026},
+  url    = {https://github.com/jaredpalmer/kev}
+}
+```
+
+**Acknowledgements.** Built after reading Archer Hume's [*Jev's Architecture Unmasked*](https://archerhume.com/posts/jevs-architecture-unmasked); the architecture claims tested here are his, and the mistakes are ours. The API contract is TypeSafe's [System One](https://docs.typesafe.ai/api). The backbone is [Qwen2.5](https://huggingface.co/Qwen/Qwen2.5-0.5B) by Alibaba Cloud. Prefix-shared attention follows [Hydragen](https://arxiv.org/abs/2402.05099) and [DeFT](https://arxiv.org/abs/2404.00242); the single-pass listwise readout follows [FIRST](https://arxiv.org/abs/2406.15657).

@@ -2,7 +2,8 @@
 
 Causal LM (Qwen2.5-0.5B + LoRA) run prefill-only with a block-causal mask (shared state prefix,
 isolated question branches) and a pointer readout over option boundary tokens, trained with log loss
-on converted public datasets (Banking77, BoolQ, AG News, MNLI). No text generation.
+on converted public datasets (Banking77, BoolQ, AG News, MNLI, SST-5, Yelp). No text generation.
+See README.md (deep dive) and MODEL_CARD.md (checkpoint recipe + metrics). Docs are written in Simple Technical English.
 
 ## Commands
 - Env: `uv sync` (torch MPS, transformers, peft, datasets)
@@ -21,7 +22,8 @@ on converted public datasets (Banking77, BoolQ, AG News, MNLI). No text generati
   rewritten to the FastAPI server (`KEV_API`, default http://127.0.0.1:8009). Presets live in `playground/src/lib/kev.ts`.
   - Next 16 dev only trusts `localhost`; other hostnames need `allowedDevOrigins` or the page SSRs but never hydrates
     (no console errors). `127.0.0.1` is allowed in `next.config.ts`. Verify hydration with `agent-browser` (CDP), not curl.
-- API tests (server must be up): `KEV_BASE_URL=http://127.0.0.1:8008 uv run --extra serve python -m pytest tests -q`
+- Unit tests (no weights, CI): `uv run --extra serve python -m pytest tests/test_unit.py -q`
+- API tests (server must be up): `KEV_BASE_URL=http://127.0.0.1:8009 uv run --extra serve python -m pytest tests/test_api.py -q`
 
 ## Layout
 - `kev/data.py`      dataset -> typed records, permutation / none-of-the-above / distractor augmentation

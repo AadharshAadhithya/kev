@@ -41,4 +41,4 @@ Do not commit weights. Attach them to a GitHub Release if they need to be shared
 
 - Python: compact, few comments, type hints where they help. Follow the existing files.
 - Agent notes and gotchas go in `AGENTS.md`.
-- README is terse and conversational (nanoGPT style, lowercase sections). MODEL_CARD.md is formal. Keep numbers in both in sync.
+- README follows the Vercel Labs house style: short declarative sentences, Title Case sections, tables over prose, no first person. MODEL_CARD.md is formal. Keep numbers in both in sync.

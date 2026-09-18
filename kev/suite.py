@@ -6,7 +6,7 @@ import random
 from collections import Counter
 from pathlib import Path
 
-from kev.data import REPOS, SOURCES, TRANSFER_REPOS, TRANSFER_SOURCES, build, dataset_ref, materialize, source_seed
+from kev.data import ALL_REPOS, ALL_SOURCES, EVAL_ONLY, REPOS, SOURCES, TRAINABLE, TRANSFER_REPOS, TRANSFER_SOURCES, build, dataset_ref, materialize, source_seed
 from kev.model import encode, load_tokenizer
 
 SPLITS = ("train", "calibration", "development", "test")
@@ -122,7 +122,7 @@ def training_state_hashes(suite_dir):
 
 
 def freeze(directory, train=300, calibration=40, development=80, test=80, seed=20260918, holdout=("mnli", "sst5"),
-           sources=None, repos=None, exclude_states_from=None):
+           sources=None, repos=None, exclude_states_from=None, contrastive_pairs=0, contrastive_holdout_families=()):
     from huggingface_hub import HfApi
 
     sources = SOURCES if sources is None else sources
@@ -135,8 +135,13 @@ def freeze(directory, train=300, calibration=40, development=80, test=80, seed=2
     revisions = {repo: hub.dataset_info(*dataset_ref(repo)[:1], revision=dataset_ref(repo)[1]).sha for repo in set(repos.values())}
     base_revisions = {base: hub.model_info(base).sha for base in BASES}
     tokenizers = [load_tokenizer(base, revision=revision) for base, revision in base_revisions.items()]
+    trainable_here = [x for x in sources if x not in holdout]
+    if set(trainable_here) & set(EVAL_ONLY):
+        raise ValueError(f"eval-only sources cannot be trainable: {sorted(set(trainable_here) & set(EVAL_ONLY))}")
     manifest = {
-        "version": 1, "seed": seed, "holdout_sources": list(holdout), "eval_only": eval_only,
+        "version": 2, "seed": seed, "holdout_sources": list(holdout), "eval_only": eval_only,
+        "trainable_sources": trainable_here, "eval_only_sources": [x for x in sources if x in holdout],
+        "policy": {"trainable": list(TRAINABLE), "eval_only": list(EVAL_ONLY)},
         "dataset_revisions": revisions, "base_revisions": base_revisions,
         "context": {"max_state": 384, "max_branch": 1024, "max_packed": 2048, "truncate": False},
         "selection": "Normalized exact-state deduplication across partitions; common tokenizer context admission; no fuzzy decontamination or pretraining-contamination claim.",
@@ -161,6 +166,32 @@ def freeze(directory, train=300, calibration=40, development=80, test=80, seed=2
             partitions["train"].extend(chosen[calibration:])
         manifest["admission"][source] = dict(report)
         print(f"froze {source}: {dict(report)}", flush=True)
+    if contrastive_pairs:
+        from kev.contrastive import FAMILIES, generate
+        families = list(FAMILIES)
+        held = list(contrastive_holdout_families)
+        unknown = set(held) - set(families)
+        if unknown: raise ValueError(f"unknown contrastive families: {sorted(unknown)}")
+        trainable_fams = [f for f in families if f not in held]
+        # training/calibration pairs and development/test pairs come from disjoint seeds within trainable families;
+        # held-out families appear only in development/test (never trained anywhere)
+        train_recs, rep_train = generate(contrastive_pairs, seed=f"{seed}-train", families=trainable_fams) if trainable_fams and not eval_only else ([], {})
+        eval_families = (held or families) if eval_only else families
+        eval_recs, rep_eval = generate(max(contrastive_pairs // 4, 4), seed=f"{seed}-eval", families=eval_families)
+        for r in train_recs + eval_recs:
+            r["_meta"].update(group_id=r["_meta"]["family_id"], variant="clean")   # siblings are one bootstrap unit
+            if r["_meta"]["text_sha256"] in seen: raise ValueError("contrastive state collides with an existing state")
+        seen.update(r["_meta"]["text_sha256"] for r in train_recs + eval_recs)
+        n_cal = 2 * max(len(train_recs) // 20, 1) if train_recs else 0
+        partitions["calibration"].extend(train_recs[:n_cal]); partitions["train"].extend(train_recs[n_cal:])
+        half = len(eval_recs) // 2 // 2 * 2   # even split, siblings stay adjacent
+        partitions["development"].extend(eval_recs[:half]); partitions["test"].extend(eval_recs[half:])
+        manifest["contrastive"] = {"pairs_per_family_train": contrastive_pairs, "trainable_families": trainable_fams, "eval_only_families": held,
+                                   "train_report": rep_train, "eval_report": rep_eval,
+                                   "note": "labels from rule evaluators; ablation + invariance checks passed for every kept pair; no LLM"}
+        if trainable_fams and not eval_only: manifest["trainable_sources"].append("contrastive")
+        else: manifest["eval_only_sources"].append("contrastive")
+        print(f"contrastive: {len(train_recs)} train/cal records, {len(eval_recs)} dev/test records; held-out families {held}", flush=True)
     for split in ("development", "test"):
         extras = []
         per_source = Counter()
@@ -193,15 +224,31 @@ def main():
     ap.add_argument("--development", type=int, default=80)
     ap.add_argument("--test", type=int, default=80)
     ap.add_argument("--seed", type=int, default=20260918)
-    ap.add_argument("--transfer", action="store_true", help="eval-only suite from TRANSFER_SOURCES (no train/calibration partitions)")
+    ap.add_argument("--transfer", action="store_true", help="eval-only suite from the eight transfer-v1 sources (no train/calibration partitions)")
+    ap.add_argument("--sources", help="comma-separated source names (any of ALL_SOURCES); trainable ones get train/calibration partitions")
+    ap.add_argument("--holdout", help="comma-separated sources kept eval-only within --sources (eval-only policy sources are always held out)")
     ap.add_argument("--exclude-states-from", help="frozen suite whose train+calibration states must not appear here")
+    ap.add_argument("--contrastive-pairs", type=int, default=0, help="programmatic contrastive pairs per trainable family for training (0 = none)")
+    ap.add_argument("--contrastive-holdout", default="", help="comma-separated contrastive families kept eval-only")
     a = ap.parse_args()
-    if min(a.development, a.test) < 1 or (not a.transfer and min(a.train, a.calibration) < 1):
+    cfam = tuple(x for x in a.contrastive_holdout.split(",") if x)
+    if min(a.development, a.test) < 1:
         ap.error("split sizes must be positive")
     if a.transfer:
         freeze(a.out, 0, 0, a.development, a.test, a.seed, holdout=tuple(TRANSFER_SOURCES), sources=TRANSFER_SOURCES,
-               repos=TRANSFER_REPOS, exclude_states_from=a.exclude_states_from)
+               repos=TRANSFER_REPOS, exclude_states_from=a.exclude_states_from, contrastive_pairs=a.contrastive_pairs, contrastive_holdout_families=cfam)
+    elif a.sources:
+        names = [x for x in a.sources.split(",") if x]
+        unknown = set(names) - set(ALL_SOURCES)
+        if unknown: ap.error(f"unknown sources: {sorted(unknown)}")
+        holdout = tuple(x for x in names if x in EVAL_ONLY or x in (a.holdout or "").split(","))
+        if any(x not in holdout for x in names) and min(a.train, a.calibration) < 1:
+            ap.error("train and calibration sizes must be positive when a trainable source is included")
+        freeze(a.out, a.train, a.calibration, a.development, a.test, a.seed, holdout=holdout,
+               sources={k: ALL_SOURCES[k] for k in names}, repos={k: ALL_REPOS[k] for k in names}, exclude_states_from=a.exclude_states_from,
+               contrastive_pairs=a.contrastive_pairs, contrastive_holdout_families=cfam)
     else:
+        if min(a.train, a.calibration) < 1: ap.error("split sizes must be positive")
         freeze(a.out, a.train, a.calibration, a.development, a.test, a.seed, exclude_states_from=a.exclude_states_from)
 
 

@@ -211,11 +211,44 @@ def _mmlu(split, n, rng):
     return out
 
 
-TRANSFER_SOURCES = {"trec": (_trec, "train", "test"), "dbpedia14": (_dbpedia, "train", "test"), "emotion": (_emotion, "train", "test"),
-                    "imdb": (_imdb, "train", "test"), "amazon": (_amazon, "train", "test"), "qnli": (_qnli, "train", "validation"),
-                    "tweet_offensive": (_offensive, "train", "test"), "mmlu": (_mmlu, "test", "test")}
-TRANSFER_REPOS = {"trec": "CogComp/trec", "dbpedia14": "fancyzhx/dbpedia_14", "emotion": "dair-ai/emotion", "imdb": "stanfordnlp/imdb",
-                  "amazon": "SetFit/amazon_reviews_multi_en", "qnli": "nyu-mll/glue", "tweet_offensive": "cardiffnlp/tweet_eval", "mmlu": "cais/mmlu"}
+def _paws(split, n, rng):
+    ds = _dataset("google-research-datasets/paws:labeled_final", split=split, rng=rng)
+    return [{"state": _wrap_state(ex["sentence1"], rng), "questions": {"paraphrase": {"type": "noul", "instructions": f'Does this sentence mean the same thing: "{ex["sentence2"]}"',
+             "criteria": {"true": "Same meaning, possibly reworded", "false": "Different meaning, even if most words match"}, "label": ex["label"] == 1, "src": "paws"}}}
+            for ex in _sample(ds, n, rng)]
+
+
+def _sciq(split, n, rng):
+    ds = _dataset("allenai/sciq", split=split, rng=rng)
+    out = []
+    for ex in _sample(ds, n, rng):
+        options = [ex["correct_answer"], ex["distractor1"], ex["distractor2"], ex["distractor3"]]
+        keys = ["a", "b", "c", "d"]; order = list(range(4)); rng.shuffle(order)
+        crit = {keys[i]: options[j] for i, j in enumerate(order)}
+        out.append({"state": {"passage": ex["support"], "question": ex["question"]} if ex["support"] else {"question": ex["question"]},
+                    "questions": {"answer": {"type": "choice", "instructions": "Which option answers the science question?", "criteria": crit,
+                                             "label": keys[order.index(0)], "src": "sciq"}}})
+    return out
+
+
+ALL_SOURCES = {**SOURCES, "trec": (_trec, "train", "test"), "dbpedia14": (_dbpedia, "train", "test"), "emotion": (_emotion, "train", "test"),
+               "imdb": (_imdb, "train", "test"), "amazon": (_amazon, "train", "test"), "qnli": (_qnli, "train", "validation"),
+               "tweet_offensive": (_offensive, "train", "test"), "mmlu": (_mmlu, "test", "test"),
+               "paws": (_paws, "train", "test"), "sciq": (_sciq, "train", "test")}
+ALL_REPOS = {**REPOS, "trec": "CogComp/trec", "dbpedia14": "fancyzhx/dbpedia_14", "emotion": "dair-ai/emotion", "imdb": "stanfordnlp/imdb",
+             "amazon": "SetFit/amazon_reviews_multi_en", "qnli": "nyu-mll/glue", "tweet_offensive": "cardiffnlp/tweet_eval", "mmlu": "cais/mmlu",
+             "paws": "google-research-datasets/paws", "sciq": "allenai/sciq"}
+
+# Policy (PLAN.md step 1). A source is trainable or eval-only; suites record both lists and training refuses eval-only
+# sources. MMLU is a knowledge probe and stays eval-only permanently; Emotion/TweetEval are noisy-label honesty checks;
+# QNLI/PAWS/SciQ measure reading transfer. Rotten Tomatoes (SST parent) and SNLI (MNLI sibling) are excluded entirely.
+TRAINABLE = ("banking77", "boolq", "agnews", "mnli", "sst5", "yelp", "trec", "dbpedia14", "amazon", "imdb")
+EVAL_ONLY = ("mmlu", "emotion", "tweet_offensive", "qnli", "paws", "sciq")
+assert set(TRAINABLE) | set(EVAL_ONLY) == set(ALL_SOURCES) and not set(TRAINABLE) & set(EVAL_ONLY)
+
+# transfer-v1 (frozen before the policy existed) used these eight; kept so its manifest can be re-derived.
+TRANSFER_SOURCES = {k: ALL_SOURCES[k] for k in ("trec", "dbpedia14", "emotion", "imdb", "amazon", "qnli", "tweet_offensive", "mmlu")}
+TRANSFER_REPOS = {k: ALL_REPOS[k] for k in TRANSFER_SOURCES}
 
 
 def build(n_per_source, split="train", seed=0, exclude=(), only=(), revisions=None, sources=None, repos=None):

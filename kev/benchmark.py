@@ -58,6 +58,7 @@ def prediction_rows(record, prediction):
         row = {"id": meta["id"], "group": meta["group_id"], "question": qid,
                "source": meta["source"], "task": q["src"], "type": q["type"],
                "variant": meta["variant"], "keys": keys, "label": y,
+               "pair_id": meta.get("pair_id"), "sibling": meta.get("sibling"),
                "p": p.tolist(), "raw_probability_sum": total, "zero_count": int((p == 0).sum())}
         rows.append(row)
     return rows
@@ -142,7 +143,9 @@ def summarize(rows, temperature=1.0, heldout_sources=("mnli", "sst5")):
             aligned = [row["p"][row["keys"].index(k)] for k in original["keys"]]
             diffs.append(float(np.max(np.abs(np.array(aligned) - original["p"]))))
             flips.append(int(np.argmax(aligned) != np.argmax(original["p"])))
+    from kev.contrastive import paired_flip
     return {"objective": -float(np.mean([v["nll"] for v in tasks.values()])),
+            "paired_flip": paired_flip(clean),
             "clean": metrics(clean), "tasks": tasks, "variants": variants,
             "heldout_tasks": grouped_metrics([r for r in clean if r["source"] in heldout_sources], "task") if any(r["source"] in heldout_sources for r in clean) else {},
             "permutation": {"n": len(diffs), "mean_max_delta": float(np.mean(diffs)) if diffs else None,

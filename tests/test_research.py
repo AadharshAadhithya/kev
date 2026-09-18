@@ -182,3 +182,52 @@ def test_batched_mask_matches_single_and_pads_are_invisible():
     assert not allowed[:3, 3:].any()          # real tokens never attend to padding
     assert allowed[3, 3] and allowed[4, 4]    # padded rows keep the diagonal, so softmax is finite
     assert not allowed[3, 1:3].any()          # pads belong to no question segment (state stays visible; rows are discarded)
+
+
+def test_eval_only_sources_cannot_be_trained(tmp_path):
+    import json
+    from kev.data import EVAL_ONLY, TRAINABLE, ALL_SOURCES
+    from kev.suite import digest, write_json
+    from kev.experiment import load_plan
+    assert "mmlu" in EVAL_ONLY and not set(TRAINABLE) & set(EVAL_ONLY) and set(TRAINABLE) | set(EVAL_ONLY) == set(ALL_SOURCES)
+    r = frozen_request(); r["_meta"]["source"] = "mmlu"
+    for name in ("train", "calibration", "development"):
+        (tmp_path / f"{name}.jsonl").write_text(json.dumps(r) + "\n")
+    write_json(tmp_path / "manifest.json", {"base_revisions": {"m": "x"}, "files": {f"{n}.jsonl": {"sha256": digest(tmp_path / f"{n}.jsonl"), "records": 1} for n in ("train", "calibration", "development")}})
+    (tmp_path / "plan.json").write_text('[{"base": "m"}]')
+    with pytest.raises(ValueError, match="eval-only"):
+        load_plan(tmp_path, tmp_path / "plan.json")
+
+
+def test_contrastive_pairs_are_checked_and_labelled_by_code():
+    from kev import contrastive
+    from kev.contrastive import FAMILIES, UNDETERMINED, check_pair, generate, label_of, paired_flip
+    records, report = generate(5, seed=7)
+    assert len(records) == 2 * 5 * len(FAMILIES) and all(v["pairs"] == 5 for v in report.values())
+    for a, b in zip(records[::2], records[1::2]):
+        assert a["_meta"]["pair_id"] == b["_meta"]["pair_id"] and a["_meta"]["family_id"] == b["_meta"]["family_id"]
+        assert a["questions"]["decision"]["label"] != b["questions"]["decision"]["label"]
+        assert a["state"]["policy"] == b["state"]["policy"]
+        materialize(a); materialize(b)
+    # a family whose label leaks into the policy text (no evidence needed) must be rejected by the ablation check
+    def leaky(rng):
+        def evaluate(f): return True
+        item = {"policy": "Everything is allowed.", "sentences": [("Filler.", {}), ("Age is 30.", {"age": 30})], "evaluate": evaluate,
+                "question": {"type": "noul", "instructions": "Allowed?"}}
+        other = {**item, "sentences": [("Filler.", {}), ("Age is 10.", {"age": 10})], "evaluate": lambda f: False}
+        return item, other
+    assert check_pair(*leaky(None)) == "ablation_failed"
+    # a pair whose two items do not differ in exactly one sentence is rejected
+    a, b = FAMILIES["authorization"](__import__("random").Random(1))
+    b["sentences"][2] = ("The refund amount is $1.", {})
+    assert check_pair(a, b) == "not_exactly_one_sentence_differs"
+    assert label_of(a, drop=0) == UNDETERMINED
+    # paired_flip: a constant model never flips; a perfect model flips every pair and gets both right
+    rows = []
+    for rec in records[:8]:
+        q = rec["questions"]["decision"]; keys = list(q["criteria"]) if q["type"] == "choice" else (["false", "true"] if q["type"] == "noul" else [str(i) for i in range(len(q["criteria"]))])
+        y = keys.index(q["label"]) if q["type"] == "choice" else int(q["label"])
+        rows.append({"pair_id": rec["_meta"]["pair_id"], "sibling": rec["_meta"]["sibling"], "keys": keys, "label": y, "p": [1.0 if i == y else 0.0 for i in range(len(keys))]})
+    assert paired_flip(rows) == {"pairs": 4, "flip_rate": 1.0, "both_correct_rate": 1.0}
+    constant = [{**r, "p": [1.0] + [0.0] * (len(r["keys"]) - 1)} for r in rows]
+    assert paired_flip(constant)["flip_rate"] == 0.0

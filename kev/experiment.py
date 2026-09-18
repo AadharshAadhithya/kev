@@ -38,11 +38,15 @@ CHOICES = {"dtype": ("fp32", "bf16")}
 
 
 def validated_trial(value, manifest):
-    if not isinstance(value, dict) or set(value) - (DEFAULTS.keys() | CHOICES.keys() | {"base"}):
+    if not isinstance(value, dict) or set(value) - (DEFAULTS.keys() | CHOICES.keys() | {"base", "train_sources"}):
         raise ValueError("trial may change only the allowlisted training parameters and base")
     result = {**DEFAULTS, **value}
     if result.get("base") not in manifest["base_revisions"]:
         raise ValueError("base must have a revision pinned in the suite")
+    if "train_sources" in result:
+        names = result["train_sources"].split(",") if isinstance(result["train_sources"], str) else None
+        if not names or set(names) - set(manifest.get("trainable_sources", [])):
+            raise ValueError("train_sources must be a comma-separated subset of the suite's trainable sources")
     for key, (lo, hi) in RANGES.items():
         v = result[key]
         if isinstance(v, bool) or not isinstance(v, (int, float)) or not lo <= v <= hi:
@@ -198,9 +202,13 @@ def aggregate(study_dir):
 
 
 def load_plan(suite, plan_path):
+    from kev.data import EVAL_ONLY
     manifest = json.loads((Path(suite) / "manifest.json").read_text())
     for split in ("train", "calibration", "development"):
         load_split(suite, split)
+    forbidden = {r["_meta"]["source"] for r in load_split(suite, "train")} & set(EVAL_ONLY)
+    if forbidden:
+        raise ValueError(f"suite training partition contains eval-only sources: {sorted(forbidden)}")
     plan = json.loads(Path(plan_path).read_text())
     if not isinstance(plan, list) or not 1 <= len(plan) <= 8:
         raise ValueError("plan must contain 1..8 bounded trials")

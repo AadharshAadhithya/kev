@@ -3,7 +3,7 @@ from pathlib import Path
 from collections import Counter
 import torch
 import torch.nn.functional as F
-from .data import build, augment, materialize, source_seed
+from .data import EVAL_ONLY, build, augment, materialize, source_seed
 from .suite import digest, load_split, write_json
 from .model import DecisionModel, load_tokenizer, encode
 
@@ -44,6 +44,7 @@ def main():
     ap.add_argument("--perm_frac", type=float, default=0.3, help="fraction of records that get the second permuted forward pass")
     ap.add_argument("--ord_w", type=float, default=0.0, help="weight of ranked probability score for Score questions")
     ap.add_argument("--suite", help="frozen suite directory; train only on its training partition")
+    ap.add_argument("--train_sources", default="", help="comma-separated subset of the suite's trainable sources (ablations); default all")
     ap.add_argument("--device", choices=["cpu", "mps", "cuda"], default=None)
     ap.add_argument("--batch", type=int, default=1, help="records per forward pass (padded batch); optimizer step every --accum micro-batches")
     ap.add_argument("--dtype", choices=["fp32", "bf16"], default="fp32", help="bf16 = autocast forward with fp32 master weights (CUDA only)")
@@ -79,6 +80,15 @@ def main():
     reqs = load_split(a.suite, "train") if manifest else build(a.n_per_source, "train", a.seed, exclude=holdout)
     if not reqs:
         raise ValueError("empty training set")
+    forbidden = {r["_meta"]["source"] for r in reqs} & set(EVAL_ONLY)
+    if forbidden:
+        raise ValueError(f"training partition contains eval-only sources: {sorted(forbidden)}")
+    if a.train_sources:
+        wanted = set(a.train_sources.split(","))
+        unknown = wanted - {r["_meta"]["source"] for r in reqs}
+        if unknown: raise ValueError(f"--train_sources not in the training partition: {sorted(unknown)}")
+        reqs = [r for r in reqs if r["_meta"]["source"] in wanted]
+        print(f"ablation: training on {sorted(wanted)} -> {len(reqs)} records", flush=True)
     suite_hash = digest(Path(a.suite) / "manifest.json") if manifest else None
     write_json(out_dir / "training_config.json", {"args": vars(a), "suite_sha256": suite_hash, "base_revision": revision,
                                                 "ordinal_objective": "ranked_probability_score", "holdout": holdout})

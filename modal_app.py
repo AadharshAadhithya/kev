@@ -97,6 +97,8 @@ def launch(suite, plan_path, name, gpu, existing=()):
     for job, result in zip(jobs, results):
         print(job[2], result if isinstance(result, Exception) else json.dumps(result), flush=True)
     failures = [r for r in results if isinstance(r, Exception)]
+    if len(failures) == len(results):
+        raise SystemExit(f"all {len(results)} trial(s) failed; nothing to pull")
     target = pull_study(name)
     print(f"study pulled to {target}; {len(failures)} failure(s)", flush=True)
     if failures:

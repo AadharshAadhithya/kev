@@ -5,7 +5,6 @@ import { Chess, type Square } from "chess.js";
 import Link from "next/link";
 import { askModel, EVAL_LEVELS, loadGames, saveGames, resultText, type Mode, type ModelMove, type SavedGame } from "@/lib/chess";
 import { api } from "@/lib/kev";
-import { AnswerCard } from "@/components/answer-card";
 import { ChessBoard } from "@/components/chess-board";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -16,6 +15,52 @@ const MODES: { value: Mode; label: string }[] = [
   { value: "white", label: "You play White" },
   { value: "black", label: "You play Black" },
 ];
+
+const TOP_N = 8;
+type Row = { key: string; p: number; top: boolean };
+
+function topRows(probs: Record<string, number>, chosen: string, n: number): Row[] {
+  const sorted = Object.entries(probs).sort((a, b) => b[1] - a[1]);
+  const rows = sorted.slice(0, n).map(([key, p]) => ({ key, p, top: key === chosen }));
+  if (!rows.some((r) => r.top) && probs[chosen] !== undefined) rows[n - 1] = { key: chosen, p: probs[chosen], top: true }; // sampled move outside the top N
+  return rows;
+}
+function topMass(probs: Record<string, number>, n: number) {
+  return Object.values(probs).sort((a, b) => b - a).slice(0, n).reduce((s, p) => s + p, 0);
+}
+
+// Fixed-height panel: always renders `nRows` bar lanes and one-line header fields, so the column never shifts
+// when the number of legal moves changes or while the model is thinking.
+function DistributionPanel({ id, title, headline, detail, rows, nRows, mono, footer, dim }: {
+  id: string; title: string; headline?: string; detail?: string; rows: Row[]; nRows: number; mono?: boolean; footer?: string; dim?: boolean;
+}) {
+  const lanes = "grid grid-cols-[minmax(0,7.5rem)_minmax(0,1fr)_2.75rem] items-center gap-x-3";
+  return (
+    <section aria-labelledby={`p-${id}`} className={`grid gap-3 rounded-md border border-border bg-card px-4 py-3 transition-opacity md:grid-cols-[11rem_minmax(0,1fr)] md:gap-6 ${dim ? "opacity-60" : ""}`}>
+      <div className="flex min-w-0 flex-col">
+        <h3 id={`p-${id}`} className="font-mono text-[12px] text-muted-foreground">{id}</h3>
+        <p className="mt-0.5 h-10 text-[13px] leading-5 text-foreground">{title}</p>
+        <p className={`mt-1.5 h-6 truncate text-base font-medium tracking-tight ${mono ? "font-mono" : ""}`}>{headline ?? "\u00a0"}</p>
+        <p className="h-5 text-[12px] tabular-nums text-muted-foreground">{detail ?? "\u00a0"}</p>
+      </div>
+      <div className="flex min-w-0 flex-col">
+        {Array.from({ length: nRows }, (_, i) => {
+          const r = rows[i];
+          return (
+            <div key={i} className={`${lanes} h-5 text-[12px]`}>
+              <span className={`truncate ${mono ? "font-mono" : ""} ${r?.top ? "text-foreground" : "text-muted-foreground"}`} title={r?.key}>{r?.key ?? "\u00a0"}</span>
+              <span className="relative block h-1 min-w-0 rounded-full bg-muted" aria-hidden>
+                {r && <span className={`absolute inset-y-0 left-0 rounded-full ${r.top ? "bg-foreground" : "bg-muted-foreground/50"}`} style={{ width: `${Math.round(r.p * 100)}%` }} />}
+              </span>
+              <span className={`text-right tabular-nums ${r?.top ? "text-foreground" : "text-muted-foreground"}`}>{r ? r.p.toFixed(2) : "\u00a0"}</span>
+            </div>
+          );
+        })}
+        {footer !== undefined && <p className="mt-1 h-4 text-[11px] text-muted-foreground">{footer}</p>}
+      </div>
+    </section>
+  );
+}
 
 function newGame(mode: Mode): SavedGame {
   return { id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`, startedAt: Date.now(), mode, pgn: "", moves: [] };
@@ -130,9 +175,9 @@ export function ChessGame() {
     persist({ ...game, moves, pgn: c.pgn(), result: undefined });
   }
 
-  const moveAnswer = lastModel && { type: "choice" as const, choice: lastModel.san, confidence: lastModel.confidence, probabilities: lastModel.probabilities };
-  const evalAnswer = lastModel && { type: "score" as const, score: lastModel.evaluation, confidence: lastModel.evalConfidence ?? 0, legend: Object.fromEntries(EVAL_LEVELS.map((l, i) => [String(i), l])), probabilities: lastModel.evalProbabilities };
   const finished = games.filter((g) => g.result);
+  const movesRef = useRef<HTMLOListElement>(null);
+  useEffect(() => { movesRef.current?.scrollTo({ top: movesRef.current.scrollHeight }); }, [game?.moves.length]);
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col px-6 pt-8 pb-16 md:px-10">
@@ -191,20 +236,23 @@ export function ChessGame() {
           {error && <pre className="whitespace-pre-wrap text-[13px] text-destructive">{error}</pre>}
         </div>
 
-        <div className="flex min-w-0 flex-col gap-4">
-          {moveAnswer && evalAnswer ? (
-            <>
-              <AnswerCard id="move" answer={moveAnswer} question={{ type: "choice", instructions: `Best move among ${lastModel.n_legal} legal moves`, criteria: {} }} />
-              <AnswerCard id="evaluation" answer={evalAnswer} question={{ type: "score", instructions: "Who is better in this position?", criteria: EVAL_LEVELS }} />
-              <p className="text-[13px] tabular-nums text-muted-foreground">{lastModel.latency_ms.toFixed(0)} ms · {lastModel.input_tokens} input tokens · {lastModel.n_legal} options</p>
-            </>
-          ) : (
-            <p className="rounded-md border border-dashed border-border p-8 text-center text-sm text-muted-foreground">The model&apos;s move distribution appears here after its first move.</p>
-          )}
+        <div className="flex min-w-0 flex-col gap-3">
+          <DistributionPanel id="move" title={lastModel ? `Best move among ${lastModel.n_legal} legal moves` : "Best move among the legal moves"}
+            headline={lastModel?.san} detail={lastModel ? `confidence ${lastModel.confidence.toFixed(2)}` : undefined}
+            rows={lastModel ? topRows(lastModel.probabilities, lastModel.san, TOP_N) : []} nRows={TOP_N} mono
+            footer={lastModel && lastModel.n_legal > TOP_N ? `${lastModel.n_legal - TOP_N} more moves share the remaining ${(1 - topMass(lastModel.probabilities, TOP_N)).toFixed(2)}` : " "}
+            dim={thinking} />
+          <DistributionPanel id="evaluation" title="Who is better in this position?"
+            headline={lastModel ? `${lastModel.evaluation.toFixed(2)} of 4` : undefined} detail={lastModel?.evalConfidence !== undefined ? `confidence ${lastModel.evalConfidence.toFixed(2)}` : undefined}
+            rows={EVAL_LEVELS.map((l, i) => ({ key: `${i}  ${l}`, p: lastModel?.evalProbabilities[String(i)] ?? 0, top: !!lastModel && i === Math.round(lastModel.evaluation) }))} nRows={EVAL_LEVELS.length}
+            dim={thinking} />
+          <p className="h-5 text-[13px] tabular-nums text-muted-foreground">
+            {lastModel ? `${lastModel.latency_ms.toFixed(0)} ms · ${lastModel.input_tokens} input tokens · ${lastModel.n_legal} options` : "The model's distribution appears here after its first move."}
+          </p>
 
           <div className="rounded-md border border-border bg-card px-4 py-3">
             <p className="text-[12px] text-muted-foreground">Moves</p>
-            <ol className="mt-1 grid grid-cols-[2.5rem_1fr_1fr] gap-y-0.5 font-mono text-[13px] tabular-nums">
+            <ol ref={movesRef} className="mt-1 grid h-40 grid-cols-[2.5rem_1fr_1fr] content-start gap-y-0.5 overflow-y-auto font-mono text-[13px] tabular-nums">
               {Array.from({ length: Math.ceil((game?.moves.length ?? 0) / 2) }, (_, i) => (
                 <li key={i} className="contents">
                   <span className="text-muted-foreground">{i + 1}.</span>
@@ -212,24 +260,26 @@ export function ChessGame() {
                   <span>{game!.moves[2 * i + 1]?.san ?? ""}</span>
                 </li>
               ))}
+              {game && game.moves.length === 0 && <li className="col-span-3 font-sans text-muted-foreground">No moves yet.</li>}
             </ol>
-            {game && game.moves.length === 0 && <p className="mt-1 text-[13px] text-muted-foreground">No moves yet.</p>}
           </div>
-
-          {finished.length > 0 && (
-            <div className="rounded-md border border-border bg-card px-4 py-3">
-              <p className="text-[12px] text-muted-foreground">Previous games (stored in this browser)</p>
-              <ul className="mt-1 flex flex-col text-[13px]">
-                {[...finished].reverse().slice(0, 8).map((g) => (
-                  <li key={g.id} className="flex items-baseline justify-between gap-3 py-0.5">
-                    <span className="text-muted-foreground">{new Date(g.startedAt).toLocaleString()} · {MODES.find((m) => m.value === g.mode)?.label}</span>
-                    <span className="tabular-nums">{g.moves.length} plies · {g.result}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
         </div>
+      </div>
+
+      <div className="mt-8 rounded-md border border-border bg-card px-4 py-3">
+        <p className="text-[12px] text-muted-foreground">Previous games (stored in this browser)</p>
+        {finished.length === 0 ? (
+          <p className="mt-1 text-[13px] text-muted-foreground">None yet. Finished games are listed here.</p>
+        ) : (
+          <ul className="mt-1 grid gap-x-8 text-[13px] md:grid-cols-2">
+            {[...finished].reverse().slice(0, 8).map((g) => (
+              <li key={g.id} className="flex items-baseline justify-between gap-3 py-0.5">
+                <span className="text-muted-foreground">{new Date(g.startedAt).toLocaleString()} · {MODES.find((m) => m.value === g.mode)?.label}</span>
+                <span className="tabular-nums">{g.moves.length} plies · {g.result}</span>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </div>
   );

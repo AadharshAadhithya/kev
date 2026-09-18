@@ -61,7 +61,7 @@ export type ModelMove = {
   probabilities: Record<string, number>;
   confidence: number;
   evaluation: number; // expected level 0..4
-  evalConfidence: number;
+  evalConfidence?: number; // absent in games saved by older versions
   evalProbabilities: Record<string, number>;
   latency_ms: number;
   input_tokens: number;

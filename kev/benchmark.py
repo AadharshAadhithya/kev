@@ -84,6 +84,16 @@ def metrics(rows, temperature=1.0):
             rps.append(float(((p.cumsum()[:-1] - target.cumsum()[:-1]) ** 2).mean()))
     result = {"n": len(rows), "nll": float(np.mean(nll)), "acc": float(np.mean(acc)),
               "ece": ece(conf, acc), "brier": float(np.mean(brier)), "mean_conf": float(np.mean(conf))}
+    confidence, correct = np.asarray(conf), np.asarray(acc, dtype=bool)
+    high = confidence >= 0.9
+    result.update(confident_error_rate=float(np.mean(high & ~correct)), coverage_at_0_9=float(high.mean()),
+                  accuracy_at_0_9=float(correct[high].mean()) if high.any() else None)
+    result["selective"] = {}
+    for fraction in (0.5, 0.8):
+        cutoff = np.sort(confidence)[-max(1, math.ceil(len(rows) * fraction))]
+        selected = confidence >= cutoff
+        result["selective"][str(fraction)] = {"coverage": float(selected.mean()), "accuracy": float(correct[selected].mean()),
+                                            "confidence_cutoff": float(cutoff)}
     if mae:
         result.update(score_mae=float(np.mean(mae)), ranked_probability_score=float(np.mean(rps)))
     return result

@@ -34,7 +34,7 @@ DEFAULTS = {"epochs": 1, "seed": 0, "lr": 0.0002, "lora": 16, "accum": 8, "batch
 RANGES = {"epochs": (1, 5), "seed": (0, 10000), "lr": (1e-6, 0.001), "lora": (1, 64), "accum": (1, 64), "batch": (1, 64),
           "perm_kl": (0, 2), "perm_frac": (0, 1), "ord_w": (0, 2),
           "p_none": (0, 0.4), "p_none_distract": (0, 0.4), "p_distract": (0, 0.4)}
-CHOICES = {"dtype": ("fp32", "bf16")}
+CHOICES = {"dtype": ("fp32", "bf16"), "checkpointing": (0, 1)}
 
 
 def validated_trial(value, manifest):
@@ -62,7 +62,8 @@ def validated_trial(value, manifest):
 
 
 def source_hashes():
-    return {str(path.relative_to(ROOT)): digest(path) for path in sorted((ROOT / "kev").glob("*.py"))}
+    paths = list((ROOT / "kev").glob("*.py")) + [ROOT / name for name in ("uv.lock", "pyproject.toml", "modal_app.py")]
+    return {str(path.relative_to(ROOT)): digest(path) for path in sorted(paths) if path.exists()}
 
 
 def git_commit():
@@ -119,7 +120,22 @@ def gate_report(report, checks, baseline=None):
         for variant in ("none_present", "none_absent"):
             gates[f"{variant}_not_worse"] = report["variants"][variant]["acc"] >= baseline["variants"][variant]["acc"] - .05
         gates["permutation_not_worse"] = report["permutation"]["flip_rate"] <= baseline["permutation"]["flip_rate"] + .05
-    return {"passed": all(gates.values()), "checks": gates, "policy": "Correctness gate at 1e-3; provisional 5pp regression guardrails, not a statistical significance claim."}
+    transfer = report.get("transfer")
+    if transfer:
+        c = transfer["coverage"]
+        gates["transfer_complete"] = c["requested_records"] == c["evaluated_records"] and not c["rejected_records"] and not c["truncated_records"]
+        pairs = transfer.get("paired_flip")
+        if pairs and pairs["pairs"]:
+            gates["heldout_pairs_at_least_70pct"] = pairs["both_correct_rate"] >= .7
+        if "confident_error_rate" in transfer["clean"]:
+            gates["transfer_confident_errors_below_10pct"] = transfer["clean"]["confident_error_rate"] <= .1
+        if baseline and baseline.get("transfer"):
+            other = baseline["transfer"]
+            if transfer["suite_sha256"] != other["suite_sha256"]:
+                raise ValueError("transfer suite hashes differ")
+            gates["transfer_accuracy_not_worse"] = transfer["clean"]["acc"] >= other["clean"]["acc"] - .02
+            gates["transfer_brier_not_worse"] = transfer["clean"]["brier"] <= other["clean"]["brier"] + .02
+    return {"passed": all(gates.values()), "checks": gates, "policy": "Research screening only: 1e-3 isolation; 5pp task regression; 70% heldout pair correctness; <=10% confident errors; no automatic release."}
 
 
 def execute_trial(config, suite, output, expected_sources, device, existing=None, transfer_suite=None):
@@ -159,14 +175,14 @@ def execute_trial(config, suite, output, expected_sources, device, existing=None
         if transfer_suite:
             t_records = load_split(transfer_suite, "development")
             transfer, _ = evaluate_records(t_records, predictor, output / "transfer", temperature, heldout_sources=tuple(r["_meta"]["source"] for r in t_records))
-            transfer = {"suite_sha256": digest(Path(transfer_suite) / "manifest.json"), "clean": transfer["clean"], "tasks": transfer["tasks"],
-                        "variants": transfer["variants"], "paired_flip": transfer["paired_flip"], "permutation": transfer["permutation"], "coverage": transfer["coverage"]}
+            transfer["suite_sha256"] = digest(Path(transfer_suite) / "manifest.json")
     finally:
         del predictor
         free_device_memory(device)
     if source_hashes() != expected_sources or digest(Path(suite) / "manifest.json") != suite_hash:
         raise ValueError("source or suite changed during the trial; result cannot be ranked")
-    report.update(provenance=provenance, mechanism_checks=checks, gates=gate_report(report, checks), transfer=transfer,
+    report["transfer"] = transfer
+    report.update(provenance=provenance, mechanism_checks=checks, gates=gate_report(report, checks),
                   wall_seconds=time.perf_counter() - started, promotable=False, test_evaluated=False)
     if not existing:
         report["training_resources"] = json.loads((Path(run) / "training_metrics.json").read_text())
@@ -176,9 +192,13 @@ def execute_trial(config, suite, output, expected_sources, device, existing=None
 
 def compare_to_baseline(report, rows, baseline):
     """Add gates and a record-clustered paired bootstrap against the study's baseline trial."""
+    if report["provenance"]["suite_sha256"] != baseline["provenance"]["suite_sha256"]:
+        raise ValueError("cannot compare different frozen suites")
     report["gates"] = gate_report(report, report["mechanism_checks"], baseline)
     report["paired_comparison"] = paired_bootstrap(rows, baseline["rows"])
-    report["promotable"] = report["gates"]["passed"] and report["paired_comparison"]["ci95"][1] < 0
+    report["promotable"] = False
+    report["candidate_for_locked_test"] = report["gates"]["passed"] and report["paired_comparison"]["ci95"][1] < 0
+    report["release_status"] = "research only; locked test and manual review required"
     return report
 
 
@@ -194,17 +214,20 @@ def aggregate(study_dir):
     """Rank completed trial directories in a study: the first non-legacy trial is the baseline for the rest."""
     study_dir = Path(study_dir)
     trials = sorted(p for p in study_dir.iterdir() if (p / "result.json").exists())
-    baseline = None
-    with (study_dir / "results.jsonl").open("w") as ledger:
+    baselines = {}
+    with (study_dir / "results.jsonl").open("x") as ledger:
         for directory in trials:
             report = json.loads((directory / "result.json").read_text())
             rows = json.loads((directory / "development/rows.json").read_text())
             legacy = report["provenance"]["legacy_checkpoint"]
+            config = report["provenance"]["config"]
+            key = (config.get("base"), config.get("seed"))
+            baseline = baselines.get(key)
             if baseline is not None and not legacy:
                 report = compare_to_baseline(report, rows, baseline)
-                write_json(directory / "result.json", report)
+                write_json(directory / "comparison.json", report)
             elif baseline is None and not legacy:
-                baseline = {**copy.deepcopy(report), "rows": rows}
+                baselines[key] = {**copy.deepcopy(report), "rows": rows}
             row = ledger_row(directory.name, report, report["provenance"]["config"], legacy, directory)
             ledger.write(json.dumps(row, allow_nan=False) + "\n")
             print(json.dumps({"id": row["id"], "objective": round(row["objective"], 4), "acc": round(row["clean"]["acc"], 4),
@@ -219,6 +242,8 @@ def load_plan(suite, plan_path):
     forbidden = {r["_meta"]["source"] for r in load_split(suite, "train")} & set(EVAL_ONLY)
     if forbidden:
         raise ValueError(f"suite training partition contains eval-only sources: {sorted(forbidden)}")
+    from kev.study_v3 import validate_training
+    validate_training(load_split(suite, "train"), manifest)
     plan = json.loads(Path(plan_path).read_text())
     if not isinstance(plan, list) or not 1 <= len(plan) <= 8:
         raise ValueError("plan must contain 1..8 bounded trials")

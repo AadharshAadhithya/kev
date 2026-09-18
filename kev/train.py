@@ -31,9 +31,14 @@ def question_loss(z, q, dev, ord_w):
     return loss
 
 
+def accumulation_records(n, batch, accum, microbatch):
+    start = (microbatch // accum) * accum * batch
+    return min(accum * batch, n - start)
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--base", default="Qwen/Qwen2.5-0.5B")
+    ap.add_argument("--base", default="Qwen/Qwen3-0.6B-Base")
     ap.add_argument("--n_per_source", type=int, default=1000)
     ap.add_argument("--epochs", type=int, default=1)
     ap.add_argument("--lr", type=float, default=2e-4)
@@ -48,6 +53,7 @@ def main():
     ap.add_argument("--device", choices=["cpu", "mps", "cuda"], default=None)
     ap.add_argument("--batch", type=int, default=1, help="records per forward pass (padded batch); optimizer step every --accum micro-batches")
     ap.add_argument("--dtype", choices=["fp32", "bf16"], default="fp32", help="bf16 = autocast forward with fp32 master weights (CUDA only)")
+    ap.add_argument("--checkpointing", type=int, choices=[0, 1], default=0)
     ap.add_argument("--p_none", type=float, default=0.1)
     ap.add_argument("--p_none_distract", type=float, default=0.12)
     ap.add_argument("--p_distract", type=float, default=0.15)
@@ -74,6 +80,9 @@ def main():
     revision = manifest["base_revisions"][a.base] if manifest else None
     tok = load_tokenizer(a.base, revision=revision)
     model = DecisionModel(a.base, tok, dev, lora=a.lora, revision=revision)
+    if a.checkpointing:
+        model.lm.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+    model.lm.config.use_cache = False
     print(f"device={dev} trainable params={sum(p.numel() for p in model.trainable_parameters())/1e6:.1f}M", flush=True)
 
     holdout = manifest["holdout_sources"] if manifest else [s for s in a.holdout.split(",") if s]
@@ -89,6 +98,9 @@ def main():
         if unknown: raise ValueError(f"--train_sources not in the training partition: {sorted(unknown)}")
         reqs = [r for r in reqs if r["_meta"]["source"] in wanted]
         print(f"ablation: training on {sorted(wanted)} -> {len(reqs)} records", flush=True)
+    if manifest:
+        from .study_v3 import validate_training
+        validate_training(reqs, manifest)
     suite_hash = digest(Path(a.suite) / "manifest.json") if manifest else None
     write_json(out_dir / "training_config.json", {"args": vars(a), "suite_sha256": suite_hash, "base_revision": revision,
                                                 "ordinal_objective": "ranked_probability_score", "holdout": holdout})
@@ -129,13 +141,12 @@ def main():
                     lp1 = F.log_softmax(z1.float(), -1); lp2 = F.log_softmax(z2.float(), -1)[torch.tensor([perm.index(j) for j in range(len(perm))], device=dev)]
                     kl = kl + 0.5 * (F.kl_div(lp2, lp1, log_target=True, reduction="sum") + F.kl_div(lp1, lp2, log_target=True, reduction="sum")); n += 1
                 kl = kl / n; loss = loss + a.perm_kl * kl; run["kl"] += kl.item(); run["kl_n"] += 1
-            loss = loss / len(recs)
             if not torch.isfinite(loss):
                 raise ValueError("non-finite training loss")
-            group_size = min(a.accum, micro_per_epoch - (mb // a.accum) * a.accum)
+            group_records = accumulation_records(len(reqs), a.batch, a.accum, mb)
+            (loss / group_records).backward(); run["n"] += len(recs); seen += len(recs)
             if dev == "mps": peak_mem = max(peak_mem, torch.mps.current_allocated_memory())
             elif dev == "cuda": peak_mem = max(peak_mem, torch.cuda.max_memory_allocated())
-            (loss / group_size).backward(); run["n"] += len(recs); seen += len(recs)
             if (mb + 1) % a.accum == 0 or mb + 1 == micro_per_epoch:
                 torch.nn.utils.clip_grad_norm_(model.trainable_parameters(), 1.0)
                 opt.step(); sched.step(); opt.zero_grad(); step += 1

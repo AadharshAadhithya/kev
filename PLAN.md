@@ -1,203 +1,99 @@
 # Research plan
 
-Working plan for the next round of infrastructure, data, evaluation, and training work.
-Numbers refer to [`evals/decision-v1`](evals/decision-v1/manifest.json) (in-distribution) and
-[`evals/transfer-v1`](evals/transfer-v1/manifest.json) (eval-only) unless stated. Every number
-below has a committed artifact; follow the links.
+## Current decision
 
-## Where we are
+Use **Qwen3-0.6B-Base as the research baseline**. Keep the released Qwen2.5 checkpoint as a historical reference, not as an equally funded development track. Preserve the MacBook training path; run the controlled studies on Modal H100s.
 
-- **kev-0.5b vs Jev, in-distribution** (720 clean dev questions): 79.7% vs 81.1%, macro
-  difference -1.8 pp, 95% CI [-5.5, +1.7]. Not distinguishable.
-  Artifacts: [`runs/kev-vs-jev-v1.json`](runs/kev-vs-jev-v1.json),
-  [`runs/research-kev-v01/report.json`](runs/research-kev-v01/report.json),
-  [`runs/research-jev-v1/report.json`](runs/research-jev-v1/report.json),
-  figure [`docs/kev-vs-jev.png`](docs/kev-vs-jev.png).
-  *Annotation:* kev was fine-tuned on these six datasets, so parity here is expected and
-  says little. Jev's exposure to the same public sets is unknown.
-- **kev-0.5b vs Jev, transfer** (640 clean dev questions, 8 sources never trained on;
-  zero exact-match overlap with any kev training state): 63.3% vs 82.3%, macro difference
-  **-19.1 pp, 95% CI [-23.1, -15.0]**. This is the real gap.
-  Artifacts: [`runs/kev-vs-jev-transfer-v1.json`](runs/kev-vs-jev-transfer-v1.json),
-  [`runs/transfer-kev-v01/report.json`](runs/transfer-kev-v01/report.json),
-  [`runs/transfer-jev-v1/report.json`](runs/transfer-jev-v1/report.json).
-  Per task (kev / Jev): IMDB .925/.938, QNLI .787/.875, DBpedia-14 .762/.988, TREC .600/.912,
-  Amazon .575/.675, TweetEval-offensive .525/.800, MMLU .475/.900, Emotion .412/.500.
-  *Annotation:* MMLU 47.5% is the Qwen2.5-0.5B base level; the readout adds nothing where
-  knowledge is the bottleneck. DBpedia and TREC are format/label-set transfer failures, not
-  knowledge failures, and are the cheapest to fix with data (step 1).
-- **kev is better calibrated out of domain** (ECE 0.052 vs 0.075; mean confidence 0.685 vs
-  accuracy 0.633, i.e. it knows it does not know). Jev puts exact zeros on true answers on
-  Emotion (NLL 4.58 at floor 1e-9; NLL is floor-sensitive, see
-  [`nll_floor_sensitivity`](runs/kev-vs-jev-transfer-v1.json)). We report accuracy and Brier
-  for Jev, not NLL.
-- **Jev's option-order flip rate is 0.000** on 48 permuted items; kev-0.5b's is 0.208
-  ([`permutation`](runs/transfer-jev-v1/report.json)). *Annotation:* zero over 48 items is
-  architectural or served invariance, not training. Design target for step 4.
-- **kev-0.5b's none-of-the-above shortcut is catastrophic out of domain**: it picks "none"
-  75% of the time when the true option is present (`none_present` acc 0.25; Jev 0.688).
-  Root cause and in-distribution fix: commit
-  [`61a7643`](https://github.com/jaredpalmer/kev/commit/61a7643) (the none option was correct
-  100% of the time it appeared in training). kev2 trains on the fixed data; the fix must be
-  verified out of domain too.
-- **Evaluator bugs fixed** (both mine): clean eval silently added none-options via a leaked
-  default; the none-removed probe never counted anything. Tests:
-  [`tests/test_research.py`](tests/test_research.py). Ordinal loss replaced with the ranked
-  probability score (proper scoring rule).
-- **Nimble** ([repo](https://github.com/bespokelabsai/nimble),
-  [model](https://huggingface.co/bespokelabs/Bespoke-Nimble-9B)): LoRA r=16 on Qwen3.5-9B,
-  2,676 fully synthetic examples (GPT-5.6 generates and separately verifies), letter-code
-  next-token readout, one prompt per field, 26-option cap. 90.1% vs Jev 93.2% on their own
-  324-example synthetic holdout (6 source families, same generator family as training).
-  *What is actually open:* code and hashes. `data/` is git-ignored and there is no Hub
-  dataset, so there is nothing to mix into our training today.
-  *Transferable idea:* contrastive pairs (two contexts differing in <=8 words on one fact so
-  the label flips) plus an evidence-ablation filter (remove either evidence sentence and the
-  fact must become undeterminable). Siblings stay in one split.
-  *Not transferable:* Qwen3.5 (hybrid DeltaNet; our block-causal mask needs standard
-  attention in every layer, verified earlier), the 26-option letter readout (our pointer head
-  has no K cap and gives exact packed isolation), and their eval as a benchmark.
-- **Compute.** MBP (M5, MPS, fp32, batch 1): 0.34 s/record, 1h45m per 9k x 2 run, one job at
-  a time, training slows the playground 10x. Modal H100 at
-  [$3.95/h](https://modal.com/pricing): ~25x per trial once training is batched, ~100x
-  throughput with parallel containers, ~$0.15-0.30 per 0.5B trial. Nimble's 9B ran ~100 ms per
-  example on H100 and 444 ms median on an M5 Pro.
+On the same v2 recipe and data, Qwen3's development accuracy was 81.6% / 79.3% across two seeds, versus 74.2% / 65.8% for Qwen2.5. Transfer accuracy was 62.0% / 62.1% versus 60.5% / 48.2%. This supports our backbone choice, not a claim that every Qwen3 model dominates every Qwen2.5 model.
 
-## Principles
+Evidence: [ablation-v2 ledger](runs/ablation-v2/results.jsonl), [Qwen3 seed 0](runs/ablation-v2/06-trial-6/result.json), [Qwen3 seed 1](runs/ablation-v2/07-trial-7/result.json).
 
-1. A source is either **trainable** or **eval-only**, recorded in the suite manifest.
-   Training refuses eval-only sources. Eval-only status never changes for MMLU.
-2. Development partitions select models; the locked test is read only for promoted
-   candidates via `--allow-test` ([`kev/suite.py`](kev/suite.py) `load_split`).
-3. Every result carries suite hash, code hashes, git commit, coverage counts, and a
-   record-clustered bootstrap when compared ([`kev/experiment.py`](kev/experiment.py),
-   [`kev/benchmark.py`](kev/benchmark.py) `paired_bootstrap`).
-4. One GPU job per device. Locally that means queuing behind the current run with
-   `--wait-pid`; on Modal it means one trial per container.
-5. No Jev distillation. Jev is a reference to measure against, not a teacher.
-6. Historical checkpoints (`runs/kev`, `runs/kev2`) overlap the suites' training data:
-   exploratory only; never promoted.
-7. The MBP path stays supported and documented as optional. Modal is the default for
-   anything longer than a smoke run.
+## Evidence and corrections
 
-## Steps
+- Original kev versus Jev on familiar sources: 79.7% versus 81.1% micro accuracy; macro difference −1.8 points, 95% CI [−5.5, +1.7]. An interval including zero is not evidence of equivalence. [Comparison](runs/kev-vs-jev-v1.json), [figure](docs/kev-vs-jev.png).
+- Original kev versus Jev on transfer-v1: 63.3% versus 82.3%, macro difference −19.1 points, CI [−23.1, −15.0]. The overlap check covered 1,360 decision-v1 training/calibration states, **not every example used to train the released checkpoint**. Public pretraining overlap is unknown for both models. [Comparison](runs/kev-vs-jev-transfer-v1.json), [manifest](evals/transfer-v1/manifest.json).
+- Lower aggregate ECE on transfer-v1 did not establish generally better calibration. Qwen3 trial 6 gets 50% authorization accuracy with 99.6% mean confidence on transfer-v2. Its familiar-source ECE falls from .073 to .026 after fitting temperature on calibration; this does not establish transfer calibration. [Result](runs/ablation-v2/06-trial-6/result.json).
+- Jev's zero observed argmax flips do **not** prove architectural invariance. Its probabilities move under permutation. [Jev transfer-v1 report](runs/transfer-jev-v1/report.json).
+- A none-present accuracy of 25% means 75% wrong, not necessarily 75% selecting none. Report actual none-option mass and selection separately. [Original comparison diagnostics](runs/kev-vs-jev-transfer-v1.json).
+- MMLU and domain-transfer failures do not by themselves identify a knowledge versus readout bottleneck. We need a controlled capacity/data experiment.
+- Two v2 issues were found: siblings shuffled their sentence order independently, and calibration took the first slice of a family-ordered synthetic list. Pair metrics also compared option indices rather than semantic keys. Fix these under **v3**, with tests; do not rewrite v2 again.
 
-### 0. Modal as the default compute  [now]
+## Nimble research
 
-Why first: every later step is a training run or an eval sweep, and each is 25-100x faster
-on Modal. Sequencing this ahead of the data work is what makes 30-40 trials an evening.
+[Bespoke Nimble](https://github.com/bespokelabsai/nimble), [model card](https://huggingface.co/bespokelabs/Bespoke-Nimble-9B), [dataset guide](https://github.com/bespokelabsai/nimble/blob/main/docs/DATASET.md).
 
-- CUDA support in [`kev/train.py`](kev/train.py), [`kev/benchmark.py`](kev/benchmark.py),
-  [`kev/experiment.py`](kev/experiment.py): `--device cuda`, TF32 matmul, optional bf16
-  autocast (`--dtype`), CUDA sync for latency, peak-memory tracking, git sha from env inside
-  containers.
-- Batched training: pad to the longest sequence in the batch, batched block-causal mask
-  `[B,1,L,L]`, SDPA attention (accepts arbitrary masks; FlashAttention does not). Parity test:
-  batched bf16 vs batch-1 fp32 on the smoke suite, probabilities within tolerance; bf16 will
-  move the third decimal and the baseline gets re-scored on the same hardware.
-- [`modal_app.py`](modal_app.py): image via `uv_sync` from `pyproject.toml`/`uv.lock` with a
-  CUDA torch index; Volumes for the HF cache and `runs/`; `HF_TOKEN` as a Modal Secret;
-  one H100 container per trial, fanned out with `.map`; results pulled back into `runs/` so
-  git provenance is unchanged. Docs used:
-  [images](.agents/skills/modal/references/guide/images.md),
-  [volumes](.agents/skills/modal/references/api/Volume.md),
-  [gpu](.agents/skills/modal/references/guide/gpu.md),
-  [secrets](.agents/skills/modal/references/guide/secrets.md).
-- Smoke on a cheap GPU, then the backbone study (step 5d-lite: Qwen2.5-0.5B vs
-  Qwen3-0.6B-Base, two seeds each) on H100s in parallel, replacing the locally queued copy.
+The inspected release trained a Qwen3.5-9B LoRA adapter on 2,676 synthetic contrastive records. It reported 90.1% agreement with synthetic reference labels versus Jev's 93.2% on 324 records from six source families. These are useful external research results, not measurements on our evaluation suite or proof of broad parity. In the inspected checkout, `data/` was ignored and the dataset guide required separately supplied files; no directly usable dataset was found during that review.
 
-### 1. Graduate part of transfer-v1 into training; keep the rest held out
+Adopt minimal factual edits, executable labels where possible, evidence checks, and grouped splits. A check on structured fact dictionaries does not independently validate the English rendering. Separate model calls also do not eliminate correlated synthetic-label errors. Hard outcome labels with a proper scoring rule are sufficient; teacher probabilities are not required.
 
-Trainable in the next suite (`decision-v2`): banking77, boolq, agnews, mnli, sst5, yelp
-(existing) + **trec, dbpedia14, amazon, imdb** (graduated: same task families, large public
-train splits; they fix the K-variety and domain-breadth failures visible in the transfer
-table above).
+Nimble scores letter tokens and supports a hybrid recurrent backbone through separate field execution. Our current packed mask alone does not isolate recurrent state, so Qwen3.5 is not a drop-in replacement. This does not make hybrid models fundamentally unusable.
 
-Eval-only forever: **mmlu** (knowledge probe), **emotion**, **tweet_offensive** (noisy-label
-honesty checks), **qnli** (reading transfer), plus new eval-only sources so the held-out set
-does not shrink: **paws** (paraphrase Noul), **sciq** (passage MCQ). Excluded on purpose:
-Rotten Tomatoes (SST parent), SNLI (MNLI sibling).
+## v3 protocol (approved)
 
-Deliverables:
-- `TRAINABLE` / `EVAL_ONLY` tables in [`kev/data.py`](kev/data.py); `kev.suite` writes both
-  lists to the manifest; `kev.train --suite` and `kev.experiment` refuse a suite whose training
-  partition contains an eval-only source.
-- `evals/decision-v2` (10 trainable sources; train/calibration/development/test) and
-  `evals/transfer-v2` (6 eval-only sources; development/test), with exact-match exclusion
-  against each other's training states (`--exclude-states-from`).
+### 1. Correctness and immutable artifacts
 
-### 2. Programmatic contrastive pairs  [CPU only]
+- Preserve all existing suite versions and run directories. New freezes and Modal trials refuse to overwrite existing paths, including failure artifacts.
+- Match sentence order and option order inside a minimal pair. Change one decisive fact only.
+- Stratify calibration by family while keeping pairs/groups together.
+- Reject incomplete or duplicated pairs. Compare semantic answer keys, not their positions.
+- Preserve locked-test bytes. New held-out structures/renderings are appended only to a new version. Do not score the locked test during this study.
+- Verify exact semantic-state separation among newly generated groups. Do not claim fuzzy or pretraining decontamination. Inherited legacy test overlap with newly generated controls is not certified by this audit.
 
-Templated policy + case generator with certain labels: return windows, eligibility
-thresholds, authorization by named role, date arithmetic, quantity limits. Each item is a
-pair differing in one fact so the label flips; an ablation check confirms the label is
-undeterminable when the deciding sentence is removed (Nimble's filter, in code, no LLM).
-Siblings share a family id and a split.
+### 2. Compositional policy data
 
-Deliverables:
-- `kev/contrastive.py`: generator, ablation check, `paired_flip` metric (did the answer
-  change when the fact changed; immune to majority-class guessing).
-- Trainable source `contrastive_policy` (decision-v2 training) and eval-only families (held
-  out by family) in transfer-v2.
-- `kev.benchmark` reports `paired_flip_rate` for sources that carry `pair_id`.
+Generate an explicit rule tree, facts, executable reference label, and a textual rendering. Include numeric comparisons (`<`, `≤`, `>`, `≥`, `=`, inclusive ranges), entity equality, elapsed-date comparisons, AND, OR, NOT, exceptions, and conditional precedence.
 
-### 3. Score kev-0.5b, kev2, and Jev on decision-v2 / transfer-v2
+For each situation create both:
 
-kev on Modal (or CPU if Modal is not yet up); Jev remotely via
-[`kev/jev.py`](kev/jev.py) (AI SDK 7 `experimental_evaluate`, ~$0.015 per 600 records,
-5xx-retry only). Commit reports and comparison JSON as for v1.
+1. Relevant intervention: change one fact and require the answer to change.
+2. Irrelevant intervention: change a routing reference and require the answer to stay unchanged.
 
-### 4. Permutation invariance as architecture  [smoke suite, cheap]
+Keep all four records in one split and one bootstrap unit. Require removal of the decisive fact to make the relevant decision unknown in the executable rule. Test truth tables and numeric/date boundaries, then manually inspect rendered samples.
 
-Experiment in [`kev/model.py`](kev/model.py): option-position-agnostic encoding (shared
-position ids for every option span, or per-option scoring against the same decide state).
-Measure flip rate and packed-vs-separate equality on the smoke suite before any full run.
-Target: Jev's 0.000 without the `--perm_kl` loss.
+Eight rule structures are trainable; three new compositions are transfer-development only; three further structures and a reserved rendering style are locked-test only. Authorization and deadline template families remain excluded from training, although related logical primitives are intentionally trained. This measures compositional/template transfer, not unseen primitive knowledge.
 
-### 5. Training runs, in order, via `kev.experiment` on decision-v2  [Modal]
+### 3. Matched data-versus-capacity experiment
 
-a. Baseline: current data + none-of-the-above fix (kev2 recipe) on decision-v2.
-b. + graduated transfer sources.
-c. + programmatic contrastive pairs.
-d. Qwen3-0.6B-Base on the best of a-c.
+| Backbone | Corrected legacy policy data | Compositional policy data |
+|---|---|---|
+| Qwen3-0.6B-Base | Control | Data effect |
+| Qwen3-4B-Base | Capacity effect | Combined effect |
 
-Each trial: same suite, same development set, record-clustered bootstrap against (a),
-gates (coverage, isolation, packing, none-present/absent, permutation), transfer-v2 as the
-out-of-domain check. Promote to the locked test only if the development CI excludes zero.
+- Identical 3,000 public training records from ten permitted sources in both arms.
+- Exactly 448 synthetic training records per arm, replacing rather than adding examples.
+- Shared, family-stratified calibration and shared development/transfer sets.
+- Two epochs, LoRA rank 16, identical learning rate per comparison, effective batch size eight. Memory-saving microbatching must preserve per-record loss weights, including the last partial batch.
+- Start with one seed per cell; repeat the cells with a second seed if smoke validation and the budget permit. Do not select and report only the better seed.
+- Record total forward tokens, steps, memory, training/evaluation wall time, full resolved configuration, dependency lock hash, source hashes, and base revisions. Equal record exposure is not equal FLOPs.
 
-### 6. LLM-generated contrastive pairs  [later, needs API keys]
+### 4. Selection and uncertainty
 
-Nimble-shaped recipe: generator != verifier, ablation filter, product domains (triage,
-rubric grading, compliance). Families held out. Labels marked synthetic; report agreement,
-not accuracy, until spot-checked.
+Primary score remains macro development NLL, with separate familiar-task retention and transfer reporting. Also report Brier, raw/calibrated ECE, confident-error rate at probability ≥0.9, accuracy at 50%/80% coverage (including ties), relevant-pair both-correct rate, and irrelevant-pair invariance/both-correct rates.
 
-### 7. Larger backbones on the winning data  [Modal, $100 cap]
+Temperature is fit on calibration only and applied unchanged to transfer. Neither the agent nor a candidate can adjust the evaluator through the trial config.
 
-Qwen3-4B-Base then Qwen3-8B-Base with the recipe from step 5 (Qwen3 tech report base
-MMLU-Pro: 4B low 50s, 8B mid-to-high 50s, 14B low 60s; Jev 84.6). Not Qwen3.5 (hybrid
-attention breaks the branch mask). Rough cost at ~40% MFU: 8B on 200k examples ~ $25.
+Research screening includes complete coverage, isolation, original-task retention, transfer accuracy/Brier non-regression, at least 70% held-out pair correctness, and at most 10% confidently wrong transfer answers. These are predeclared provisional thresholds, not production guarantees. A development win can become a candidate for a locked test; it must never automatically become a released model.
 
-## Status
+### 5. Compute and spending
 
-- [x] transfer-v1 frozen and scored (kev-0.5b, Jev); comparison committed
-      ([`1054ea7`](https://github.com/jaredpalmer/kev/commit/1054ea7))
-- [x] Modal CLI installed (`modal==1.5.5`, dev dependency) and authenticated (workspace `jp-1083`)
-- [x] 0. CUDA + batched training; `modal_app.py`; smoke; backbone study on Modal
-      ([`runs/backbone-v1/results.jsonl`](runs/backbone-v1/results.jsonl): Qwen3-0.6B +3 pp in-dist and
-      +4-6 pp on never-trained MNLI/SST-5 vs Qwen2.5-0.5B at 1.2k records, both seeds; seed spread is as
-      large as the backbone effect. 0.019-0.03 s/record on H100 vs 0.34 on the MBP; 5 trials in ~5 min, ~$0.80.
-      Evaluation on CUDA runs fp32-exact: TF32 alone moves probabilities ~1e-3 and tripped the isolation gate.)
-- [x] kev2 (9k records, none fix, MBP) scored on decision-v1 dev
-      ([`runs/research-kev2-dev/report.json`](runs/research-kev2-dev/report.json)): acc 0.803, `none_absent`
-      0.861 (was 0.667), `none_present` 0.75 (was 0.78): the augmentation fix teaches "pick none when right",
-      not "don't pick none when wrong". Motivates step 2.
-- [ ] 1. trainable/eval-only manifest flag; decision-v2 + transfer-v2 frozen
-- [ ] 2. programmatic contrastive pairs + paired_flip metric
-- [ ] 3. kev-0.5b / kev2 / Jev on v2 suites
-- [ ] 4. permutation-invariant encoding experiment
-- [ ] 5a-d training runs
-- [ ] 6. LLM contrastive pairs
-- [ ] 7. 4B / 8B runs
+No local training job needs to be interrupted. The Modal workspace currently reports $9.46 metered usage before this phase (covered by credits). Verified H100 rate: $3.95/GPU-hour, plus CPU/memory/storage. [Modal pricing](https://modal.com/pricing).
 
-The locally queued backbone study was cancelled in favour of the Modal copy; `runs/kev2` finished
-on the MBP and is scored above.
+Use at most four concurrent containers, no automatic trial retries, and an 1,800-second per-trial timeout. Launch-time cost admission uses the GPU rate plus bounded CPU/memory requests; it excludes image build/startup/storage and is not an account-level hard spending cap. Keep the phase within the previously discussed $100 total budget, with an initial study compute bound below $20. Preserve failures rather than silently retraining or overwriting them.
+
+Modal documentation: [images](https://modal.com/docs/guide/images), [volumes](https://modal.com/docs/guide/volumes), [GPU](https://modal.com/docs/guide/gpu), [secrets](https://modal.com/docs/guide/secrets).
+
+## Status and deferred work
+
+- [x] Modal CUDA/batched path and backbone-v1 study completed; MBP path retained.
+- [x] v2 source policy, PAWS/SciQ conversion, contrastive prototype, and data-ablation study completed. Findings remain exploratory.
+- [ ] v3 minimal-pair/calibration/metric corrections and regression tests.
+- [ ] v3 compositional generator and boundary/rendering validation.
+- [ ] v3 frozen matched suites, pinned 4B revision, and strict context admission.
+- [ ] Modal smoke followed by the matched 0.6B/4B comparison.
+- [ ] Analyze all seeds, update results, and decide whether any candidate warrants a locked test.
+- [ ] Deferred: option-order architecture experiments. Do not infer Jev's architecture from zero argmax flips.
+- [ ] Deferred: LLM-authored product scenarios, with a separate verification model and retained provenance; needs explicit API/budget decisions.
+- [ ] Deferred: 8B runs after the data-versus-capacity result, not as an automatic escalation.
+- [ ] Deferred: final release/model-card/Hub updates until generalization and calibration justify them.
+
+Relevant code: [suite builder](kev/study_v3.py), [rule generator](kev/composition.py), [experiment runner](kev/experiment.py), [benchmark](kev/benchmark.py), [Modal app](modal_app.py), [v3 tests](tests/test_v3.py).

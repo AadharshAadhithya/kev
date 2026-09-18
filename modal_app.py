@@ -15,7 +15,7 @@ KEV_HF_SECRET=<modal secret name> to attach a Secret carrying HF_TOKEN for gated
 """
 import json
 import os
-import shutil
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -34,6 +34,8 @@ image = (
     .uv_sync(uv_project_dir=str(ROOT), groups=[])           # exact locked deps; Linux torch wheels are the CUDA build
     .env({"HF_HOME": HF_MOUNT, "HF_HUB_DISABLE_PROGRESS_BARS": "1", "TOKENIZERS_PARALLELISM": "false", "PYTHONUNBUFFERED": "1"})
     .add_local_python_source("kev")
+    .add_local_file(ROOT / "uv.lock", "/root/uv.lock")
+    .add_local_file(ROOT / "pyproject.toml", "/root/pyproject.toml")
     .add_local_dir(ROOT / "evals", "/root/evals")
 )
 hf_cache = modal.Volume.from_name("kev-hf-cache", create_if_missing=True)
@@ -51,7 +53,8 @@ def local_source_hashes():
     return source_hashes()
 
 
-@app.function(image=image, gpu=GPU, timeout=4 * 3600, volumes={RUNS_MOUNT: runs_volume, HF_MOUNT: hf_cache}, secrets=secrets)
+@app.function(image=image, gpu=GPU, cpu=2, memory=(32768, 49152), max_containers=4, retries=0, timeout=1800,
+              volumes={RUNS_MOUNT: runs_volume, HF_MOUNT: hf_cache}, secrets=secrets)
 def run_trial(study, index, label, config, suite, expected_sources, git_commit, existing=None, transfer=None):
     """One trial in one container. `existing` is a checkpoint path on the runs volume or a Hub id (legacy scoring)."""
     import torch
@@ -62,10 +65,13 @@ def run_trial(study, index, label, config, suite, expected_sources, git_commit, 
         raise RuntimeError("container received different kev/*.py than the launcher hashed")
     out = Path(RUNS_MOUNT) / study / f"{index:02d}-{label}"
     if out.exists():
-        shutil.rmtree(out)
+        raise FileExistsError(f"refusing to overwrite remote trial: {out}")
     print(f"[{label}] {torch.cuda.get_device_name(0)} torch {torch.__version__} config={json.dumps(config)}", flush=True)
-    report, _ = execute_trial(config or {}, Path("/root") / suite, out, expected_sources, "cuda", existing, Path("/root") / transfer if transfer else None)
-    runs_volume.commit()
+    try:
+        report, _ = execute_trial(config or {}, Path("/root") / suite, out, expected_sources, "cuda", existing, Path("/root") / transfer if transfer else None)
+    finally:
+        runs_volume.commit()
+        hf_cache.commit()
     return {"label": label, "objective": report["objective"], "clean_acc": report["clean"]["acc"],
             "wall_seconds": report["wall_seconds"], "gates": report["gates"]["checks"]}
 
@@ -74,7 +80,7 @@ def pull_study(study):
     """Download a study directory from the runs volume into runs/<study> and rank it."""
     target = ROOT / "runs" / study
     if target.exists():
-        shutil.rmtree(target)
+        raise FileExistsError(f"refusing to overwrite local study: {target}")
     target.parent.mkdir(exist_ok=True)
     # `modal volume get <vol> /<study> runs/` recreates runs/<study>/... locally, checkpoints included (gitignored)
     subprocess.run([sys.executable, "-m", "modal", "volume", "get", "kev-runs", f"/{study}", str(target.parent)], check=True)
@@ -82,16 +88,29 @@ def pull_study(study):
     return target
 
 
-def launch(suite, plan_path, name, gpu, existing=(), transfer=None):
+def launch(suite, plan_path, name, gpu, existing=(), transfer=None, budget=20.0, timeout=1800):
     from kev.experiment import load_plan
 
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,79}", name):
+        raise ValueError("study name must be a simple unique identifier")
+    if (ROOT / "runs" / name).exists():
+        raise FileExistsError("choose a new study name; existing results are immutable")
+    if not 60 <= timeout <= 1800 or not 0 < budget <= 25:
+        raise ValueError("timeout must be 60..1800 seconds and study budget <= $25")
     trials = load_plan(ROOT / suite, ROOT / plan_path) if plan_path else []
+    rates = {"H100": 3.95, "T4": .59}
+    if gpu not in rates:
+        raise ValueError("no verified cost bound for this GPU")
+    upper = (rates[gpu] + 2 * .04730 + 48 * .008) * timeout / 3600 * (len(trials) + len(existing))
+    if upper > budget:
+        raise ValueError(f"timeout-based compute bound ${upper:.2f} exceeds budget ${budget:.2f}")
+    print(f"Compute admission bound ${upper:.2f}; excludes image build, startup, and storage; no automatic retries.", flush=True)
     commit, sources = local_git_commit(), local_source_hashes()
     if subprocess.run(["git", "status", "--porcelain", "kev", "evals"], cwd=ROOT, capture_output=True, text=True).stdout.strip():
         print("warning: kev/ or evals/ has uncommitted changes; provenance records the last commit, not the working tree", flush=True)
     entries = [(None, p) for p in existing] + [(t, None) for t in trials]
     jobs = [(name, i, Path(ex).name if ex else f"trial-{i}", cfg or {}, suite, sources, commit, ex, transfer) for i, (cfg, ex) in enumerate(entries)]
-    fn = run_trial.with_options(gpu=gpu) if gpu != GPU else run_trial
+    fn = run_trial.with_options(gpu=gpu, timeout=timeout, retries=0, max_containers=4)
     print(f"launching {len(jobs)} trial(s) on {gpu} for study {name}", flush=True)
     results = list(fn.starmap(jobs, return_exceptions=True))
     for job, result in zip(jobs, results):
@@ -106,8 +125,8 @@ def launch(suite, plan_path, name, gpu, existing=(), transfer=None):
 
 
 @app.local_entrypoint()
-def study(suite: str, plan: str, name: str, gpu: str = GPU, existing: str = "", transfer: str = ""):
-    launch(suite, plan, name, gpu, [e for e in existing.split(",") if e], transfer or None)
+def study(suite: str, plan: str, name: str, gpu: str = GPU, existing: str = "", transfer: str = "", budget: float = 20.0, timeout: int = 1800):
+    launch(suite, plan, name, gpu, [e for e in existing.split(",") if e], transfer or None, budget, timeout)
 
 
 @app.local_entrypoint()

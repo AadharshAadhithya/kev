@@ -143,7 +143,7 @@ def check_pair(a, b):
         evidence = 0
         for i, (_, facts) in enumerate(item["sentences"]):
             got = label_of(item, drop=i)
-            if facts and got is not UNDETERMINED: return "ablation_failed"      # evidence removed must make it undeterminable
+            if facts and got != UNDETERMINED: return "ablation_failed"      # evidence removed must make it undeterminable
             if not facts and got != label: return "invariance_failed"          # filler removed must not change the label
             evidence += bool(facts)
         if evidence < 1: return "no_evidence_sentence"
@@ -174,7 +174,9 @@ def generate(n_pairs_per_family, seed, families=None):
             if why:
                 rejected += 1; reasons[why] = reasons.get(why, 0) + 1; continue
             pair_id = f"{seed}-{family}-{kept:04d}"
-            records += [to_request(a, family, pair_id, "a", rng), to_request(b, family, pair_id, "b", rng)]
+            order_seed = rng.getrandbits(64)
+            records += [to_request(a, family, pair_id, "a", random.Random(order_seed)),
+                        to_request(b, family, pair_id, "b", random.Random(order_seed))]
             kept += 1
         if kept < n_pairs_per_family:
             raise ValueError(f"{family}: only {kept}/{n_pairs_per_family} pairs passed checks ({reasons})")
@@ -187,11 +189,24 @@ def paired_flip(rows):
     by_pair = {}
     for r in rows:
         if r.get("pair_id"):
-            by_pair.setdefault(r["pair_id"], {})[r["sibling"]] = r
-    pairs = [p for p in by_pair.values() if len(p) == 2]
-    if not pairs:
+            key = (r["pair_id"], r.get("question", "decision"))
+            pair = by_pair.setdefault(key, {})
+            if r["sibling"] in pair:
+                raise ValueError("duplicate contrastive sibling")
+            pair[r["sibling"]] = r
+    if not by_pair:
         return None
-    argmax = lambda r: max(range(len(r["p"])), key=r["p"].__getitem__)
-    flips = sum(argmax(p["a"]) != argmax(p["b"]) for p in pairs)
-    both = sum(argmax(p["a"]) == p["a"]["label"] and argmax(p["b"]) == p["b"]["label"] for p in pairs)
-    return {"pairs": len(pairs), "flip_rate": flips / len(pairs), "both_correct_rate": both / len(pairs)}
+    if any(set(p) != {"a", "b"} for p in by_pair.values()):
+        raise ValueError("incomplete contrastive pair")
+    prediction = lambda r: r["keys"][max(range(len(r["p"])), key=r["p"].__getitem__)]
+    truth = lambda r: r["keys"][r["label"]]
+    relevant = [p for p in by_pair.values() if truth(p["a"]) != truth(p["b"])]
+    invariant = [p for p in by_pair.values() if truth(p["a"]) == truth(p["b"])]
+    both = lambda ps: sum(all(prediction(r) == truth(r) for r in p.values()) for p in ps) / len(ps) if ps else None
+    result = {"pairs": len(relevant),
+              "flip_rate": sum(prediction(p["a"]) != prediction(p["b"]) for p in relevant) / len(relevant) if relevant else None,
+              "both_correct_rate": both(relevant)}
+    if invariant:
+        result.update(invariant_pairs=len(invariant), invariance_rate=sum(prediction(p["a"]) == prediction(p["b"]) for p in invariant) / len(invariant),
+                      invariant_both_correct_rate=both(invariant))
+    return result

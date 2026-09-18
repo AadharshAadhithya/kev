@@ -42,6 +42,14 @@ runs/transfer-jev-v1/*
 .agents/skills/modal/
 # Modal studies: keep results/ledger/provenance, not checkpoints or prediction dumps
 !runs/backbone-v1/
+!runs/ablation-v2/
+runs/ablation-v2/*
+!runs/ablation-v2/results.jsonl
+!runs/ablation-v2/*/
+runs/ablation-v2/*/*
+!runs/ablation-v2/*/result.json
+!runs/ablation-v2/*/provenance.json
+!runs/ablation-v2/*/train.log
 runs/backbone-v1/*
 !runs/backbone-v1/results.jsonl
 !runs/backbone-v1/*/

@@ -135,3 +135,15 @@ def test_date_and_entity_atoms():
     assert atom_value(a, {"signer": "Mira"}) is None
 
 
+
+
+def test_unpinned_base_requires_full_sha_in_trial():
+    from kev.experiment import validated_trial
+    manifest = {"base_revisions": {"pinned": "a" * 40}, "trainable_sources": []}
+    with pytest.raises(ValueError, match="base_revision"):
+        validated_trial({"base": "other"}, manifest)
+    with pytest.raises(ValueError, match="base_revision"):
+        validated_trial({"base": "other", "base_revision": "main"}, manifest)
+    assert validated_trial({"base": "other", "base_revision": "b" * 40}, manifest)["base_revision"] == "b" * 40
+    with pytest.raises(ValueError, match="conflicts"):
+        validated_trial({"base": "pinned", "base_revision": "b" * 40}, manifest)

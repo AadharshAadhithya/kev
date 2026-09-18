@@ -54,6 +54,7 @@ def main():
     ap.add_argument("--batch", type=int, default=1, help="records per forward pass (padded batch); optimizer step every --accum micro-batches")
     ap.add_argument("--dtype", choices=["fp32", "bf16"], default="fp32", help="bf16 = autocast forward with fp32 master weights (CUDA only)")
     ap.add_argument("--checkpointing", type=int, choices=[0, 1], default=0)
+    ap.add_argument("--base_revision", default="", help="pin the base commit when the suite manifest does not pin this base")
     ap.add_argument("--p_none", type=float, default=0.1)
     ap.add_argument("--p_none_distract", type=float, default=0.12)
     ap.add_argument("--p_distract", type=float, default=0.15)
@@ -77,7 +78,12 @@ def main():
         torch.backends.cuda.matmul.allow_tf32 = True; torch.backends.cudnn.allow_tf32 = True
     autocast = torch.autocast("cuda", dtype=torch.bfloat16) if a.dtype == "bf16" else contextlib.nullcontext()
     manifest = json.loads((Path(a.suite) / "manifest.json").read_text()) if a.suite else None
-    revision = manifest["base_revisions"][a.base] if manifest else None
+    revision = manifest["base_revisions"].get(a.base) if manifest else None
+    if a.base_revision:
+        if revision and revision != a.base_revision: raise ValueError("--base_revision conflicts with the suite's pinned revision")
+        revision = a.base_revision
+    if manifest and not revision:
+        raise ValueError("base not pinned by the suite; pass --base_revision")
     tok = load_tokenizer(a.base, revision=revision)
     model = DecisionModel(a.base, tok, dev, lora=a.lora, revision=revision)
     if a.checkpointing:

@@ -16,6 +16,7 @@ import gc
 import json
 import os
 import platform
+import re
 import subprocess
 import sys
 import time
@@ -38,11 +39,15 @@ CHOICES = {"dtype": ("fp32", "bf16"), "checkpointing": (0, 1)}
 
 
 def validated_trial(value, manifest):
-    if not isinstance(value, dict) or set(value) - (DEFAULTS.keys() | CHOICES.keys() | {"base", "train_sources"}):
+    if not isinstance(value, dict) or set(value) - (DEFAULTS.keys() | CHOICES.keys() | {"base", "train_sources", "base_revision"}):
         raise ValueError("trial may change only the allowlisted training parameters and base")
     result = {**DEFAULTS, **value}
     if result.get("base") not in manifest["base_revisions"]:
-        raise ValueError("base must have a revision pinned in the suite")
+        # a base the frozen suite did not pin may still be used if the trial pins its own full commit sha (recorded in provenance)
+        if not re.fullmatch(r"[0-9a-f]{40}", str(result.get("base_revision", ""))):
+            raise ValueError("base must have a revision pinned in the suite, or the trial must pin a 40-hex base_revision")
+    elif "base_revision" in result and result["base_revision"] != manifest["base_revisions"][result["base"]]:
+        raise ValueError("trial base_revision conflicts with the suite's pinned revision")
     if "train_sources" in result:
         names = result["train_sources"].split(",") if isinstance(result["train_sources"], str) else None
         if not names or set(names) - set(manifest.get("trainable_sources", [])):

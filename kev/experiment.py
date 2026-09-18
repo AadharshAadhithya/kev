@@ -122,7 +122,7 @@ def gate_report(report, checks, baseline=None):
     return {"passed": all(gates.values()), "checks": gates, "policy": "Correctness gate at 1e-3; provisional 5pp regression guardrails, not a statistical significance claim."}
 
 
-def execute_trial(config, suite, output, expected_sources, device, existing=None):
+def execute_trial(config, suite, output, expected_sources, device, existing=None, transfer_suite=None):
     """Train (unless `existing` points at a checkpoint), calibrate, score development, run mechanism checks.
     Writes result.json (without cross-trial comparisons) and returns (report, rows). Safe to run in isolation."""
     output = Path(output)
@@ -152,14 +152,21 @@ def execute_trial(config, suite, output, expected_sources, device, existing=None
             _, calibration_rows = evaluate_records(load_split(suite, "calibration"), predictor, output / "calibration")
             temperature = fit_temperature(calibration_rows)
         records = load_split(suite, "development")
-        report, rows = evaluate_records(records, predictor, output / "development", temperature)
+        heldout = tuple(json.loads((Path(suite) / "manifest.json").read_text()).get("holdout_sources", []))
+        report, rows = evaluate_records(records, predictor, output / "development", temperature, heldout_sources=heldout)
         checks = mechanism_checks(records, predictor)
+        transfer = None
+        if transfer_suite:
+            t_records = load_split(transfer_suite, "development")
+            transfer, _ = evaluate_records(t_records, predictor, output / "transfer", temperature, heldout_sources=tuple(r["_meta"]["source"] for r in t_records))
+            transfer = {"suite_sha256": digest(Path(transfer_suite) / "manifest.json"), "clean": transfer["clean"], "tasks": transfer["tasks"],
+                        "variants": transfer["variants"], "paired_flip": transfer["paired_flip"], "permutation": transfer["permutation"], "coverage": transfer["coverage"]}
     finally:
         del predictor
         free_device_memory(device)
     if source_hashes() != expected_sources or digest(Path(suite) / "manifest.json") != suite_hash:
         raise ValueError("source or suite changed during the trial; result cannot be ranked")
-    report.update(provenance=provenance, mechanism_checks=checks, gates=gate_report(report, checks),
+    report.update(provenance=provenance, mechanism_checks=checks, gates=gate_report(report, checks), transfer=transfer,
                   wall_seconds=time.perf_counter() - started, promotable=False, test_evaluated=False)
     if not existing:
         report["training_resources"] = json.loads((Path(run) / "training_metrics.json").read_text())
@@ -177,7 +184,9 @@ def compare_to_baseline(report, rows, baseline):
 
 def ledger_row(label, report, config, legacy, path):
     return {"id": label, "status": "complete", "path": str(path), "objective": report["objective"],
-            "clean": report["clean"], "gates": report["gates"], "promotable": report["promotable"],
+            "clean": report["clean"], "transfer_clean": (report.get("transfer") or {}).get("clean"),
+            "transfer_paired_flip": (report.get("transfer") or {}).get("paired_flip"),
+            "gates": report["gates"], "promotable": report["promotable"],
             "paired_ci95": report.get("paired_comparison", {}).get("ci95"), "config": config, "legacy": legacy}
 
 
@@ -198,7 +207,8 @@ def aggregate(study_dir):
                 baseline = {**copy.deepcopy(report), "rows": rows}
             row = ledger_row(directory.name, report, report["provenance"]["config"], legacy, directory)
             ledger.write(json.dumps(row, allow_nan=False) + "\n")
-            print(json.dumps({k: row[k] for k in ("id", "objective", "paired_ci95", "promotable")}), flush=True)
+            print(json.dumps({"id": row["id"], "objective": round(row["objective"], 4), "acc": round(row["clean"]["acc"], 4),
+                              "transfer_acc": row["transfer_clean"] and round(row["transfer_clean"]["acc"], 4), "paired_ci95": row["paired_ci95"], "promotable": row["promotable"]}), flush=True)
 
 
 def load_plan(suite, plan_path):
@@ -225,6 +235,7 @@ def main():
     ap.add_argument("--device", choices=["cpu", "mps", "cuda"], default=default_device())
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--aggregate", action="store_true", help="rank an existing study directory (e.g. after Modal trials)")
+    ap.add_argument("--transfer", help="eval-only suite whose development partition is scored for every trial (out-of-domain check)")
     a = ap.parse_args()
     if a.aggregate:
         aggregate(a.out); return
@@ -252,7 +263,7 @@ def main():
             label = Path(existing).name if existing else f"trial-{i}"
             print(f"Starting {label}", flush=True)
             try:
-                execute_trial(config or {}, suite, output / f"{i:02d}-{label}", expected_sources, a.device, existing)
+                execute_trial(config or {}, suite, output / f"{i:02d}-{label}", expected_sources, a.device, existing, Path(a.transfer).resolve() if a.transfer else None)
             except Exception as error:
                 with (output / "results.jsonl").open("a") as ledger:
                     ledger.write(json.dumps({"id": label, "status": "failed", "error": str(error)}) + "\n")

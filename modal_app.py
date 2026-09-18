@@ -52,7 +52,7 @@ def local_source_hashes():
 
 
 @app.function(image=image, gpu=GPU, timeout=4 * 3600, volumes={RUNS_MOUNT: runs_volume, HF_MOUNT: hf_cache}, secrets=secrets)
-def run_trial(study, index, label, config, suite, expected_sources, git_commit, existing=None):
+def run_trial(study, index, label, config, suite, expected_sources, git_commit, existing=None, transfer=None):
     """One trial in one container. `existing` is a checkpoint path on the runs volume or a Hub id (legacy scoring)."""
     import torch
     from kev.experiment import execute_trial, source_hashes
@@ -64,7 +64,7 @@ def run_trial(study, index, label, config, suite, expected_sources, git_commit, 
     if out.exists():
         shutil.rmtree(out)
     print(f"[{label}] {torch.cuda.get_device_name(0)} torch {torch.__version__} config={json.dumps(config)}", flush=True)
-    report, _ = execute_trial(config or {}, Path("/root") / suite, out, expected_sources, "cuda", existing)
+    report, _ = execute_trial(config or {}, Path("/root") / suite, out, expected_sources, "cuda", existing, Path("/root") / transfer if transfer else None)
     runs_volume.commit()
     return {"label": label, "objective": report["objective"], "clean_acc": report["clean"]["acc"],
             "wall_seconds": report["wall_seconds"], "gates": report["gates"]["checks"]}
@@ -82,7 +82,7 @@ def pull_study(study):
     return target
 
 
-def launch(suite, plan_path, name, gpu, existing=()):
+def launch(suite, plan_path, name, gpu, existing=(), transfer=None):
     from kev.experiment import load_plan
 
     trials = load_plan(ROOT / suite, ROOT / plan_path) if plan_path else []
@@ -90,7 +90,7 @@ def launch(suite, plan_path, name, gpu, existing=()):
     if subprocess.run(["git", "status", "--porcelain", "kev", "evals"], cwd=ROOT, capture_output=True, text=True).stdout.strip():
         print("warning: kev/ or evals/ has uncommitted changes; provenance records the last commit, not the working tree", flush=True)
     entries = [(None, p) for p in existing] + [(t, None) for t in trials]
-    jobs = [(name, i, Path(ex).name if ex else f"trial-{i}", cfg or {}, suite, sources, commit, ex) for i, (cfg, ex) in enumerate(entries)]
+    jobs = [(name, i, Path(ex).name if ex else f"trial-{i}", cfg or {}, suite, sources, commit, ex, transfer) for i, (cfg, ex) in enumerate(entries)]
     fn = run_trial.with_options(gpu=gpu) if gpu != GPU else run_trial
     print(f"launching {len(jobs)} trial(s) on {gpu} for study {name}", flush=True)
     results = list(fn.starmap(jobs, return_exceptions=True))
@@ -106,8 +106,8 @@ def launch(suite, plan_path, name, gpu, existing=()):
 
 
 @app.local_entrypoint()
-def study(suite: str, plan: str, name: str, gpu: str = GPU, existing: str = ""):
-    launch(suite, plan, name, gpu, [e for e in existing.split(",") if e])
+def study(suite: str, plan: str, name: str, gpu: str = GPU, existing: str = "", transfer: str = ""):
+    launch(suite, plan, name, gpu, [e for e in existing.split(",") if e], transfer or None)
 
 
 @app.local_entrypoint()
@@ -116,6 +116,6 @@ def smoke(gpu: str = GPU):
 
 
 @app.local_entrypoint()
-def evaluate(run: str, suite: str, name: str, gpu: str = GPU):
+def evaluate(run: str, suite: str, name: str, gpu: str = GPU, transfer: str = ""):
     """Score an existing checkpoint (Hub id, or a path under the runs volume) on a suite's development partition."""
-    launch(suite, None, name, gpu, [run])
+    launch(suite, None, name, gpu, [run], transfer or None)

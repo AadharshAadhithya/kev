@@ -16,6 +16,10 @@ from kev.suite import digest, load_split, record_digest, write_json
 EPSILON = 1e-9
 
 
+def default_device():
+    return "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+
+
 def api_request(record):
     return {"state": record["state"], "questions": {
         qid: {k: v for k, v in q.items() if k in ("type", "instructions", "criteria")}
@@ -149,9 +153,16 @@ def summarize(rows, temperature=1.0, heldout_sources=("mnli", "sst5")):
                               "returned_zeros": sum(r["zero_count"] for r in rows)}}
 
 
+def sync(device):
+    if device == "mps": torch.mps.synchronize()
+    elif device == "cuda": torch.cuda.synchronize()
+
+
 class LocalPredictor:
     def __init__(self, run, device):
         self.run = resolve_run(run)
+        if device == "cuda":
+            torch.backends.cuda.matmul.allow_tf32 = True
         self.tok, self.model = load(self.run, device)
         self.device = device
 
@@ -159,12 +170,10 @@ class LocalPredictor:
         enc = encode(self.tok, materialize(record), strict=True)
         if len(enc["ids"]) > 2048:
             raise ValueError("packed request exceeds frozen 2048-token limit")
-        if self.device == "mps":
-            torch.mps.synchronize()
+        sync(self.device)
         start = time.perf_counter()
         ps = self.model.probs(enc)
-        if self.device == "mps":
-            torch.mps.synchronize()
+        sync(self.device)
         return {"probabilities": {qid: dict(zip(labels(q)[0], p.tolist())) for (qid, q), p in zip(record["questions"].items(), ps)},
                 "latency_ms": 1000 * (time.perf_counter() - start), "input_tokens": len(enc["ids"])}
 
@@ -205,7 +214,7 @@ def main():
     ap.add_argument("--run", required=True)
     ap.add_argument("--suite", required=True)
     ap.add_argument("--out", required=True)
-    ap.add_argument("--device", choices=["cpu", "mps"], default="mps" if torch.backends.mps.is_available() else "cpu")
+    ap.add_argument("--device", choices=["cpu", "mps", "cuda"], default=default_device())
     ap.add_argument("--allow-test", action="store_true")
     a = ap.parse_args()
     split = "test" if a.allow_test else "development"

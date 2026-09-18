@@ -1,4 +1,4 @@
-import argparse, json, math, os, random, resource, sys, time
+import argparse, contextlib, json, math, os, random, resource, sys, time
 from pathlib import Path
 from collections import Counter
 import torch
@@ -44,7 +44,9 @@ def main():
     ap.add_argument("--perm_frac", type=float, default=0.3, help="fraction of records that get the second permuted forward pass")
     ap.add_argument("--ord_w", type=float, default=0.0, help="weight of ranked probability score for Score questions")
     ap.add_argument("--suite", help="frozen suite directory; train only on its training partition")
-    ap.add_argument("--device", choices=["cpu", "mps"], default=None)
+    ap.add_argument("--device", choices=["cpu", "mps", "cuda"], default=None)
+    ap.add_argument("--batch", type=int, default=1, help="records per forward pass (padded batch); optimizer step every --accum micro-batches")
+    ap.add_argument("--dtype", choices=["fp32", "bf16"], default="fp32", help="bf16 = autocast forward with fp32 master weights (CUDA only)")
     ap.add_argument("--p_none", type=float, default=0.1)
     ap.add_argument("--p_none_distract", type=float, default=0.12)
     ap.add_argument("--p_distract", type=float, default=0.15)
@@ -52,8 +54,10 @@ def main():
     ap.add_argument("--seed", type=int, default=0)
     a = ap.parse_args()
 
-    if min(a.epochs, a.accum, a.n_per_source, a.lora) < 1:
-        ap.error("epochs, accum, n_per_source and lora must be positive")
+    if min(a.epochs, a.accum, a.n_per_source, a.lora, a.batch) < 1:
+        ap.error("epochs, accum, n_per_source, lora and batch must be positive")
+    if a.dtype == "bf16" and a.device != "cuda":
+        ap.error("--dtype bf16 requires --device cuda")
     if a.lr <= 0 or min(a.ord_w, a.perm_kl) < 0 or not 0 <= a.perm_frac <= 1:
         ap.error("invalid learning rate or loss weights")
     out_dir = Path(a.out)
@@ -61,7 +65,10 @@ def main():
         ap.error("refusing to overwrite an existing run")
     out_dir.mkdir(parents=True)
     torch.manual_seed(a.seed); rng = random.Random(a.seed)
-    dev = a.device or ("mps" if torch.backends.mps.is_available() else "cpu")
+    dev = a.device or ("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+    if dev == "cuda":
+        torch.backends.cuda.matmul.allow_tf32 = True; torch.backends.cudnn.allow_tf32 = True
+    autocast = torch.autocast("cuda", dtype=torch.bfloat16) if a.dtype == "bf16" else contextlib.nullcontext()
     manifest = json.loads((Path(a.suite) / "manifest.json").read_text()) if a.suite else None
     revision = manifest["base_revisions"][a.base] if manifest else None
     tok = load_tokenizer(a.base, revision=revision)
@@ -79,43 +86,52 @@ def main():
           f"{dict(Counter(q['qtype'] for r in reqs for q in materialize(r)['questions']))}")
 
     opt = torch.optim.AdamW(model.trainable_parameters(), lr=a.lr, weight_decay=0.01)
-    steps = a.epochs * math.ceil(len(reqs) / a.accum)
+    micro_per_epoch = math.ceil(len(reqs) / a.batch)
+    steps = a.epochs * math.ceil(micro_per_epoch / a.accum)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=a.lr, total_steps=max(steps, 1), pct_start=0.1)
     model.train(); t0 = time.time(); run = Counter(); step = 0; seen = 0
-    tokens_seen = peak_mps = 0
+    tokens_seen = peak_mem = 0
     for ep in range(a.epochs):
         rng.shuffle(reqs)
-        for i, req in enumerate(reqs):
-            item_rng = random.Random(source_seed(a.seed, f"{ep}:{req['_meta']['id']}"))
-            rec = materialize(augment(req, item_rng, p_none=a.p_none, p_none_distract=a.p_none_distract, p_distract=a.p_distract))  # fresh permutation / distractors each epoch
-            enc = encode(tok, rec, strict=True)
-            if len(enc["ids"]) > 2048:
-                raise ValueError("training request exceeds 2048 packed tokens")
-            tokens_seen += len(enc["ids"])
-            logits = model(enc)
-            loss = sum(question_loss(z, q, dev, a.ord_w) for z, q in zip(logits, rec["questions"])) / len(logits)
-            run["ce"] += loss.item()
-            if a.perm_kl > 0 and item_rng.random() < a.perm_frac and any(q["qtype"] == "choice" and len(q["options"]) >= 3 for q in rec["questions"]):
-                rec2, perms = permuted_copy(rec, item_rng)
-                logits2 = model(encode(tok, rec2, strict=True)); kl, n = 0.0, 0
-                tokens_seen += len(enc["ids"])
-                for z1, z2, perm in zip(logits, logits2, perms):
+        for mb in range(micro_per_epoch):
+            chunk = reqs[mb * a.batch : (mb + 1) * a.batch]
+            recs, encs, perm_jobs = [], [], []
+            for req in chunk:
+                item_rng = random.Random(source_seed(a.seed, f"{ep}:{req['_meta']['id']}"))
+                rec = materialize(augment(req, item_rng, p_none=a.p_none, p_none_distract=a.p_none_distract, p_distract=a.p_distract))  # fresh permutation / distractors each epoch
+                enc = encode(tok, rec, strict=True)
+                if len(enc["ids"]) > 2048:
+                    raise ValueError("training request exceeds 2048 packed tokens")
+                recs.append(rec); encs.append(enc); tokens_seen += len(enc["ids"])
+                if a.perm_kl > 0 and item_rng.random() < a.perm_frac and any(q["qtype"] == "choice" and len(q["options"]) >= 3 for q in rec["questions"]):
+                    rec2, perms = permuted_copy(rec, item_rng); perm_jobs.append((len(recs) - 1, encode(tok, rec2, strict=True), perms))
+            with autocast:
+                logits_b = model.forward_batch(encs)
+                logits2_b = model.forward_batch([e for _, e, _ in perm_jobs]) if perm_jobs else []
+            loss = 0.0
+            for logits, rec in zip(logits_b, recs):
+                ce = sum(question_loss(z.float(), q, dev, a.ord_w) for z, q in zip(logits, rec["questions"])) / len(logits)
+                run["ce"] += ce.item(); loss = loss + ce
+            for (ri, enc2, perms), logits2 in zip(perm_jobs, logits2_b):
+                kl, n = 0.0, 0; tokens_seen += len(enc2["ids"])
+                for z1, z2, perm in zip(logits_b[ri], logits2, perms):
                     if perm is None: continue
-                    lp1 = F.log_softmax(z1, -1); lp2 = F.log_softmax(z2, -1)[torch.tensor([perm.index(j) for j in range(len(perm))], device=dev)]
+                    lp1 = F.log_softmax(z1.float(), -1); lp2 = F.log_softmax(z2.float(), -1)[torch.tensor([perm.index(j) for j in range(len(perm))], device=dev)]
                     kl = kl + 0.5 * (F.kl_div(lp2, lp1, log_target=True, reduction="sum") + F.kl_div(lp1, lp2, log_target=True, reduction="sum")); n += 1
                 kl = kl / n; loss = loss + a.perm_kl * kl; run["kl"] += kl.item(); run["kl_n"] += 1
+            loss = loss / len(recs)
             if not torch.isfinite(loss):
                 raise ValueError("non-finite training loss")
-            group_size = min(a.accum, len(reqs) - (i // a.accum) * a.accum)
-            if dev == "mps":
-                peak_mps = max(peak_mps, torch.mps.current_allocated_memory())
-            (loss / group_size).backward(); run["n"] += 1; seen += 1
-            if (i + 1) % a.accum == 0 or i + 1 == len(reqs):
+            group_size = min(a.accum, micro_per_epoch - (mb // a.accum) * a.accum)
+            if dev == "mps": peak_mem = max(peak_mem, torch.mps.current_allocated_memory())
+            elif dev == "cuda": peak_mem = max(peak_mem, torch.cuda.max_memory_allocated())
+            (loss / group_size).backward(); run["n"] += len(recs); seen += len(recs)
+            if (mb + 1) % a.accum == 0 or mb + 1 == micro_per_epoch:
                 torch.nn.utils.clip_grad_norm_(model.trainable_parameters(), 1.0)
                 opt.step(); sched.step(); opt.zero_grad(); step += 1
                 if dev == "mps": torch.mps.empty_cache()
                 if step % 10 == 0:
-                    print(f"ep{ep} step {step}/{steps} loss {run['ce']/run['n']:.3f} kl {run['kl']/max(run['kl_n'],1):.3f} {(time.time()-t0)/seen:.2f}s/rec", flush=True)
+                    print(f"ep{ep} step {step}/{steps} loss {run['ce']/run['n']:.3f} kl {run['kl']/max(run['kl_n'],1):.3f} {(time.time()-t0)/seen:.3f}s/rec", flush=True)
                     run = Counter()
     os.makedirs(a.out, exist_ok=True)
     model.lm.save_pretrained(a.out)
@@ -125,7 +141,7 @@ def main():
     write_json(out_dir / "training_metrics.json", {"wall_seconds": time.time() - t0, "records_seen": seen,
                "requested_records": a.epochs * len(reqs), "truncated_records": 0, "rejected_records": 0,
                "optimizer_steps": step, "forward_tokens": tokens_seen,
-               "peak_observed_mps_bytes": peak_mps,
+               "peak_device_bytes": peak_mem, "device": dev, "dtype": a.dtype, "batch": a.batch,
                "peak_rss_bytes": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * (1 if sys.platform == "darwin" else 1024)})
     print("saved", a.out, flush=True)
 

@@ -169,3 +169,16 @@ def test_trial_config_cannot_change_evaluator_or_read_test():
     for extra in ({"test": True}, {"command": "echo x"}, {"lr": -1}, {"epochs": 2.5}):
         with pytest.raises(ValueError):
             validated_trial({"base": "model", **extra}, manifest)
+
+
+def test_batched_mask_matches_single_and_pads_are_invisible():
+    from kev.model import branch_mask, branch_mask_batch
+    a, b = [0, 0, 1, 1, 2], [0, 1, 1]
+    m = branch_mask_batch([a, b], "cpu")
+    assert m.shape == (2, 1, 5, 5)
+    assert torch.equal(m[0:1], branch_mask(a, "cpu"))
+    assert torch.equal(m[1:2, :, :3, :3], branch_mask(b, "cpu"))
+    allowed = m[1, 0] == 0
+    assert not allowed[:3, 3:].any()          # real tokens never attend to padding
+    assert allowed[3, 3] and allowed[4, 4]    # padded rows keep the diagonal, so softmax is finite
+    assert not allowed[3, 1:3].any()          # pads belong to no question segment (state stays visible; rows are discarded)

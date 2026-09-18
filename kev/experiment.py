@@ -1,3 +1,14 @@
+"""Configuration-only experiment runner.
+
+A study is a JSON plan: a list of 1..8 trials, each a dict of allowlisted training parameters plus a base model
+whose revision is pinned in the suite manifest. Every trial trains on the suite's training partition, fits a
+temperature on the calibration partition, and is scored on the development partition. The locked test is never
+read here.
+
+Two execution modes share one code path:
+  local  : trials run sequentially on this machine (one GPU job at a time); `--wait-pid` queues behind a run.
+  modal  : `modal_app.py` runs `execute_trial` once per container and `--aggregate` ranks the results afterwards.
+"""
 import argparse
 import copy
 import fcntl
@@ -13,20 +24,21 @@ from pathlib import Path
 
 import torch
 
-from kev.benchmark import LocalPredictor, evaluate_records, fit_temperature, paired_bootstrap
+from kev.benchmark import LocalPredictor, default_device, evaluate_records, fit_temperature, paired_bootstrap
 from kev.suite import digest, load_split, record_digest, write_json
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULTS = {"epochs": 1, "seed": 0, "lr": 0.0002, "lora": 16, "accum": 8,
+DEFAULTS = {"epochs": 1, "seed": 0, "lr": 0.0002, "lora": 16, "accum": 8, "batch": 1,
             "perm_kl": 0.0, "perm_frac": 0.3, "ord_w": 0.0,
             "p_none": 0.1, "p_none_distract": 0.12, "p_distract": 0.15}
-RANGES = {"epochs": (1, 5), "seed": (0, 10000), "lr": (1e-6, 0.001), "lora": (1, 64), "accum": (1, 64),
+RANGES = {"epochs": (1, 5), "seed": (0, 10000), "lr": (1e-6, 0.001), "lora": (1, 64), "accum": (1, 64), "batch": (1, 64),
           "perm_kl": (0, 2), "perm_frac": (0, 1), "ord_w": (0, 2),
           "p_none": (0, 0.4), "p_none_distract": (0, 0.4), "p_distract": (0, 0.4)}
+CHOICES = {"dtype": ("fp32", "bf16")}
 
 
 def validated_trial(value, manifest):
-    if not isinstance(value, dict) or set(value) - (DEFAULTS.keys() | {"base"}):
+    if not isinstance(value, dict) or set(value) - (DEFAULTS.keys() | CHOICES.keys() | {"base"}):
         raise ValueError("trial may change only the allowlisted training parameters and base")
     result = {**DEFAULTS, **value}
     if result.get("base") not in manifest["base_revisions"]:
@@ -37,6 +49,9 @@ def validated_trial(value, manifest):
             raise ValueError(f"invalid {key}")
         if isinstance(DEFAULTS[key], int) and not isinstance(v, int):
             raise ValueError(f"{key} must be an integer")
+    for key, allowed in CHOICES.items():
+        if key in result and result[key] not in allowed:
+            raise ValueError(f"invalid {key}")
     if sum(result[k] for k in ("p_none", "p_none_distract", "p_distract")) > 1:
         raise ValueError("augmentation probabilities sum to more than one")
     return result
@@ -44,6 +59,22 @@ def validated_trial(value, manifest):
 
 def source_hashes():
     return {str(path.relative_to(ROOT)): digest(path) for path in sorted((ROOT / "kev").glob("*.py"))}
+
+
+def git_commit():
+    """Commit hash from the environment inside containers (no .git there), else from the working tree."""
+    if os.environ.get("KEV_GIT_COMMIT"):
+        return os.environ["KEV_GIT_COMMIT"]
+    try:
+        return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True, stderr=subprocess.DEVNULL).strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return "unknown"
+
+
+def free_device_memory(device):
+    gc.collect()
+    if device == "mps": torch.mps.empty_cache()
+    elif device == "cuda": torch.cuda.empty_cache()
 
 
 @contextmanager
@@ -87,14 +118,17 @@ def gate_report(report, checks, baseline=None):
     return {"passed": all(gates.values()), "checks": gates, "policy": "Correctness gate at 1e-3; provisional 5pp regression guardrails, not a statistical significance claim."}
 
 
-def execute_trial(config, suite, output, expected_sources, device, existing=None, baseline=None):
+def execute_trial(config, suite, output, expected_sources, device, existing=None):
+    """Train (unless `existing` points at a checkpoint), calibrate, score development, run mechanism checks.
+    Writes result.json (without cross-trial comparisons) and returns (report, rows). Safe to run in isolation."""
     output = Path(output)
     output.mkdir(parents=True, exist_ok=False)
     started = time.perf_counter()
     suite_hash = digest(Path(suite) / "manifest.json")
     provenance = {"config": config, "config_sha256": record_digest(config), "suite_sha256": suite_hash,
-                  "source_hashes": expected_sources, "git_commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
+                  "source_hashes": expected_sources, "git_commit": git_commit(),
                   "platform": platform.platform(), "torch": torch.__version__, "device": device,
+                  "gpu": torch.cuda.get_device_name(0) if device == "cuda" else None,
                   "legacy_checkpoint": existing is not None}
     write_json(output / "provenance.json", provenance)
     if source_hashes() != expected_sources:
@@ -118,41 +152,78 @@ def execute_trial(config, suite, output, expected_sources, device, existing=None
         checks = mechanism_checks(records, predictor)
     finally:
         del predictor
-        gc.collect()
-        if device == "mps":
-            torch.mps.empty_cache()
+        free_device_memory(device)
     if source_hashes() != expected_sources or digest(Path(suite) / "manifest.json") != suite_hash:
         raise ValueError("source or suite changed during the trial; result cannot be ranked")
-    report.update(provenance=provenance, mechanism_checks=checks,
-                  gates=gate_report(report, checks, baseline), wall_seconds=time.perf_counter() - started,
-                  promotable=not existing, test_evaluated=False)
+    report.update(provenance=provenance, mechanism_checks=checks, gates=gate_report(report, checks),
+                  wall_seconds=time.perf_counter() - started, promotable=False, test_evaluated=False)
     if not existing:
         report["training_resources"] = json.loads((Path(run) / "training_metrics.json").read_text())
-    if baseline:
-        report["paired_comparison"] = paired_bootstrap(rows, baseline["rows"])
-        report["promotable"] = report["gates"]["passed"] and report["paired_comparison"]["ci95"][1] < 0
     write_json(output / "result.json", report)
     return report, rows
 
 
+def compare_to_baseline(report, rows, baseline):
+    """Add gates and a record-clustered paired bootstrap against the study's baseline trial."""
+    report["gates"] = gate_report(report, report["mechanism_checks"], baseline)
+    report["paired_comparison"] = paired_bootstrap(rows, baseline["rows"])
+    report["promotable"] = report["gates"]["passed"] and report["paired_comparison"]["ci95"][1] < 0
+    return report
+
+
+def ledger_row(label, report, config, legacy, path):
+    return {"id": label, "status": "complete", "path": str(path), "objective": report["objective"],
+            "clean": report["clean"], "gates": report["gates"], "promotable": report["promotable"],
+            "paired_ci95": report.get("paired_comparison", {}).get("ci95"), "config": config, "legacy": legacy}
+
+
+def aggregate(study_dir):
+    """Rank completed trial directories in a study: the first non-legacy trial is the baseline for the rest."""
+    study_dir = Path(study_dir)
+    trials = sorted(p for p in study_dir.iterdir() if (p / "result.json").exists())
+    baseline = None
+    with (study_dir / "results.jsonl").open("w") as ledger:
+        for directory in trials:
+            report = json.loads((directory / "result.json").read_text())
+            rows = json.loads((directory / "development/rows.json").read_text())
+            legacy = report["provenance"]["legacy_checkpoint"]
+            if baseline is not None and not legacy:
+                report = compare_to_baseline(report, rows, baseline)
+                write_json(directory / "result.json", report)
+            elif baseline is None and not legacy:
+                baseline = {**copy.deepcopy(report), "rows": rows}
+            row = ledger_row(directory.name, report, report["provenance"]["config"], legacy, directory)
+            ledger.write(json.dumps(row, allow_nan=False) + "\n")
+            print(json.dumps({k: row[k] for k in ("id", "objective", "paired_ci95", "promotable")}), flush=True)
+
+
+def load_plan(suite, plan_path):
+    manifest = json.loads((Path(suite) / "manifest.json").read_text())
+    for split in ("train", "calibration", "development"):
+        load_split(suite, split)
+    plan = json.loads(Path(plan_path).read_text())
+    if not isinstance(plan, list) or not 1 <= len(plan) <= 8:
+        raise ValueError("plan must contain 1..8 bounded trials")
+    return [validated_trial(t, manifest) for t in plan]
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--suite", required=True)
-    ap.add_argument("--plan", required=True)
+    ap.add_argument("--suite")
+    ap.add_argument("--plan")
     ap.add_argument("--out", required=True)
     ap.add_argument("--existing", nargs="*", default=[])
     ap.add_argument("--wait-pid", type=int)
-    ap.add_argument("--device", choices=["cpu", "mps"], default="mps" if torch.backends.mps.is_available() else "cpu")
+    ap.add_argument("--device", choices=["cpu", "mps", "cuda"], default=default_device())
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--aggregate", action="store_true", help="rank an existing study directory (e.g. after Modal trials)")
     a = ap.parse_args()
+    if a.aggregate:
+        aggregate(a.out); return
+    if not a.plan or not a.suite:
+        ap.error("--suite and --plan are required unless --aggregate")
     suite = Path(a.suite).resolve()
-    manifest = json.loads((suite / "manifest.json").read_text())
-    for split in ("train", "calibration", "development"):
-        load_split(suite, split)
-    plan = json.loads(Path(a.plan).read_text())
-    if not isinstance(plan, list) or not 1 <= len(plan) <= 8:
-        ap.error("plan must contain 1..8 bounded trials")
-    trials = [validated_trial(t, manifest) for t in plan]
+    trials = load_plan(suite, a.plan)
     if a.dry_run:
         print(json.dumps({"trials": trials, "existing": a.existing, "suite_sha256": digest(suite / "manifest.json"), "locked_test": "not read"}, indent=2))
         return
@@ -168,27 +239,17 @@ def main():
                 time.sleep(10)
         output = Path(a.out).resolve()
         output.mkdir(parents=True, exist_ok=False)
-        baseline = None
         entries = [(None, p) for p in a.existing] + [(t, None) for t in trials]
-        with (output / "results.jsonl").open("w") as ledger:
-            for i, (config, existing) in enumerate(entries):
-                label = Path(existing).name if existing else f"trial-{i}"
-                print(f"Starting {label}", flush=True)
-                directory = output / f"{i:02d}-{label}"
-                try:
-                    report, rows = execute_trial(config or {}, suite, directory, expected_sources, a.device, existing, baseline)
-                    row = {"id": label, "status": "complete", "path": str(directory), "objective": report["objective"],
-                           "clean": report["clean"], "gates": report["gates"], "promotable": report["promotable"],
-                           "config": config, "legacy": existing is not None}
-                    if existing is None and baseline is None:
-                        baseline = {**copy.deepcopy(report), "rows": rows}
-                except Exception as error:
-                    row = {"id": label, "status": "failed", "error": str(error), "path": str(directory)}
-                    ledger.write(json.dumps(row) + "\n"); ledger.flush()
-                    print(json.dumps(row), flush=True)
-                    raise
-                ledger.write(json.dumps(row, allow_nan=False) + "\n"); ledger.flush()
-                print(json.dumps(row, allow_nan=False), flush=True)
+        for i, (config, existing) in enumerate(entries):
+            label = Path(existing).name if existing else f"trial-{i}"
+            print(f"Starting {label}", flush=True)
+            try:
+                execute_trial(config or {}, suite, output / f"{i:02d}-{label}", expected_sources, a.device, existing)
+            except Exception as error:
+                with (output / "results.jsonl").open("a") as ledger:
+                    ledger.write(json.dumps({"id": label, "status": "failed", "error": str(error)}) + "\n")
+                raise
+        aggregate(output)
 
 
 if __name__ == "__main__":

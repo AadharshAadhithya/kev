@@ -54,12 +54,24 @@ def encode(tok, rec, max_state=MAX_STATE, max_branch=MAX_BRANCH, strict=False):
 
 def branch_mask(seg, device, dtype=torch.float32):
     """attend(i,j) iff j<=i and (seg[j]==0 or seg[j]==seg[i]). Returns additive [1,1,L,L]."""
-    s = torch.tensor(seg, device=device)
-    L = len(seg)
+    return branch_mask_batch([seg], device, dtype)
+
+
+def branch_mask_batch(segs, device, dtype=torch.float32):
+    """Batched block-causal mask, additive [B,1,L,L], right-padded to the longest sequence.
+
+    Padded key positions are masked for every query; padded query rows keep the diagonal so no row is fully
+    masked (finfo.min, not -inf, so softmax stays finite either way). Real tokens never see pads because pads sit
+    after them (causal) and belong to no segment (-1)."""
+    L = max(len(s) for s in segs)
+    s = torch.full((len(segs), L), -1, device=device)
+    for b, seg in enumerate(segs):
+        s[b, : len(seg)] = torch.tensor(seg, device=device)
     causal = torch.tril(torch.ones(L, L, dtype=torch.bool, device=device))
-    same = (s[None, :] == s[:, None]) | (s[None, :] == 0)
-    allow = causal & same
-    return torch.zeros(L, L, dtype=dtype, device=device).masked_fill(~allow, torch.finfo(dtype).min)[None, None]
+    same = (s[:, None, :] == s[:, :, None]) | (s[:, None, :] == 0)
+    valid_key = (s != -1)[:, None, :]
+    allow = (causal[None] & same & valid_key) | torch.eye(L, dtype=torch.bool, device=device)[None]
+    return torch.zeros(len(segs), L, L, dtype=dtype, device=device).masked_fill(~allow, torch.finfo(dtype).min)[:, None]
 
 
 class PointerHead(nn.Module):
@@ -73,10 +85,13 @@ class PointerHead(nn.Module):
 
 
 class DecisionModel(nn.Module):
-    def __init__(self, name, tok, device, lora=None, revision=None):
+    def __init__(self, name, tok, device, lora=None, revision=None, attn=None):
         super().__init__()
-        # backbone only (no vocab head): we never generate text
-        self.lm = AutoModelForCausalLM.from_pretrained(name, revision=revision, dtype=torch.float32, attn_implementation="eager").model
+        # backbone only (no vocab head): we never generate text.
+        # eager on MPS/CPU (known-good with our float 4D mask); SDPA on CUDA (accepts arbitrary additive masks).
+        attn = attn or ("sdpa" if str(device).startswith("cuda") else "eager")
+        self.lm = AutoModelForCausalLM.from_pretrained(name, revision=revision, dtype=torch.float32, attn_implementation=attn).model
+        self.pad_id = tok.pad_token_id if tok.pad_token_id is not None else 0
         if lora:
             from peft import LoraConfig, get_peft_model
             cfg = LoraConfig(task_type="FEATURE_EXTRACTION", r=lora, lora_alpha=2 * lora, lora_dropout=0.05, target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"])
@@ -86,15 +101,30 @@ class DecisionModel(nn.Module):
         self.to(device)
 
     def hidden(self, enc):
-        ids = torch.tensor([enc["ids"]], device=self.device)
-        pos = torch.tensor([enc["pos"]], device=self.device)
-        mask = branch_mask(enc["seg"], self.device)
-        return self.lm(input_ids=ids, position_ids=pos, attention_mask=mask).last_hidden_state[0]
+        return self.hidden_batch([enc])[0, : len(enc["ids"])]
+
+    def hidden_batch(self, encs):
+        """[B, L_max, d] hidden states for a right-padded batch of encoded records."""
+        L = max(len(e["ids"]) for e in encs)
+        ids = torch.full((len(encs), L), self.pad_id, device=self.device)
+        pos = torch.zeros((len(encs), L), dtype=torch.long, device=self.device)
+        for b, e in enumerate(encs):
+            ids[b, : len(e["ids"])] = torch.tensor(e["ids"], device=self.device)
+            pos[b, : len(e["pos"])] = torch.tensor(e["pos"], device=self.device)
+        mask = branch_mask_batch([e["seg"] for e in encs], self.device)
+        return self.lm(input_ids=ids, position_ids=pos, attention_mask=mask).last_hidden_state
+
+    def _readout(self, h, enc):
+        return [self.head(h[d], h[torch.tensor(oi, device=self.device)]) for d, oi in zip(enc["decide_idx"], enc["opt_idx"])]
 
     def forward(self, enc):
         """Returns list of logits tensors, one per question."""
-        h = self.hidden(enc)
-        return [self.head(h[d], h[torch.tensor(oi, device=self.device)]) for d, oi in zip(enc["decide_idx"], enc["opt_idx"])]
+        return self._readout(self.hidden(enc), enc)
+
+    def forward_batch(self, encs):
+        """List (per record) of lists (per question) of logits, from one padded forward pass."""
+        hs = self.hidden_batch(encs)
+        return [self._readout(hs[b], e) for b, e in enumerate(encs)]
 
     @torch.no_grad()
     def probs(self, enc):

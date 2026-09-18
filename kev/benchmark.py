@@ -58,7 +58,8 @@ def prediction_rows(record, prediction):
         row = {"id": meta["id"], "group": meta["group_id"], "question": qid,
                "source": meta["source"], "task": q["src"], "type": q["type"],
                "variant": meta["variant"], "keys": keys, "label": y,
-               "pair_id": meta.get("pair_id"), "sibling": meta.get("sibling"),
+               "pair_id": meta.get("pair_id"), "sibling": meta.get("sibling"), # suites frozen before parent_id existed stored the parent's id in group_id for variants
+               "parent": meta.get("parent_id") or (meta["id"] if meta["variant"] == "clean" else meta["group_id"]),
                "p": p.tolist(), "raw_probability_sum": total, "zero_count": int((p == 0).sum())}
         rows.append(row)
     return rows
@@ -135,11 +136,11 @@ def summarize(rows, temperature=1.0, heldout_sources=("mnli", "sst5")):
     clean = [r for r in rows if r["variant"] == "clean"]
     tasks = grouped_metrics(clean, "task")
     variants = grouped_metrics(rows, "variant")
-    lookup = {(r["group"], r["question"]): r for r in clean}
+    lookup = {(r["id"], r["question"]): r for r in clean}
     diffs, flips = [], []
     for row in rows:
         if row["variant"] == "permuted" and row["type"] == "choice":
-            original = lookup[(row["group"], row["question"])]
+            original = lookup[(row["parent"], row["question"])]
             aligned = [row["p"][row["keys"].index(k)] for k in original["keys"]]
             diffs.append(float(np.max(np.abs(np.array(aligned) - original["p"]))))
             flips.append(int(np.argmax(aligned) != np.argmax(original["p"])))

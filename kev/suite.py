@@ -47,7 +47,8 @@ def load_split(directory, split, allow_test=False):
 
 def case_copy(record, variant):
     result = copy.deepcopy(record)
-    result["_meta"]["group_id"] = record["_meta"]["id"]
+    result["_meta"]["group_id"] = record["_meta"].get("group_id", record["_meta"]["id"])   # bootstrap unit (pair for contrastive)
+    result["_meta"]["parent_id"] = record["_meta"]["id"]                                   # the clean record this variant perturbs
     result["_meta"]["id"] += "/" + variant
     result["_meta"]["variant"] = variant
     return result

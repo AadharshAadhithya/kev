@@ -231,3 +231,18 @@ def test_contrastive_pairs_are_checked_and_labelled_by_code():
     assert paired_flip(rows) == {"pairs": 4, "flip_rate": 1.0, "both_correct_rate": 1.0}
     constant = [{**r, "p": [1.0] + [0.0] * (len(r["keys"]) - 1)} for r in rows]
     assert paired_flip(constant)["flip_rate"] == 0.0
+
+
+def test_permuted_variants_pair_with_their_parent_not_their_group():
+    from kev.benchmark import prediction_rows, summarize
+    from kev.suite import contrast_cases
+    rows = []
+    for i in range(2):
+        r = frozen_request(i); r["_meta"]["group_id"] = "shared-pair"     # siblings share a bootstrap group
+        variants = contrast_cases(r)
+        for rec in [r] + variants:
+            rec["_meta"].setdefault("group_id", "shared-pair")
+            keys = list(rec["questions"]["reason"]["criteria"])
+            rows += prediction_rows(rec, {"probabilities": {"reason": {k: (0.7 if k == rec["questions"]["reason"]["label"] else 0.3 / (len(keys) - 1)) for k in keys}}})
+    report = summarize(rows)
+    assert report["permutation"]["n"] == 2 and report["permutation"]["flip_rate"] == 0.0

@@ -97,6 +97,30 @@ def test_iia(tok, model, reqs, rng):
     return {"n": len(s), "mean_abs_logodds_shift": float(np.abs(s).mean()), "mean_shift": float(s.mean()), "p90_abs_shift": float(np.percentile(np.abs(s), 90))}
 
 
+def test_none_of_the_above(tok, model, reqs, rng):
+    """Add a 'none of the above' option. When the true option is still present it should get little mass;
+    when the true option is removed it should be chosen. A shortcut model picks it in both cases."""
+    from .data import NONE_OPTIONS
+    p_present, hit_present, hit_absent, n = [], 0, 0, 0
+    for r in reqs:
+        for qid, q in r["questions"].items():
+            if q["type"] != "choice" or len(q["criteria"]) < 3: continue
+            nk, nd = rng.choice(NONE_OPTIONS)
+            if nk in q["criteria"]: continue
+            try:
+                present = {**q, "criteria": {**q["criteria"], nk: nd}}
+                _, ps = _probs(tok, model, {"state": r["state"], "questions": {qid: present}})
+                keys = list(present["criteria"]); p = ps[0].numpy()
+                p_present.append(float(p[keys.index(nk)])); hit_present += int(keys[int(p.argmax())] == q["label"])
+                absent = {**q, "criteria": {k: v for k, v in present["criteria"].items() if k != q["label"]}}
+                _, ps = _probs(tok, model, {"state": r["state"], "questions": {qid: absent}})
+                keys = list(absent["criteria"]); p = ps[0].numpy()
+                hit_absent += int(keys[int(p.argmax())] == nk); n += 1
+            except ValueError: continue
+    return {"n": n, "true_option_present": {"mean_p_none": float(np.mean(p_present)), "p_none_over_0.5_rate": float(np.mean(np.array(p_present) > 0.5)), "acc": hit_present / max(n, 1)},
+            "true_option_removed": {"picks_none_rate": hit_absent / max(n, 1)}}
+
+
 def test_isolation(tok, model, rng, n=20):
     """Secret code in sibling question vs in state. Probe asks which code was mentioned."""
     res = {"sibling": [], "state": [], "absent": []}
@@ -196,6 +220,7 @@ def main():
                      ("temperature_scaling", lambda: test_temperature(tok, model, reqs, random.Random(a.seed))),
                      ("permutation", lambda: test_permutation(tok, model, reqs[:150], rng)),
                      ("iia", lambda: test_iia(tok, model, reqs[:250], rng)),
+                     ("none_of_the_above", lambda: test_none_of_the_above(tok, model, reqs[:200], rng)),
                      ("isolation", lambda: test_isolation(tok, model, rng)),
                      ("packed_vs_separate", lambda: test_packed_vs_separate(tok, model, reqs, rng))]:
         t = time.time(); out[name] = fn(); print(f"== {name} ({time.time()-t:.0f}s)\n{json.dumps(out[name], indent=1)}", flush=True)

@@ -10,6 +10,10 @@ from datasets import load_dataset
 from .api import SystemOneRequest, to_record
 
 NONE = "None of the above"
+# "None of the above" options must appear both as the correct answer and as a wrong alternative, with varied
+# wording, or the model learns "this wording => pick it" (it did, in the first training run).
+NONE_OPTIONS = [("other", "None of the above"), ("other", "A reason that fits none of the above"), ("none", "None of these"),
+                ("other", "Something else"), ("not_listed", "Not listed here"), ("none_of_the_above", None)]
 DISTRACTORS = {"weather": "Bad weather caused it", "purple": "The colour purple", "pancakes": "A recipe for pancakes", "taxes": "Unrelated: quarterly tax filing"}
 
 AG = {"world": "World news: politics, international affairs, conflicts", "sports": "Sports: games, athletes, teams, results",
@@ -114,16 +118,20 @@ def build(n_per_source, split="train", seed=0, exclude=(), only=()):
     return reqs
 
 
-def augment(req, rng, p_none=0.1, p_distract=0.15):
-    """Choice only: permute option order (always); sometimes swap in 'other: none of the above' or an irrelevant distractor."""
+def augment(req, rng, p_none=0.1, p_none_distract=0.12, p_distract=0.15):
+    """Choice only: permute option order (always); sometimes add a 'none of the above' option, either as the correct
+    answer (true option removed) or as a wrong alternative (true option kept); sometimes add an irrelevant distractor."""
     out = {"state": req["state"], "questions": {}}
     for qid, q in req["questions"].items():
         if q["type"] != "choice":
             out["questions"][qid] = q; continue
         crit, y = dict(q["criteria"]), q["label"]
-        if len(crit) > 2 and rng.random() < p_none:
-            crit.pop(y); crit["other"] = NONE; y = "other"
-        elif rng.random() < p_distract:
+        r = rng.random()
+        if len(crit) > 2 and r < p_none:
+            nk, nd = rng.choice(NONE_OPTIONS); crit.pop(y); crit[nk] = nd; y = nk
+        elif r < p_none + p_none_distract:
+            nk, nd = rng.choice(NONE_OPTIONS); crit.setdefault(nk, nd)
+        elif r < p_none + p_none_distract + p_distract:
             k = rng.choice(list(DISTRACTORS)); crit[k] = DISTRACTORS[k]
         keys = list(crit); rng.shuffle(keys)
         out["questions"][qid] = {**q, "criteria": {k: crit[k] for k in keys}, "label": y}

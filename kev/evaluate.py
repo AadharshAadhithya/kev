@@ -35,8 +35,8 @@ def resolve_run(run):
 def load(run, dev):
     run = resolve_run(run)
     meta = torch.load(f"{run}/head.pt", map_location="cpu")
-    tok = load_tokenizer(meta["base"])
-    m = DecisionModel(meta["base"], tok, dev, lora=None)
+    tok = load_tokenizer(meta["base"], revision=meta.get("base_revision"))
+    m = DecisionModel(meta["base"], tok, dev, lora=None, revision=meta.get("base_revision"))
     from peft import PeftModel
     m.lm = PeftModel.from_pretrained(m.lm, run).to(dev)
     m.head.load_state_dict(meta["head"]); m.eval()
@@ -45,7 +45,7 @@ def load(run, dev):
 
 def _probs(tok, model, req):
     rec = materialize(req)
-    return rec, model.probs(encode(tok, rec))
+    return rec, model.probs(encode(tok, rec, strict=True))
 
 
 def _one(req, qid):
@@ -55,8 +55,8 @@ def _one(req, qid):
 def test_accuracy(tok, model, reqs, rng):
     by = defaultdict(lambda: {"conf": [], "ok": [], "nll": [], "mae": []})
     for r in reqs:
-        try: rec, ps = _probs(tok, model, augment(r, rng, p_none=0, p_distract=0))
-        except ValueError: continue
+        try: rec, ps = _probs(tok, model, augment(r, rng, p_none=0, p_none_distract=0, p_distract=0))
+        except ValueError as exc: raise ValueError("Evaluation rejected an example; refusing partial metrics") from exc
         for q, p in zip(rec["questions"], ps):
             p = p.numpy(); y = q["label"]; d = by[q["src"]]
             d["conf"].append(float(p.max())); d["ok"].append(int(p.argmax() == y)); d["nll"].append(-math.log(max(p[y], 1e-9)))
@@ -80,7 +80,7 @@ def test_permutation(tok, model, reqs, rng, n_perm=4):
                 keys = list(q["criteria"]); rng.shuffle(keys)
                 q2 = {**q, "criteria": {k: q["criteria"][k] for k in keys}}
                 try: _, ps = _probs(tok, model, {"state": r["state"], "questions": {qid: q2}})
-                except ValueError: break
+                except ValueError as exc: raise ValueError("Permutation evaluation rejected an example") from exc
                 p = ps[0].numpy(); argmaxes.append(keys[int(p.argmax())]); pcorrect.append(float(p[keys.index(q["label"])]))
             if len(pcorrect) == n_perm:
                 n += 1; flips += int(len(set(argmaxes)) > 1); spreads.append(max(pcorrect) - min(pcorrect))
@@ -97,7 +97,7 @@ def test_iia(tok, model, reqs, rng):
                 _, ps0 = _probs(tok, model, {"state": r["state"], "questions": {qid: q}})
                 k = rng.choice(list(DISTRACTORS))
                 _, ps1 = _probs(tok, model, {"state": r["state"], "questions": {qid: {**q, "criteria": {**q["criteria"], k: DISTRACTORS[k]}}}})
-            except ValueError: continue
+            except ValueError as exc: raise ValueError("Evaluation rejected an example; refusing partial metrics") from exc
             p0, p1 = ps0[0].numpy(), ps1[0].numpy()
             a, b = np.argsort(-p0)[:2]
             shifts.append(math.log(max(p1[a], 1e-6) / max(p1[b], 1e-6)) - math.log(max(p0[a], 1e-6) / max(p0[b], 1e-6)))
@@ -119,12 +119,14 @@ def test_none_of_the_above(tok, model, reqs, rng):
                 present = {**q, "criteria": {**q["criteria"], nk: nd}}
                 _, ps = _probs(tok, model, {"state": r["state"], "questions": {qid: present}})
                 keys = list(present["criteria"]); p = ps[0].numpy()
-                p_present.append(float(p[keys.index(nk)])); hit_present += int(keys[int(p.argmax())] == q["label"])
-                absent = {**q, "criteria": {k: v for k, v in present["criteria"].items() if k != q["label"]}}
+                none_probability = float(p[keys.index(nk)])
+                present_correct = int(keys[int(p.argmax())] == q["label"])
+                absent = {**q, "label": nk, "criteria": {k: v for k, v in present["criteria"].items() if k != q["label"]}}
                 _, ps = _probs(tok, model, {"state": r["state"], "questions": {qid: absent}})
                 keys = list(absent["criteria"]); p = ps[0].numpy()
+                p_present.append(none_probability); hit_present += present_correct
                 hit_absent += int(keys[int(p.argmax())] == nk); n += 1
-            except ValueError: continue
+            except ValueError as exc: raise ValueError("Evaluation rejected an example; refusing partial metrics") from exc
     return {"n": n, "true_option_present": {"mean_p_none": float(np.mean(p_present)), "p_none_over_0.5_rate": float(np.mean(np.array(p_present) > 0.5)), "acc": hit_present / max(n, 1)},
             "true_option_removed": {"picks_none_rate": hit_absent / max(n, 1)}}
 
@@ -169,7 +171,7 @@ def baseline_letter_logits(base, reqs, dev, rng, chat=False):
     by = defaultdict(lambda: {"conf": [], "ok": []})
     with torch.no_grad():
         for r in reqs:
-            rec = materialize(augment(r, rng, p_none=0, p_distract=0))
+            rec = materialize(augment(r, rng, p_none=0, p_none_distract=0, p_distract=0))
             for q in rec["questions"]:
                 K = len(q["options"])
                 if K > 8: continue
@@ -190,8 +192,8 @@ def test_temperature(tok, model, reqs, rng):
     fit, held = [], []
     with torch.no_grad():
         for i, r in enumerate(reqs):
-            try: rec = materialize(augment(r, rng, p_none=0, p_distract=0)); zs = model(encode(tok, rec))
-            except ValueError: continue
+            try: rec = materialize(augment(r, rng, p_none=0, p_none_distract=0, p_distract=0)); zs = model(encode(tok, rec))
+            except ValueError as exc: raise ValueError("Evaluation rejected an example; refusing partial metrics") from exc
             for z, q in zip(zs, rec["questions"]):
                 (fit if i % 2 == 0 else held).append((z.cpu(), q["label"]))
     logT = torch.zeros(1, requires_grad=True); opt = torch.optim.LBFGS([logT], lr=0.1, max_iter=50)

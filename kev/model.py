@@ -11,8 +11,8 @@ SPECIAL = ["<|fim_prefix|>", "<|fim_middle|>", "<|box_start|>", "<|box_end|>", "
 MAX_STATE, MAX_BRANCH = 384, 1024
 
 
-def load_tokenizer(name):
-    return AutoTokenizer.from_pretrained(name)
+def load_tokenizer(name, revision=None):
+    return AutoTokenizer.from_pretrained(name, revision=revision)
 
 
 _SPECIAL_RE = re.compile(r"<\|([A-Za-z0-9_]+)\|>")
@@ -24,13 +24,16 @@ def user_tokens(tok, text):
     return tok(_SPECIAL_RE.sub(r"<¦\1¦>", text), add_special_tokens=False).input_ids
 
 
-def encode(tok, rec, max_state=MAX_STATE, max_branch=MAX_BRANCH):
+def encode(tok, rec, max_state=MAX_STATE, max_branch=MAX_BRANCH, strict=False):
     """Pack one record: [<state> ...] then per-question [<q> instr <opt> o </opt>... <decide>].
 
     Returns ids, seg (0 = state, k = question k), pos (branch positions restart after state),
     decide_idx [Q], opt_idx [Q][K] (index of </opt> token for each option).
     """
-    S = [tok.convert_tokens_to_ids(SPECIAL[0])] + user_tokens(tok, rec["state"])[: max_state - 1]
+    state_tokens = user_tokens(tok, rec["state"])
+    if strict and len(state_tokens) + 1 > max_state:
+        raise ValueError(f"state exceeds {max_state} tokens: {len(state_tokens) + 1}")
+    S = [tok.convert_tokens_to_ids(SPECIAL[0])] + state_tokens[: max_state - 1]
     ids, seg, pos = list(S), [0] * len(S), list(range(len(S)))
     q_id, o_id, c_id, d_id = (tok.convert_tokens_to_ids(t) for t in SPECIAL[1:])
     decide_idx, opt_idx = [], []
@@ -46,7 +49,7 @@ def encode(tok, rec, max_state=MAX_STATE, max_branch=MAX_BRANCH):
         base = len(ids)
         ids += br; seg += [k] * len(br); pos += list(range(len(S), len(S) + len(br)))
         decide_idx.append(base + len(br) - 1); opt_idx.append([base + i for i in oi])
-    return {"ids": ids, "seg": seg, "pos": pos, "decide_idx": decide_idx, "opt_idx": opt_idx, "labels": [q["label"] for q in rec["questions"]]}
+    return {"ids": ids, "seg": seg, "pos": pos, "decide_idx": decide_idx, "opt_idx": opt_idx, "labels": [q["label"] for q in rec["questions"]], "state_truncated": len(state_tokens) + 1 > max_state}
 
 
 def branch_mask(seg, device, dtype=torch.float32):
@@ -70,10 +73,10 @@ class PointerHead(nn.Module):
 
 
 class DecisionModel(nn.Module):
-    def __init__(self, name, tok, device, lora=None):
+    def __init__(self, name, tok, device, lora=None, revision=None):
         super().__init__()
         # backbone only (no vocab head): we never generate text
-        self.lm = AutoModelForCausalLM.from_pretrained(name, dtype=torch.float32, attn_implementation="eager").model
+        self.lm = AutoModelForCausalLM.from_pretrained(name, revision=revision, dtype=torch.float32, attn_implementation="eager").model
         if lora:
             from peft import LoraConfig, get_peft_model
             cfg = LoraConfig(task_type="FEATURE_EXTRACTION", r=lora, lora_alpha=2 * lora, lora_dropout=0.05, target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"])

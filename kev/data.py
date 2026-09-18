@@ -5,9 +5,23 @@ A "labelled request" is {"state": JSONContent, "questions": {id: {type, instruct
   label: choice -> option key, noul -> bool, score -> level index.
 materialize() -> internal record {"state": str, "questions": [{"instr", "options", "label": int, "src"}]}
 """
+import hashlib
+import json
 import random
 from datasets import load_dataset
 from .api import SystemOneRequest, to_record
+
+
+REPOS = {"banking77": "legacy-datasets/banking77", "boolq": "google/boolq", "agnews": "fancyzhx/ag_news",
+         "mnli": "nyu-mll/multi_nli", "sst5": "SetFit/sst5", "yelp": "Yelp/yelp_review_full"}
+
+
+def source_seed(seed, source):
+    return int.from_bytes(hashlib.sha256(f"{seed}:{source}".encode()).digest()[:8], "big")
+
+
+def _dataset(repo, split, rng):
+    return load_dataset(repo, split=split, revision=getattr(rng, "revision", None))
 
 NONE = "None of the above"
 # "None of the above" options must appear both as the correct answer and as a wrong alternative, with varied
@@ -44,11 +58,22 @@ def _desc(desc, rng, p_null=0.3, p_struct=0.1):
 
 
 def _sample(ds, n, rng):
-    return [ds[i] for i in rng.sample(range(len(ds)), min(n, len(ds)))]
+    rows = []
+    rng.origins = []
+    for i in rng.sample(range(len(ds)), min(n, len(ds))):
+        row = ds[i]
+        if row.get("label", 0) == -1:
+            continue
+        text = row.get("text", row.get("premise", row.get("passage", json.dumps(row, sort_keys=True))))
+        normalized = " ".join(text.casefold().split())
+        rng.origins.append({"row": i, "text_sha256": hashlib.sha256(normalized.encode()).hexdigest(),
+                            "row_sha256": hashlib.sha256(json.dumps(row, sort_keys=True).encode()).hexdigest()})
+        rows.append(row)
+    return rows
 
 
 def _banking(split, n, rng):
-    ds = load_dataset("legacy-datasets/banking77", split=split)
+    ds = _dataset("legacy-datasets/banking77", split=split, rng=rng)
     names = ds.features["label"].names
     out = []
     for ex in _sample(ds, n, rng):
@@ -59,7 +84,7 @@ def _banking(split, n, rng):
 
 
 def _boolq(split, n, rng):
-    ds = load_dataset("google/boolq", split=split)
+    ds = _dataset("google/boolq", split=split, rng=rng)
     out = []
     for ex in _sample(ds, n, rng):
         q = {"type": "noul", "instructions": _instr(ex["question"].strip().rstrip("?") + "?", rng), "label": bool(ex["answer"]), "src": "boolq"}
@@ -69,7 +94,7 @@ def _boolq(split, n, rng):
 
 
 def _agnews(split, n, rng):
-    ds = load_dataset("fancyzhx/ag_news", split=split)
+    ds = _dataset("fancyzhx/ag_news", split=split, rng=rng)
     keys = list(AG)
     out = []
     for ex in _sample(ds, n, rng):
@@ -82,19 +107,19 @@ def _agnews(split, n, rng):
 
 
 def _mnli(split, n, rng):
-    ds = load_dataset("nyu-mll/multi_nli", split=split)
+    ds = _dataset("nyu-mll/multi_nli", split=split, rng=rng)
     keys = list(MNLI)
     return [{"state": _wrap_state(ex["premise"], rng), "questions": {"relation": {"type": "choice", "instructions": _instr(f'Hypothesis: "{ex["hypothesis"]}" How does it relate to the premise?', rng), "criteria": {k: _desc(v, rng) for k, v in MNLI.items()}, "label": keys[ex["label"]], "src": "mnli"}}}
             for ex in _sample(ds, n, rng) if ex["label"] >= 0]
 
 
 def _sst5(split, n, rng):
-    ds = load_dataset("SetFit/sst5", split=split)
+    ds = _dataset("SetFit/sst5", split=split, rng=rng)
     return [{"state": _wrap_state(ex["text"], rng), "questions": {"sentiment": {"type": "score", "instructions": _instr("What is the sentiment of this review sentence?", rng), "criteria": list(SST5), "label": ex["label"], "src": "sst5"}}} for ex in _sample(ds, n, rng)]
 
 
 def _yelp(split, n, rng):
-    ds = load_dataset("Yelp/yelp_review_full", split=split)
+    ds = _dataset("Yelp/yelp_review_full", split=split, rng=rng)
     out = []
     for ex in _sample(ds, n, rng):
         text = " ".join(ex["text"].split()[:220])
@@ -108,31 +133,46 @@ SOURCES = {"banking77": (_banking, "train", "test"), "boolq": (_boolq, "train", 
            "mnli": (_mnli, "train", "validation_matched"), "sst5": (_sst5, "train", "test"), "yelp": (_yelp, "train", "test")}
 
 
-def build(n_per_source, split="train", seed=0, exclude=(), only=()):
-    rng = random.Random(seed)
+def build(n_per_source, split="train", seed=0, exclude=(), only=(), revisions=None):
+    unknown = (set(exclude) | set(only)) - SOURCES.keys()
+    if unknown:
+        raise ValueError(f"unknown sources: {sorted(unknown)}")
     reqs = []
     for name, (fn, tr, te) in SOURCES.items():
         if name in exclude or (only and name not in only): continue
-        reqs += fn(tr if split == "train" else te, n_per_source, rng)
-    rng.shuffle(reqs)
+        rng = random.Random(source_seed(seed, name))
+        rng.revision = (revisions or {}).get(REPOS[name])
+        source_split = tr if split == "train" else te
+        records = fn(source_split, n_per_source, rng)
+        if len(records) != len(rng.origins):
+            raise ValueError(f"provenance mismatch for {name}")
+        for record, origin in zip(records, rng.origins):
+            record["_meta"] = {**origin, "source": name, "repo": REPOS[name], "revision": rng.revision,
+                               "split": source_split, "id": f"{name}/{source_split}/{origin['row']}"}
+        reqs.extend(records)
+    random.Random(seed).shuffle(reqs)
     return reqs
 
 
 def augment(req, rng, p_none=0.1, p_none_distract=0.12, p_distract=0.15):
     """Choice only: permute option order (always); sometimes add a 'none of the above' option, either as the correct
     answer (true option removed) or as a wrong alternative (true option kept); sometimes add an irrelevant distractor."""
+    if min(p_none, p_none_distract, p_distract) < 0 or p_none + p_none_distract + p_distract > 1:
+        raise ValueError("augmentation probabilities must be nonnegative and sum to at most one")
     out = {"state": req["state"], "questions": {}}
     for qid, q in req["questions"].items():
         if q["type"] != "choice":
             out["questions"][qid] = q; continue
         crit, y = dict(q["criteria"]), q["label"]
         r = rng.random()
-        if len(crit) > 2 and r < p_none:
-            nk, nd = rng.choice(NONE_OPTIONS); crit.pop(y); crit[nk] = nd; y = nk
-        elif r < p_none + p_none_distract:
-            nk, nd = rng.choice(NONE_OPTIONS); crit.setdefault(nk, nd)
-        elif r < p_none + p_none_distract + p_distract:
-            k = rng.choice(list(DISTRACTORS)); crit[k] = DISTRACTORS[k]
+        none_options = [(k, v) for k, v in NONE_OPTIONS if k not in crit]
+        distractors = [k for k in DISTRACTORS if k not in crit]
+        if len(crit) > 2 and r < p_none and none_options:
+            nk, nd = rng.choice(none_options); crit.pop(y); crit[nk] = nd; y = nk
+        elif p_none <= r < p_none + p_none_distract and len(crit) < 255 and none_options:
+            nk, nd = rng.choice(none_options); crit[nk] = nd
+        elif p_none + p_none_distract <= r < p_none + p_none_distract + p_distract and len(crit) < 255 and distractors:
+            k = rng.choice(distractors); crit[k] = DISTRACTORS[k]
         keys = list(crit); rng.shuffle(keys)
         out["questions"][qid] = {**q, "criteria": {k: crit[k] for k in keys}, "label": y}
     return out

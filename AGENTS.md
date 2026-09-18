@@ -13,6 +13,14 @@ See README.md (deep dive) and MODEL_CARD.md (checkpoint recipe + metrics). READM
 - Eval:  `uv run python -m kev.evaluate --run runs/kev --n_per_source 150 --baseline --baseline_instruct Qwen/Qwen2.5-0.5B-Instruct`
   -> `runs/kev/eval.json` (acc/ECE/NLL per source, temperature scaling, permutation, IIA, isolation, packed-vs-separate, held-out sources)
 - Smoke: `--n_per_source 40 --accum 4 --out runs/smoke` (~1 min)
+- Research suite: `evals/decision-v1` (frozen, checksummed; train/calibration/development/test; manifest pins dataset + base
+  revisions). `kev.suite` freezes; `kev.benchmark --run X --suite evals/decision-v1 --out runs/...` scores development;
+  `--allow-test` is the only way to read the locked test. `kev.experiment --plan experiments/*.json` runs config-only trials
+  (bounded allowlist, provenance, coverage/isolation gates, results.jsonl ledger, `--wait-pid` to queue behind a training job).
+  `kev.jev` scores Jev via Vercel AI Gateway (AI SDK 7 `experimental_evaluate`, node worker in `playground/scripts/`;
+  needs `AI_GATEWAY_API_KEY` or `--provision-scope`; budget-capped). `kev.compare` pairs two result dirs (record-clustered
+  bootstrap). Historical checkpoints (`runs/kev`, `runs/kev2`) overlap the suite's training data: exploratory only.
+  `--ord_w` is now the ranked probability score (proper); the old |E[level]-y| term was removed. `--perm_kl`/`--ord_w` default 0.
 - Plot (README figure): `uv run python -m kev.plot --logs runs/logs/train_kev.log:kev-0.5b --eval runs/kev/eval.json --out docs/training.png`
   Training logs to keep go in `runs/logs/train_*.log` (only path under runs/ besides eval.json that is committed).
 - Publish: `uv run python -m kev.publish --run runs/<run> --repo jaredpalmer/kev-<size>` (needs `hf auth login`). Repos are named by
@@ -30,7 +38,7 @@ See README.md (deep dive) and MODEL_CARD.md (checkpoint recipe + metrics). READM
   - React Compiler lint forbids sync setState in effects; schedule via setTimeout or move into handlers.
   - Next 16 dev only trusts `localhost`; other hostnames need `allowedDevOrigins` or the page SSRs but never hydrates
     (no console errors). `127.0.0.1` is allowed in `next.config.ts`. Verify hydration with `agent-browser` (CDP), not curl.
-- Unit tests (no weights, CI): `uv run --extra serve python -m pytest tests/test_unit.py -q`
+- Unit tests (no weights, CI): `uv run --extra serve python -m pytest tests/test_unit.py tests/test_research.py -q`
 - API tests (server must be up): `KEV_BASE_URL=http://127.0.0.1:8009 uv run --extra serve python -m pytest tests/test_api.py -q`
 
 ## Layout

@@ -217,10 +217,11 @@ uv run python -m kev.train --n_per_source 1500 --epochs 2 --perm_kl 0 --ord_w 0 
 | `--base` | `Qwen/Qwen2.5-0.5B` | Causal LM backbone |
 | `--n_per_source` | `1000` | Records sampled per dataset |
 | `--holdout` | – | Sources to exclude, e.g. `mnli,sst5`, for out-of-source evaluation |
-| `--perm_kl` | `0.5` | Symmetric KL between predictions under two option orders |
-| `--ord_w` | `0.5` | Ordinal `\|E[level] − y\|` term for Score questions |
+| `--perm_kl` | `0` | Optional symmetric KL between predictions under two option orders |
+| `--ord_w` | `0` | Optional ranked probability score for ordered levels |
+| `--suite` | – | Train on a frozen suite's training partition |
 
-`kev-0.5b` predates `--perm_kl` and `--ord_w`; reproduce it with both set to `0`. Full recipe in the [model card](MODEL_CARD.md).
+The released `kev-0.5b` used cross-entropy without either extra loss. The current data conversion and sampling have changed, so rerunning this command does not reproduce its weights exactly. The optional ordinal loss now compares cumulative probabilities, a proper scoring rule, rather than absolute error of the expected level. Full historical recipe in the [model card](MODEL_CARD.md).
 
 Run one training job at a time. Two jobs on the same Apple GPU slow each other by about 10×.
 
@@ -243,6 +244,23 @@ Writes `runs/kev/eval.json`. Baselines use the same rendered text and read next-
 | **All** (1,350 held-out questions) | | | **0.799 / 0.065** |
 
 Cells are accuracy / ECE (10 bins). These are in-distribution numbers; the test splits come from the training datasets.
+
+### Frozen research suite
+
+`evals/decision-v1` is a frozen, checksummed suite: separate training, calibration, development, and locked test partitions; pinned dataset and base-model revisions; and per-record provenance. Development runs are used for model selection. The locked test is only for promoted candidates and requires `--allow-test`.
+
+```bash
+uv run python -m kev.benchmark --run runs/kev --suite evals/decision-v1 --out runs/research-kev-v01
+uv run python -m kev.experiment --suite evals/decision-v1 --plan experiments/mbp-comparison.json --out runs/mbp-comparison-v1
+```
+
+Trials are configuration-only: `kev.experiment` refuses configs outside a bounded allowlist, records code, suite, and git hashes, checks complete coverage, isolation, and packing, and never reads the locked test.
+
+### Comparison with Jev
+
+`kev.jev` scores the same frozen development suite against the real `typesafe-ai/jev` through Vercel AI Gateway (AI SDK 7 `experimental_evaluate`, cost-capped). Jev is the hosted reference product; kev was fine-tuned on these six datasets, so this is a shared-task baseline, not a controlled ablation. On 720 clean development questions the released `kev-0.5b` had 79.7% micro accuracy and Jev 81.1%; the record-clustered macro accuracy difference was −1.8 points with 95% CI [−5.5, +1.7]. Jev rounds some probabilities to zero, so log-loss depends on the clipping floor. Results and caveats: `runs/kev-vs-jev-v1.json`; regenerate the figure with `uv run python scripts/plot_eval_comparison.py`.
+
+![kev vs Jev, preliminary per-task accuracy on the frozen development suite](docs/kev-vs-jev.png)
 
 | Mechanism test | Result |
 |---|---|

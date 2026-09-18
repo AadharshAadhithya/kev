@@ -36,6 +36,9 @@ def main():
             src = f"{a.run}/{f}"
             if os.path.exists(src): shutil.copy(src, tmp)
             else: print(f"skip {f} (not found)")
+        # runs before task_type was set saved null; the Hub warns about it and PEFT treats both the same for a bare backbone
+        cfg_path = f"{tmp}/adapter_config.json"; cfg = json.load(open(cfg_path))
+        if not cfg.get("task_type"): cfg["task_type"] = "FEATURE_EXTRACTION"; json.dump(cfg, open(cfg_path, "w"), indent=2)
         for log in (f"runs/logs/train_{run_name}.log", f"runs/train_{run_name}.log", f"runs/train.log" if run_name == "kev" else ""):
             if log and os.path.exists(log): shutil.copy(log, f"{tmp}/train.log"); break
 

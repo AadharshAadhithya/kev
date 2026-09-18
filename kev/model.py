@@ -76,7 +76,7 @@ class DecisionModel(nn.Module):
         self.lm = AutoModelForCausalLM.from_pretrained(name, dtype=torch.float32, attn_implementation="eager").model
         if lora:
             from peft import LoraConfig, get_peft_model
-            cfg = LoraConfig(r=lora, lora_alpha=2 * lora, lora_dropout=0.05, target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"])
+            cfg = LoraConfig(task_type="FEATURE_EXTRACTION", r=lora, lora_alpha=2 * lora, lora_dropout=0.05, target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"])
             self.lm = get_peft_model(self.lm, cfg)
         self.head = PointerHead(self.lm.config.hidden_size)
         self.device = device

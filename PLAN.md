@@ -86,11 +86,17 @@ Modal documentation: [images](https://modal.com/docs/guide/images), [volumes](ht
 
 - [x] Modal CUDA/batched path and backbone-v1 study completed; MBP path retained.
 - [x] v2 source policy, PAWS/SciQ conversion, contrastive prototype, and data-ablation study completed. Findings remain exploratory.
-- [ ] v3 minimal-pair/calibration/metric corrections and regression tests.
-- [ ] v3 compositional generator and boundary/rendering validation.
-- [ ] v3 frozen matched suites, pinned 4B revision, and strict context admission.
-- [ ] Modal smoke followed by the matched 0.6B/4B comparison.
-- [ ] Analyze all seeds, update results, and decide whether any candidate warrants a locked test.
+- [x] v3 minimal-pair/calibration/metric corrections and regression tests ([tests](tests/test_v3.py)).
+- [x] v3 compositional generator with truth-table and boundary tests ([generator](kev/composition.py)).
+- [x] v3 frozen matched suites ([decision-v3](evals/v3/decision-v3/manifest.json), [transfer-v3](evals/v3/transfer-v3/manifest.json)); both arms share 3,000 public records and 448 synthetic records.
+- [x] Modal smoke and the matched 0.6B/4B comparison, seed 0 ([ledger](runs/v3-data-capacity-s0/results.jsonl)).
+      Paired, record-clustered bootstrap, transfer-v3 development:
+      capacity (4B vs 0.6B, same data): +17.5 pp acc CI [+13.0, +22.1] on legacy data, +19.0 pp CI [+12.3, +25.0] on compositional data;
+      data (compositional vs legacy, same backbone): +3.6 pp CI [-0.4, +7.8] at 0.6B, +5.1 pp CI [0.0, +9.9] at 4B; Brier -0.053 CI [-0.102, -0.005] at 0.6B.
+      Held-out compositional structures, both siblings correct: 0.6B 3%/6%; 4B 45%/52%. Held-out authorization: 4B 100% both arms (0.6B 50%).
+      Held-out deadline (3-level score) stays near chance for all cells. No cell passes the 70% held-out-pair screen; none is a locked-test candidate.
+      Cost: 4 H100 trials, 0.6B ~4.5 min and 4B ~13.5 min wall each, admission bound $8.86.
+- [ ] Second seed for the four cells (budget permitting); then decide whether any candidate warrants a locked test.
 - [ ] Deferred: option-order architecture experiments. Do not infer Jev's architecture from zero argmax flips.
 - [ ] Deferred: LLM-authored product scenarios, with a separate verification model and retained provenance; needs explicit API/budget decisions.
 - [ ] Deferred: 8B runs after the data-versus-capacity result, not as an automatic escalation.

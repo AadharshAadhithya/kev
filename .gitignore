@@ -60,3 +60,13 @@ runs/backbone-v1/*/*
 !runs/research-kev2-dev/
 runs/research-kev2-dev/*
 !runs/research-kev2-dev/report.json
+# v3 studies: results, ledger, provenance, comparisons, train logs only
+!runs/v3-*/
+runs/v3-*/*
+!runs/v3-*/results.jsonl
+!runs/v3-*/*/
+runs/v3-*/*/*
+!runs/v3-*/*/result.json
+!runs/v3-*/*/comparison.json
+!runs/v3-*/*/provenance.json
+!runs/v3-*/*/train.log

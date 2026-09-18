@@ -43,6 +43,7 @@ examples = [
 dev = [
     "httpx>=0.28.1",
     "matplotlib>=3.9",
+    "modal==1.5.5",
     "pytest>=9.1.1",
 ]
 

@@ -37,3 +37,6 @@ runs/transfer-jev-v1/*
 !runs/transfer-jev-v1/report.json
 !runs/transfer-jev-v1/usage.json
 !runs/kev-vs-jev-transfer-v1.json
+
+# vendored agent skills (modal skills install); reinstall with `uv run modal skills install`
+.agents/skills/modal/

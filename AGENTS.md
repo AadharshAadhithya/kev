@@ -34,7 +34,7 @@ See README.md (deep dive) and MODEL_CARD.md (checkpoint recipe + metrics). READM
 - Web demo: `cd playground && npm run dev -- -p 3001` (:3000 is used by another project). Next 16 app router; `/kev/*` is
   rewritten to the FastAPI server (`KEV_API`, default http://127.0.0.1:8009). Presets live in `playground/src/lib/kev.ts`.
   - `/chess` (`src/components/chess-game.tsx`, `src/lib/chess.ts`, chess.js): legal moves -> Choice options, board -> state, Score for eval;
-    games in localStorage key `kev.chess.v1`. Python twin: `examples/chess_selfplay.py` (typesafe-sdk + python-chess, `--extra examples`).
+    games in localStorage key `kev.chess.v1`.
   - React Compiler lint forbids sync setState in effects; schedule via setTimeout or move into handlers.
   - Next 16 dev only trusts `localhost`; other hostnames need `allowedDevOrigins` or the page SSRs but never hydrates
     (no console errors). `127.0.0.1` is allowed in `next.config.ts`. Verify hydration with `agent-browser` (CDP), not curl.

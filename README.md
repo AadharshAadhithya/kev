@@ -112,12 +112,7 @@ cd playground && npm run dev -- -p 3001
 
 Open [localhost:3001](http://localhost:3001). Load a preset, edit the state and questions, press `⌘↵`. **Packed vs separate** compares one N-question request with N single-question requests. **Permute** re-asks a Choice under six option orders. The **Isolation probe** and **Boundary forgery** presets reproduce the two experiments from the blog post.
 
-**Chess** at [localhost:3001/chess](http://localhost:3001/chess): the legal moves are the options of one Choice question, the board is the state, and a Score rates the position in the same request. Play the model or watch it play itself; games are kept in `localStorage`. The same loop through the Python SDK:
-
-```bash
-uv sync --extra serve --extra examples
-uv run python examples/chess_selfplay.py --plies 40 --pgn game.pgn
-```
+**Chess** at [localhost:3001/chess](http://localhost:3001/chess): the legal moves are the options of one Choice question, the board is the state, and a Score rates the position in the same request. Play the model or watch it play itself; games are kept in `localStorage`.
 
 ## API
 

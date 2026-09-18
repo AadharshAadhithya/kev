@@ -36,9 +36,6 @@ serve = [
     "typesafe-sdk>=0.6.0",
     "uvicorn>=0.30",
 ]
-examples = [
-    "chess>=1.10",
-]
 
 [dependency-groups]
 dev = [

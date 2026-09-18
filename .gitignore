@@ -40,3 +40,15 @@ runs/transfer-jev-v1/*
 
 # vendored agent skills (modal skills install); reinstall with `uv run modal skills install`
 .agents/skills/modal/
+# Modal studies: keep results/ledger/provenance, not checkpoints or prediction dumps
+!runs/backbone-v1/
+runs/backbone-v1/*
+!runs/backbone-v1/results.jsonl
+!runs/backbone-v1/*/
+runs/backbone-v1/*/*
+!runs/backbone-v1/*/result.json
+!runs/backbone-v1/*/provenance.json
+!runs/backbone-v1/*/train.log
+!runs/research-kev2-dev/
+runs/research-kev2-dev/*
+!runs/research-kev2-dev/report.json

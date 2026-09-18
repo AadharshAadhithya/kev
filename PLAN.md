@@ -182,7 +182,15 @@ attention breaks the branch mask). Rough cost at ~40% MFU: 8B on 200k examples ~
 - [x] transfer-v1 frozen and scored (kev-0.5b, Jev); comparison committed
       ([`1054ea7`](https://github.com/jaredpalmer/kev/commit/1054ea7))
 - [x] Modal CLI installed (`modal==1.5.5`, dev dependency) and authenticated (workspace `jp-1083`)
-- [ ] 0. CUDA + batched training; `modal_app.py`; smoke; backbone study on Modal
+- [x] 0. CUDA + batched training; `modal_app.py`; smoke; backbone study on Modal
+      ([`runs/backbone-v1/results.jsonl`](runs/backbone-v1/results.jsonl): Qwen3-0.6B +3 pp in-dist and
+      +4-6 pp on never-trained MNLI/SST-5 vs Qwen2.5-0.5B at 1.2k records, both seeds; seed spread is as
+      large as the backbone effect. 0.019-0.03 s/record on H100 vs 0.34 on the MBP; 5 trials in ~5 min, ~$0.80.
+      Evaluation on CUDA runs fp32-exact: TF32 alone moves probabilities ~1e-3 and tripped the isolation gate.)
+- [x] kev2 (9k records, none fix, MBP) scored on decision-v1 dev
+      ([`runs/research-kev2-dev/report.json`](runs/research-kev2-dev/report.json)): acc 0.803, `none_absent`
+      0.861 (was 0.667), `none_present` 0.75 (was 0.78): the augmentation fix teaches "pick none when right",
+      not "don't pick none when wrong". Motivates step 2.
 - [ ] 1. trainable/eval-only manifest flag; decision-v2 + transfer-v2 frozen
 - [ ] 2. programmatic contrastive pairs + paired_flip metric
 - [ ] 3. kev-0.5b / kev2 / Jev on v2 suites
@@ -191,6 +199,5 @@ attention breaks the branch mask). Rough cost at ~40% MFU: 8B on 200k examples ~
 - [ ] 6. LLM contrastive pairs
 - [ ] 7. 4B / 8B runs
 
-Local runs in flight and untouched: `runs/kev2` (9k x 2, none-fix, on the MBP GPU) and the
-locally queued backbone study `runs/mbp-comparison-v1` (to be cancelled once the Modal copy is
-running).
+The locally queued backbone study was cancelled in favour of the Modal copy; `runs/kev2` finished
+on the MBP and is scored above.

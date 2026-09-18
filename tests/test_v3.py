@@ -147,3 +147,18 @@ def test_unpinned_base_requires_full_sha_in_trial():
     assert validated_trial({"base": "other", "base_revision": "b" * 40}, manifest)["base_revision"] == "b" * 40
     with pytest.raises(ValueError, match="conflicts"):
         validated_trial({"base": "pinned", "base_revision": "b" * 40}, manifest)
+
+
+def test_none_pair_is_minimal_and_relabelled():
+    import random
+    from kev.data import none_pair, materialize
+    req = {"state": "The shoes are the wrong size.", "questions": {"reason": {"type": "choice", "instructions": "Why?",
+           "criteria": {"size": "Wrong size", "damage": "Damaged", "color": "Wrong color"}, "label": "size", "src": "t"}}}
+    present, absent = none_pair(req, random.Random(3))
+    pk, ak = list(present["questions"]["reason"]["criteria"]), list(absent["questions"]["reason"]["criteria"])
+    assert len(pk) == 4 and present["questions"]["reason"]["label"] == "size"
+    assert [k for k in pk if k != "size"] == ak                     # same order, true option removed, nothing else moved
+    assert absent["questions"]["reason"]["label"] == ak[-1] or absent["questions"]["reason"]["label"] in ak
+    assert absent["questions"]["reason"]["label"] not in req["questions"]["reason"]["criteria"]
+    materialize(present); materialize(absent)
+    assert none_pair({"state": "s", "questions": {"q": {"type": "noul", "instructions": "i", "label": True, "src": "t"}}}, random.Random(0)) == []

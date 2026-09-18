@@ -3,7 +3,7 @@ from pathlib import Path
 from collections import Counter
 import torch
 import torch.nn.functional as F
-from .data import EVAL_ONLY, build, augment, materialize, source_seed
+from .data import EVAL_ONLY, build, augment, materialize, none_pair, source_seed
 from .suite import digest, load_split, write_json
 from .model import DecisionModel, load_tokenizer, encode
 
@@ -58,6 +58,7 @@ def main():
     ap.add_argument("--p_none", type=float, default=0.1)
     ap.add_argument("--p_none_distract", type=float, default=0.12)
     ap.add_argument("--p_distract", type=float, default=0.15)
+    ap.add_argument("--p_none_pair", type=float, default=0.0, help="fraction of Choice records that additionally emit a none-present/none-absent minimal pair")
     ap.add_argument("--out", default="runs/kev")
     ap.add_argument("--seed", type=int, default=0)
     a = ap.parse_args()
@@ -126,11 +127,15 @@ def main():
             recs, encs, perm_jobs = [], [], []
             for req in chunk:
                 item_rng = random.Random(source_seed(a.seed, f"{ep}:{req['_meta']['id']}"))
-                rec = materialize(augment(req, item_rng, p_none=a.p_none, p_none_distract=a.p_none_distract, p_distract=a.p_distract))  # fresh permutation / distractors each epoch
-                enc = encode(tok, rec, strict=True)
-                if len(enc["ids"]) > 2048:
-                    raise ValueError("training request exceeds 2048 packed tokens")
-                recs.append(rec); encs.append(enc); tokens_seen += len(enc["ids"])
+                variants = [augment(req, item_rng, p_none=a.p_none, p_none_distract=a.p_none_distract, p_distract=a.p_distract)]  # fresh permutation / distractors each epoch
+                if a.p_none_pair > 0 and item_rng.random() < a.p_none_pair:
+                    variants += none_pair(req, item_rng)
+                for v in variants:
+                    rec = materialize(v)
+                    enc = encode(tok, rec, strict=True)
+                    if len(enc["ids"]) > 2048:
+                        raise ValueError("training request exceeds 2048 packed tokens")
+                    recs.append(rec); encs.append(enc); tokens_seen += len(enc["ids"])
                 if a.perm_kl > 0 and item_rng.random() < a.perm_frac and any(q["qtype"] == "choice" and len(q["options"]) >= 3 for q in rec["questions"]):
                     rec2, perms = permuted_copy(rec, item_rng); perm_jobs.append((len(recs) - 1, encode(tok, rec2, strict=True), perms))
             with autocast:
@@ -149,7 +154,8 @@ def main():
                 kl = kl / n; loss = loss + a.perm_kl * kl; run["kl"] += kl.item(); run["kl_n"] += 1
             if not torch.isfinite(loss):
                 raise ValueError("non-finite training loss")
-            group_records = accumulation_records(len(reqs), a.batch, a.accum, mb)
+            # weight by source records in the accumulation group so none-pair siblings do not inflate a record's share
+            group_records = accumulation_records(len(reqs), a.batch, a.accum, mb) * (len(recs) / len(chunk))
             (loss / group_records).backward(); run["n"] += len(recs); seen += len(recs)
             if dev == "mps": peak_mem = max(peak_mem, torch.mps.current_allocated_memory())
             elif dev == "cuda": peak_mem = max(peak_mem, torch.cuda.max_memory_allocated())

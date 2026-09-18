@@ -39,7 +39,10 @@ NONE = "None of the above"
 # "None of the above" options must appear both as the correct answer and as a wrong alternative, with varied
 # wording, or the model learns "this wording => pick it" (it did, in the first training run).
 NONE_OPTIONS = [("other", "None of the above"), ("other", "A reason that fits none of the above"), ("none", "None of these"),
-                ("other", "Something else"), ("not_listed", "Not listed here"), ("none_of_the_above", None)]
+                ("other", "Something else"), ("not_listed", "Not listed here"), ("none_of_the_above", None),
+                ("other", "A category that fits none of the above"), ("other", "None of the listed options apply"),
+                ("unknown", "Cannot be determined from the options given"), ("other", "Other"), ("none", None),
+                ("other", "An answer not covered by the other options"), ("no_match", "No option matches")]
 DISTRACTORS = {"weather": "Bad weather caused it", "purple": "The colour purple", "pancakes": "A recipe for pancakes", "taxes": "Unrelated: quarterly tax filing"}
 
 AG = {"world": "World news: politics, international affairs, conflicts", "sports": "Sports: games, athletes, teams, results",
@@ -296,6 +299,21 @@ def augment(req, rng, p_none=0.1, p_none_distract=0.12, p_distract=0.15):
         keys = list(crit); rng.shuffle(keys)
         out["questions"][qid] = {**q, "criteria": {k: crit[k] for k in keys}, "label": y}
     return out
+
+
+def none_pair(req, rng):
+    """Minimal pair for the none-of-the-above shortcut: the same state and question rendered twice, once with the true
+    option present (a none option is wrong) and once with it removed (the same none option is right). Everything else,
+    including option order, is identical, so the only difference the model can use is whether the evidence matches an
+    option. Returns [] when the request has no eligible Choice (>=3 options, no none key already present)."""
+    eligible = [(qid, q) for qid, q in req["questions"].items() if q["type"] == "choice" and len(q["criteria"]) >= 3]
+    if not eligible: return []
+    qid, q = rng.choice(eligible)
+    nk, nd = rng.choice([o for o in NONE_OPTIONS if o[0] not in q["criteria"]] or [("none_of_these", None)])
+    keys = list(q["criteria"]) + [nk]; rng.shuffle(keys)
+    present = {**q, "criteria": {k: (nd if k == nk else q["criteria"][k]) for k in keys}}
+    absent = {**present, "criteria": {k: v for k, v in present["criteria"].items() if k != q["label"]}, "label": nk}
+    return [{"state": req["state"], "questions": {qid: present}}, {"state": req["state"], "questions": {qid: absent}}]
 
 
 def materialize(req):

@@ -31,10 +31,10 @@ from kev.suite import digest, load_split, record_digest, write_json
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULTS = {"epochs": 1, "seed": 0, "lr": 0.0002, "lora": 16, "accum": 8, "batch": 1,
             "perm_kl": 0.0, "perm_frac": 0.3, "ord_w": 0.0,
-            "p_none": 0.1, "p_none_distract": 0.12, "p_distract": 0.15}
+            "p_none": 0.1, "p_none_distract": 0.12, "p_distract": 0.15, "p_none_pair": 0.0}
 RANGES = {"epochs": (1, 5), "seed": (0, 10000), "lr": (1e-6, 0.001), "lora": (1, 64), "accum": (1, 64), "batch": (1, 64),
           "perm_kl": (0, 2), "perm_frac": (0, 1), "ord_w": (0, 2),
-          "p_none": (0, 0.4), "p_none_distract": (0, 0.4), "p_distract": (0, 0.4)}
+          "p_none": (0, 0.4), "p_none_distract": (0, 0.4), "p_distract": (0, 0.4), "p_none_pair": (0, 1)}
 CHOICES = {"dtype": ("fp32", "bf16"), "checkpointing": (0, 1)}
 
 
@@ -163,8 +163,12 @@ def execute_trial(config, suite, output, expected_sources, device, existing=None
         args = [sys.executable, "-m", "kev.train", "--suite", str(suite), "--out", run, "--device", device]
         for key, value in config.items():
             args += ["--" + key, str(value)]
-        with (output / "train.log").open("w") as log:
-            subprocess.run(args, stdout=log, stderr=subprocess.STDOUT, check=True, cwd=ROOT)
+        with (output / "train.log").open("w") as log, subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=ROOT) as proc:
+            for line in proc.stdout:            # tee: the file is the record, stdout gives live progress in containers
+                log.write(line); log.flush()
+                if line.startswith(("ep", "saved", "device", "ablation")) or "Error" in line: print(line.rstrip(), flush=True)
+        if proc.returncode:
+            raise subprocess.CalledProcessError(proc.returncode, args)
     predictor = LocalPredictor(run, device)
     try:
         if existing:

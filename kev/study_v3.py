@@ -71,7 +71,9 @@ def validate_training(records, manifest):
         raise ValueError("empty training partition")
 
 
-def freeze(out, source="evals/decision-v2", transfer="evals/transfer-v2"):
+def freeze(out, source="evals/decision-v2", transfer="evals/transfer-v2", public_train=None):
+    """public_train: optional larger public training pool (a frozen suite dir). Its train+calibration partitions replace
+    the source suite's public train/calibration; development/test still come from `source` so results stay comparable."""
     out, source, transfer = Path(out), Path(source), Path(transfer)
     if out.exists():
         raise FileExistsError("v3 destination already exists; choose a new version")
@@ -82,10 +84,21 @@ def freeze(out, source="evals/decision-v2", transfer="evals/transfer-v2"):
     parts = {s: [] for s in SPLITS}
     for split in ("train", "calibration", "development"):
         parts[split] = [r for r in load_split(source, split) if r["_meta"]["source"] != "contrastive"]
+    if public_train:
+        pool = Path(public_train)
+        dev_test_states = {r["_meta"]["text_sha256"] for split in ("development", "test") for r in load_split(source, split, allow_test=True)}
+        for split in ("train", "calibration"):
+            fresh = [r for r in load_split(pool, split) if r["_meta"]["source"] != "contrastive"]
+            leaked = [r for r in fresh if r["_meta"]["text_sha256"] in dev_test_states]
+            if leaked: raise ValueError(f"{len(leaked)} public {split} records collide with development/test states")
+            parts[split] = fresh
+        source_dirs = [pool]
+    else:
+        source_dirs = []
     reserved = set()
     for split in ("train", "calibration", "development"):
         reserved.update(semantic_hash(r) for r in parts[split])
-    sources = [p for p in source.glob("*.json*")] + [p for p in transfer.glob("*.json*")]
+    sources = [p for p in source.glob("*.json*")] + [p for p in transfer.glob("*.json*")] + [p for d in source_dirs for p in d.glob("*.json*")]
     parent_hashes = {str(p): digest(p) for p in sources}
 
     def admit_groups(records):
@@ -129,6 +142,7 @@ def freeze(out, source="evals/decision-v2", transfer="evals/transfer-v2"):
         "protocol": {"train_shapes": TRAIN_SHAPES, "transfer_shapes": DEV_SHAPES, "locked_shapes": TEST_SHAPES,
                      "train_render_styles": [0, 1], "locked_render_styles": [2],
                      "public_train_records": len(parts["train"]) - len(old_train) - len(new_train),
+                     "public_train_pool": str(public_train) if public_train else str(source),
                      "synthetic_records_per_arm": len(old_train), "calibration": "shared; stratified by family and group",
                      "arm_selection": "train_sources selects public sources plus exactly one synthetic arm",
                      "primary": "macro development NLL; transfer and confident-error checks required; no automatic release",
@@ -191,11 +205,12 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True)
     ap.add_argument("--smoke-from")
+    ap.add_argument("--public-train", help="frozen suite whose train/calibration public partitions replace the source's (larger pool)")
     a = ap.parse_args()
     if a.smoke_from:
         smoke_subset(a.smoke_from, a.out)
     else:
-        freeze(a.out)
+        freeze(a.out, public_train=a.public_train)
 
 
 if __name__ == "__main__":

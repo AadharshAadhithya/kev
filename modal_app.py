@@ -1,6 +1,6 @@
 """Run kev studies on Modal: one GPU container per trial, results pulled back into runs/.
 
-    uv run modal run modal_app.py::smoke                                   # ~2 min end to end on a T4
+    KEV_GPU=T4 uv run modal run modal_app.py::smoke                        # ~2 min end to end on a T4 (free tier)
     uv run modal run modal_app.py::study --suite evals/decision-v1 \\
         --plan experiments/mbp-comparison.json --name mbp-comparison-v1     # N trials in parallel on H100s
     uv run modal run modal_app.py::evaluate --run jaredpalmer/kev-0.5b \\
@@ -25,6 +25,7 @@ import modal
 APP_NAME = "kev-research"
 ROOT = Path(__file__).resolve().parent
 RUNS_MOUNT, HF_MOUNT = "/runs", "/hf"
+GPU = os.environ.get("KEV_GPU", "H100")   # H100 needs a payment method on the workspace; KEV_GPU=T4 for the free tier
 
 app = modal.App(APP_NAME)
 image = (
@@ -50,7 +51,7 @@ def local_source_hashes():
     return source_hashes()
 
 
-@app.function(image=image, gpu="H100", timeout=4 * 3600, volumes={RUNS_MOUNT: runs_volume, HF_MOUNT: hf_cache}, secrets=secrets)
+@app.function(image=image, gpu=GPU, timeout=4 * 3600, volumes={RUNS_MOUNT: runs_volume, HF_MOUNT: hf_cache}, secrets=secrets)
 def run_trial(study, index, label, config, suite, expected_sources, git_commit, existing=None):
     """One trial in one container. `existing` is a checkpoint path on the runs volume or a Hub id (legacy scoring)."""
     import torch
@@ -90,7 +91,7 @@ def launch(suite, plan_path, name, gpu, existing=()):
         print("warning: kev/ or evals/ has uncommitted changes; provenance records the last commit, not the working tree", flush=True)
     entries = [(None, p) for p in existing] + [(t, None) for t in trials]
     jobs = [(name, i, Path(ex).name if ex else f"trial-{i}", cfg or {}, suite, sources, commit, ex) for i, (cfg, ex) in enumerate(entries)]
-    fn = run_trial.with_options(gpu=gpu) if gpu != "H100" else run_trial
+    fn = run_trial.with_options(gpu=gpu) if gpu != GPU else run_trial
     print(f"launching {len(jobs)} trial(s) on {gpu} for study {name}", flush=True)
     results = list(fn.starmap(jobs, return_exceptions=True))
     for job, result in zip(jobs, results):
@@ -103,16 +104,16 @@ def launch(suite, plan_path, name, gpu, existing=()):
 
 
 @app.local_entrypoint()
-def study(suite: str, plan: str, name: str, gpu: str = "H100", existing: str = ""):
+def study(suite: str, plan: str, name: str, gpu: str = GPU, existing: str = ""):
     launch(suite, plan, name, gpu, [e for e in existing.split(",") if e])
 
 
 @app.local_entrypoint()
-def smoke(gpu: str = "T4"):
+def smoke(gpu: str = GPU):
     launch("evals/smoke-v1", "experiments/smoke.json", "smoke", gpu)
 
 
 @app.local_entrypoint()
-def evaluate(run: str, suite: str, name: str, gpu: str = "H100"):
+def evaluate(run: str, suite: str, name: str, gpu: str = GPU):
     """Score an existing checkpoint (Hub id, or a path under the runs volume) on a suite's development partition."""
     launch(suite, None, name, gpu, [run])

@@ -174,8 +174,11 @@ def smoke_subset(source, out):
         if split != "test":
             groups = defaultdict(list)
             for r in load_split(source, split):
-                groups[r["_meta"]["group_id"]].append(r)
-            records = [r for group in list(groups.values())[:16] for r in group]
+                groups[(r["_meta"]["source"], r["_meta"]["group_id"])].append(r)
+            taken = Counter()
+            for (name, _), group in groups.items():
+                if taken[name] < 2:
+                    records.extend(group); taken[name] += 1
         path = out / f"{split}.jsonl"
         path.write_text("".join(json.dumps(r) + "\n" for r in records))
         manifest["files"][path.name] = {"sha256": digest(path), "records": len(records),

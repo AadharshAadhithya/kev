@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Chess, type Square } from "chess.js";
 import Link from "next/link";
-import { askModel, EVAL_LEVELS, loadGames, saveGames, resultText, type Mode, type ModelMove, type SavedGame } from "@/lib/chess";
+import { askModel, EVAL_LEVELS, legalMove, loadGames, replay, saveGames, resultText, type Mode, type ModelMove, type SavedGame } from "@/lib/chess";
 import { api } from "@/lib/kev";
 import { ChessBoard } from "@/components/chess-board";
 import { Button } from "@/components/ui/button";
@@ -67,9 +67,7 @@ function newGame(mode: Mode): SavedGame {
 }
 
 function rebuild(g: SavedGame) {
-  const c = new Chess();
-  for (const m of g.moves) c.move(m.san);
-  return c;
+  return replay(g.moves).chess;
 }
 
 export function ChessGame() {
@@ -83,6 +81,7 @@ export function ChessGame() {
   const [selected, setSelected] = useState<Square | null>(null);
   const [model, setModel] = useState<string | null>(null);
   const autoRef = useRef(false);
+  const gameRef = useRef<SavedGame | null>(null); // latest persisted game, so async replies validate against the live position
 
   // load from localStorage (an external store) after mount; deferred so SSR and first client render match
   useEffect(() => {
@@ -90,7 +89,9 @@ export function ChessGame() {
       const saved = loadGames();
       setGames(saved);
       const last = saved.at(-1);
-      if (last && !last.result) { setGame(last); setMode(last.mode); } else setGame(newGame("self"));
+      const g = last && !last.result ? last : newGame("self");
+      if (last && !last.result) setMode(last.mode);
+      gameRef.current = g; setGame(g);
     }, 0);
     api.models().then((m) => setModel(m.models[0].run)).catch(() => setModel(null));
     return () => clearTimeout(t);
@@ -104,26 +105,31 @@ export function ChessGame() {
   const lastModel = useMemo(() => [...(game?.moves ?? [])].reverse().find((m) => m.model)?.model, [game]);
 
   const persist = useCallback((g: SavedGame) => {
+    gameRef.current = g;
     setGame(g);
     setGames((prev) => { const next = [...prev.filter((x) => x.id !== g.id), g]; saveGames(next); return next; });
   }, []);
 
-  const applyMove = useCallback((san: string, by: "human" | "model", info?: ModelMove) => {
-    if (!game) return;
-    const c = rebuild(game);
-    c.move(san);
-    persist({ ...game, moves: [...game.moves, { san, by, model: info }], pgn: c.pgn(), result: resultText(c) });
-  }, [game, persist]);
+  // The only way a move enters a game. `base` is the game the move was chosen for; it is applied only if that is still
+  // the live game (id and ply count) and `san` is legal in that position. Returns the resulting position, or null if rejected.
+  const applyMove = useCallback((base: SavedGame, san: string, by: "human" | "model", info?: ModelMove): Chess | null => {
+    const cur = gameRef.current;
+    if (!cur || cur.id !== base.id || cur.moves.length !== base.moves.length || cur.result) return null; // position changed while the move was being chosen
+    const mv = legalMove(cur, san);
+    if (!mv) { setError(`Rejected illegal move ${san} for ${by}`); return null; }
+    const c = rebuild(cur);
+    c.move(mv.san);
+    persist({ ...cur, moves: [...cur.moves, { san: mv.san, by, model: info }], pgn: c.pgn(), result: resultText(c) });
+    return c;
+  }, [persist]);
 
   const modelMove = useCallback(async () => {
     if (!game || game.result || thinking) return;
     setThinking(true); setError(null);
     try {
-      const c = rebuild(game);
-      const info = await askModel(c, sample);
-      c.move(info.san);
-      applyMove(info.san, "model", info);
-      if (c.isGameOver()) { setAuto(false); autoRef.current = false; }
+      const info = await askModel(rebuild(game), sample);
+      const c = applyMove(game, info.san, "model", info);
+      if (!c || c.isGameOver()) { setAuto(false); autoRef.current = false; }
     } catch (e) { setError((e as Error).message); setAuto(false); autoRef.current = false; }
     finally { setThinking(false); }
   }, [game, sample, thinking, applyMove]);
@@ -153,8 +159,10 @@ export function ChessGame() {
     if (!humanToMove || thinking) return;
     const piece = chess.get(sq);
     if (selected && targets.has(sq)) {
-      const mv = chess.moves({ square: selected, verbose: true }).find((m) => m.to === sq);
-      if (mv) applyMove(mv.san, "human");
+      // several legal moves share from/to only for promotions; promote to a queen
+      const candidates = chess.moves({ square: selected, verbose: true }).filter((m) => m.to === sq);
+      const mv = candidates.find((m) => !m.promotion || m.promotion === "q") ?? candidates[0];
+      if (mv) applyMove(game!, mv.san, "human");
       setSelected(null); return;
     }
     if (piece && piece.color === chess.turn()) setSelected(sq); else setSelected(null);
@@ -171,7 +179,7 @@ export function ChessGame() {
     // in human modes undo the model reply too, so it is the human's turn again
     const n = humanSide && game.moves.at(-1)?.by === "model" ? 2 : 1;
     const moves = game.moves.slice(0, -n);
-    const c = new Chess(); for (const m of moves) c.move(m.san);
+    const c = replay(moves).chess;
     persist({ ...game, moves, pgn: c.pgn(), result: undefined });
   }
 

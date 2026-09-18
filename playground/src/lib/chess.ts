@@ -79,7 +79,7 @@ export async function askModel(chess: Chess, sample = false): Promise<ModelMove>
     let u = Math.random();
     for (const [k, p] of Object.entries(a.probabilities)) { u -= p; if (u <= 0) { san = k; break; } }
   }
-  if (!legal.some((m) => m.san === san)) san = a.choice; // should not happen: options are the legal moves
+  if (!legal.some((m) => m.san === san)) throw new Error(`model returned ${JSON.stringify(san)}, which is not a legal move here`);
   return { san, probabilities: a.probabilities, confidence: a.confidence, evaluation: e.score, evalConfidence: e.confidence, evalProbabilities: e.probabilities, latency_ms: r.latency_ms ?? 0, input_tokens: r.usage.input_tokens, n_legal: legal.length };
 }
 
@@ -98,9 +98,31 @@ export type SavedGame = {
 
 const KEY = "kev.chess.v1";
 
+// Replays a game's moves, stopping at the first one that is not legal in its position (chess.js throws on illegal SAN).
+export function replay(moves: SavedGame["moves"]): { chess: Chess; moves: SavedGame["moves"] } {
+  const chess = new Chess();
+  const ok: SavedGame["moves"] = [];
+  for (const m of moves) {
+    try { chess.move(m.san); ok.push(m); } catch { break; }
+  }
+  return { chess, moves: ok };
+}
+
+// The legal move `san` in the position after `game`, or undefined if it is not legal there.
+export function legalMove(game: SavedGame, san: string): Move | undefined {
+  return replay(game.moves).chess.moves({ verbose: true }).find((m) => m.san === san);
+}
+
 export function loadGames(): SavedGame[] {
   if (typeof window === "undefined") return [];
-  try { return JSON.parse(localStorage.getItem(KEY) ?? "[]"); } catch { return []; }
+  let raw: unknown;
+  try { raw = JSON.parse(localStorage.getItem(KEY) ?? "[]"); } catch { return []; }
+  if (!Array.isArray(raw)) return [];
+  // stored games are untrusted: keep only the legal prefix of each move list so the board and the list agree
+  return raw.filter((g): g is SavedGame => !!g && typeof g.id === "string" && Array.isArray(g.moves)).map((g) => {
+    const { chess, moves } = replay(g.moves);
+    return moves.length === g.moves.length ? g : { ...g, moves, pgn: chess.pgn(), result: resultText(chess) };
+  });
 }
 
 export function saveGames(games: SavedGame[]) {

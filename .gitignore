@@ -29,3 +29,11 @@ runs/research-jev-v1/*
 !runs/research-jev-v1/report.json
 !runs/research-jev-v1/usage.json
 !runs/kev-vs-jev-v1.json
+!runs/transfer-kev-v01/
+runs/transfer-kev-v01/*
+!runs/transfer-kev-v01/report.json
+!runs/transfer-jev-v1/
+runs/transfer-jev-v1/*
+!runs/transfer-jev-v1/report.json
+!runs/transfer-jev-v1/usage.json
+!runs/kev-vs-jev-transfer-v1.json

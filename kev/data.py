@@ -20,8 +20,20 @@ def source_seed(seed, source):
     return int.from_bytes(hashlib.sha256(f"{seed}:{source}".encode()).digest()[:8], "big")
 
 
+# Repos whose main branch is a (no longer supported) loading script; read the Hub's auto-converted parquet branch instead.
+PARQUET_BRANCH = {"CogComp/trec": "refs/convert/parquet"}
+
+
+def dataset_ref(repo):
+    """(repo, revision-to-pin) for a repo id; parquet-branch repos pin that branch's sha, not main."""
+    return repo.partition(":")[0], PARQUET_BRANCH.get(repo.partition(":")[0])
+
+
 def _dataset(repo, split, rng):
-    return load_dataset(repo, split=split, revision=getattr(rng, "revision", None))
+    """repo may be 'owner/name' or 'owner/name:config'."""
+    name, _, config = repo.partition(":")
+    revision = getattr(rng, "revision", None) or PARQUET_BRANCH.get(name)
+    return load_dataset(name, config or None, split=split, revision=revision)
 
 NONE = "None of the above"
 # "None of the above" options must appear both as the correct answer and as a wrong alternative, with varied
@@ -64,7 +76,7 @@ def _sample(ds, n, rng):
         row = ds[i]
         if row.get("label", 0) == -1:
             continue
-        text = row.get("text", row.get("premise", row.get("passage", json.dumps(row, sort_keys=True))))
+        text = next((row[k] for k in ("text", "premise", "passage", "content", "question", "sentence") if isinstance(row.get(k), str)), json.dumps(row, sort_keys=True))
         normalized = " ".join(text.casefold().split())
         rng.origins.append({"row": i, "text_sha256": hashlib.sha256(normalized.encode()).hexdigest(),
                             "row_sha256": hashlib.sha256(json.dumps(row, sort_keys=True).encode()).hexdigest()})
@@ -133,21 +145,96 @@ SOURCES = {"banking77": (_banking, "train", "test"), "boolq": (_boolq, "train", 
            "mnli": (_mnli, "train", "validation_matched"), "sst5": (_sst5, "train", "test"), "yelp": (_yelp, "train", "test")}
 
 
-def build(n_per_source, split="train", seed=0, exclude=(), only=(), revisions=None):
-    unknown = (set(exclude) | set(only)) - SOURCES.keys()
+# Eval-only sources for transfer measurement. Never passed to training; kept out of SOURCES so build() defaults cannot
+# pick them up. Rotten Tomatoes (SST parent) and SNLI (MNLI sibling) are deliberately excluded.
+TREC = {"abbreviation": "Asks what an abbreviation stands for", "entity": "Asks about a thing, object, animal, product, or creative work",
+        "description": "Asks for a definition, description, reason, or manner", "human": "Asks about a person, group, or organisation",
+        "location": "Asks about a place", "number": "Asks for a number, date, count, or other numeric value"}
+EMOTION = {"sadness": None, "joy": None, "love": None, "anger": None, "fear": None, "surprise": None}
+AMAZON = ["1 star: very negative", "2 stars: negative", "3 stars: mixed", "4 stars: positive", "5 stars: very positive"]
+
+
+def _trec(split, n, rng):
+    ds = _dataset("CogComp/trec", split=split, rng=rng)
+    keys = list(TREC)
+    return [{"state": _wrap_state(ex["text"], rng), "questions": {"answer_type": {"type": "choice", "instructions": "What kind of answer does this question ask for?",
+             "criteria": dict(TREC), "label": keys[ex["coarse_label"]], "src": "trec"}}} for ex in _sample(ds, n, rng)]
+
+
+def _dbpedia(split, n, rng):
+    ds = _dataset("fancyzhx/dbpedia_14", split=split, rng=rng)
+    names = [x.lower().replace(" ", "_") for x in ds.features["label"].names]
+    return [{"state": _wrap_state(" ".join(ex["content"].split()[:200]), rng), "questions": {"category": {"type": "choice", "instructions": "Which category does the subject of this encyclopedia text belong to?",
+             "criteria": {k: None for k in names}, "label": names[ex["label"]], "src": "dbpedia14"}}} for ex in _sample(ds, n, rng)]
+
+
+def _emotion(split, n, rng):
+    ds = _dataset("dair-ai/emotion:split", split=split, rng=rng)
+    keys = list(EMOTION)
+    return [{"state": ex["text"], "questions": {"emotion": {"type": "choice", "instructions": "Which emotion does the writer express?",
+             "criteria": dict(EMOTION), "label": keys[ex["label"]], "src": "emotion"}}} for ex in _sample(ds, n, rng)]
+
+
+def _imdb(split, n, rng):
+    ds = _dataset("stanfordnlp/imdb", split=split, rng=rng)
+    return [{"state": _wrap_state(" ".join(ex["text"].replace("<br />", " ").split()[:220]), rng), "questions": {"positive": {"type": "noul", "instructions": "Is this movie review positive?",
+             "criteria": {"true": "The reviewer liked the film overall", "false": "The reviewer disliked the film overall"}, "label": ex["label"] == 1, "src": "imdb"}}} for ex in _sample(ds, n, rng)]
+
+
+def _amazon(split, n, rng):
+    ds = _dataset("SetFit/amazon_reviews_multi_en", split=split, rng=rng)
+    return [{"state": _wrap_state(" ".join(ex["text"].split()[:220]), rng), "questions": {"stars": {"type": "score", "instructions": "How many stars did this product reviewer give?",
+             "criteria": list(AMAZON), "label": ex["label"], "src": "amazon"}}} for ex in _sample(ds, n, rng)]
+
+
+def _qnli(split, n, rng):
+    ds = _dataset("nyu-mll/glue:qnli", split=split, rng=rng)
+    return [{"state": _wrap_state(ex["sentence"], rng), "questions": {"answers": {"type": "noul", "instructions": f'Does the sentence contain the answer to this question: "{ex["question"]}"',
+             "label": ex["label"] == 0, "src": "qnli"}}} for ex in _sample(ds, n, rng)]
+
+
+def _offensive(split, n, rng):
+    ds = _dataset("cardiffnlp/tweet_eval:offensive", split=split, rng=rng)
+    return [{"state": ex["text"], "questions": {"offensive": {"type": "noul", "instructions": "Is this post offensive?",
+             "criteria": {"true": "Contains insults, threats, profanity directed at someone, or hateful content", "false": "Not offensive"},
+             "label": ex["label"] == 1, "src": "tweet_offensive"}}} for ex in _sample(ds, n, rng)]
+
+
+def _mmlu(split, n, rng):
+    ds = _dataset("cais/mmlu:all", split=split, rng=rng)
+    out = []
+    for ex in _sample(ds, n, rng):
+        keys = ["a", "b", "c", "d"]
+        out.append({"state": {"subject": ex["subject"].replace("_", " "), "question": ex["question"]},
+                    "questions": {"answer": {"type": "choice", "instructions": "Which option correctly answers the question?",
+                                             "criteria": dict(zip(keys, ex["choices"])), "label": keys[ex["answer"]], "src": "mmlu"}}})
+    return out
+
+
+TRANSFER_SOURCES = {"trec": (_trec, "train", "test"), "dbpedia14": (_dbpedia, "train", "test"), "emotion": (_emotion, "train", "test"),
+                    "imdb": (_imdb, "train", "test"), "amazon": (_amazon, "train", "test"), "qnli": (_qnli, "train", "validation"),
+                    "tweet_offensive": (_offensive, "train", "test"), "mmlu": (_mmlu, "test", "test")}
+TRANSFER_REPOS = {"trec": "CogComp/trec", "dbpedia14": "fancyzhx/dbpedia_14", "emotion": "dair-ai/emotion", "imdb": "stanfordnlp/imdb",
+                  "amazon": "SetFit/amazon_reviews_multi_en", "qnli": "nyu-mll/glue", "tweet_offensive": "cardiffnlp/tweet_eval", "mmlu": "cais/mmlu"}
+
+
+def build(n_per_source, split="train", seed=0, exclude=(), only=(), revisions=None, sources=None, repos=None):
+    sources = SOURCES if sources is None else sources
+    repos = REPOS if repos is None else repos
+    unknown = (set(exclude) | set(only)) - sources.keys()
     if unknown:
         raise ValueError(f"unknown sources: {sorted(unknown)}")
     reqs = []
-    for name, (fn, tr, te) in SOURCES.items():
+    for name, (fn, tr, te) in sources.items():
         if name in exclude or (only and name not in only): continue
         rng = random.Random(source_seed(seed, name))
-        rng.revision = (revisions or {}).get(REPOS[name])
+        rng.revision = (revisions or {}).get(repos[name])
         source_split = tr if split == "train" else te
         records = fn(source_split, n_per_source, rng)
         if len(records) != len(rng.origins):
             raise ValueError(f"provenance mismatch for {name}")
         for record, origin in zip(records, rng.origins):
-            record["_meta"] = {**origin, "source": name, "repo": REPOS[name], "revision": rng.revision,
+            record["_meta"] = {**origin, "source": name, "repo": repos[name], "revision": rng.revision,
                                "split": source_split, "id": f"{name}/{source_split}/{origin['row']}"}
         reqs.extend(records)
     random.Random(seed).shuffle(reqs)

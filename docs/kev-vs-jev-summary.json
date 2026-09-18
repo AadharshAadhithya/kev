@@ -1,25 +1,28 @@
 {
+  "profile": "baseline",
   "status": "preliminary baseline snapshot",
+  "title": "kev vs. Jev",
+  "eyebrow": "PRELIMINARY  /  BASELINE SNAPSHOT",
   "suite": "evals/decision-v1/development.jsonl",
   "suite_sha256": "f9373760e475d3a06753524b92baafc57a9c51403879136c9fea1ac73ed8acdd",
   "inputs": {
-    "kev_report": {
+    "candidate_report": {
       "path": "/Users/jared/dev/kev/runs/research-kev-v01/report.json",
       "sha256": "5ebeb05dd9637fb1ce90c186c1a862d3057141d3ef2456f9f6900c5bdac7dfb9"
     },
-    "jev_report": {
-      "path": "/Users/jared/dev/kev/runs/research-jev-v1/report.json",
-      "sha256": "daff10c3e8d2dc6e6b916ad1243aed6a90d9f883b70153abb81e2b1f37ba944f"
-    },
-    "kev_rows": {
+    "candidate_rows": {
       "path": "/Users/jared/dev/kev/runs/research-kev-v01/rows.json",
       "sha256": "eaed3d21f0357693a33fe17fd43e6a220d3a4cd2688d81169e28ff4c56f2d6a4"
     },
-    "jev_rows": {
+    "reference_report": {
+      "path": "/Users/jared/dev/kev/runs/research-jev-v1/report.json",
+      "sha256": "daff10c3e8d2dc6e6b916ad1243aed6a90d9f883b70153abb81e2b1f37ba944f"
+    },
+    "reference_rows": {
       "path": "/Users/jared/dev/kev/runs/research-jev-v1/rows.json",
       "sha256": "4296ac36e4544e5b2e1c1886716c5e49bb73eefa6db28f72fa3fcfebd84eb88d"
     },
-    "comparison": {
+    "paired": {
       "path": "/Users/jared/dev/kev/runs/kev-vs-jev-v1.json",
       "sha256": "4ef7d5de8311520b9cc9e892cfadf67cdffd41419ec7e43a100f9d848c860ee6"
     }
@@ -40,6 +43,8 @@
       "zero_data_retention_requested": true
     }
   },
+  "candidate_label": "Original kev: Qwen2.5-0.5B + LoRA",
+  "extra_units": "including perturbations",
   "coverage_per_model": {
     "requested_records": 588,
     "requested_questions": 852,
@@ -108,6 +113,7 @@
       "jev_accuracy": 0.825
     }
   ],
+  "tasks_where_jev_higher": 5,
   "macro_accuracy": {
     "kev": 0.78125,
     "jev": 0.7992187500000001
@@ -133,6 +139,29 @@
     "jev": 0.8111111111111111
   },
   "micro_accuracy_difference_percentage_points": -1.388888888888884,
+  "behaviour": {
+    "kev": {
+      "ece_clean": 0.08067573590967712,
+      "mean_confidence_clean": 0.8690721518656611,
+      "permutation_flip_rate": 0.027777777777777776,
+      "permutation_n": 36,
+      "none_present_accuracy": 0.7777777777777778,
+      "none_present_n": 36,
+      "none_absent_accuracy": 0.6666666666666666,
+      "none_absent_n": 36
+    },
+    "jev": {
+      "ece_clean": 0.07697180134680137,
+      "mean_confidence_clean": 0.8880829124579126,
+      "permutation_flip_rate": 0.0,
+      "permutation_n": 36,
+      "none_present_accuracy": 0.75,
+      "none_present_n": 36,
+      "none_absent_accuracy": 0.4722222222222222,
+      "none_absent_n": 36
+    }
+  },
+  "reference_returned_zeros": 9388,
   "nll_floor_sensitivity_not_plotted": {
     "0.001": {
       "candidate_macro_nll": 0.6551909754180831,
@@ -147,15 +176,22 @@
       "reference_macro_nll": 1.01426987402772
     }
   },
+  "footnotes": [
+    "Scope: original kev was fine-tuned on all six sources; Jev training exposure is unknown. Not an out-of-domain equivalence claim or fair architecture ablation.",
+    "Status: the locked final test has not been evaluated. More runs are pending; this development snapshot is not a final model-selection claim.",
+    "Probability caveat: NLL is omitted. Jev returns rounded zeros (9,388 in this run); NLL is clipping-floor sensitive (EPS 1e-9; saved alternatives 1e-6 and 1e-3)."
+  ],
   "caveats": [
-    "Preliminary baseline snapshot on the frozen development suite; not a final model-selection claim.",
-    "Locked final test has not been evaluated.",
     "Original kev checkpoint was fine-tuned on all six sources; Jev training exposure is unknown.",
-    "This is neither an out-of-domain equivalence claim nor a fair architecture ablation.",
+    "This is not an out-of-domain equivalence claim.",
+    "Development-suite comparison; the locked final test has not been evaluated.",
+    "Not a final model-selection claim and not a fair architecture ablation.",
     "Accuracy is top-1 exact match, including Score questions; perturbations are excluded from plotted accuracy.",
-    "Macro accuracy weights eight tasks equally; micro accuracy weights 720 clean questions equally.",
+    "Macro accuracy weights tasks equally; micro accuracy weights clean questions equally.",
     "Only the saved paired macro-difference interval is shown; no per-task uncertainty is estimated.",
-    "Jev is a hosted alias with an unexposed revision, evaluated through Vercel AI SDK 7.0.105.",
+    "Behaviour probes (ECE, permutation flip rate, none-of-the-above) are point estimates without uncertainty.",
+    "Jev is a hosted alias with an unexposed revision, evaluated through the Vercel AI SDK.",
     "NLL is not plotted: Jev returns rounded zeros, making NLL clipping-floor sensitive (EPS 1e-9; saved alternatives 1e-6 and 1e-3)."
-  ]
+  ],
+  "png_title": "kev vs. Jev \u2014 preliminary development baseline"
 }

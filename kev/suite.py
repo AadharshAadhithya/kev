@@ -6,7 +6,7 @@ import random
 from collections import Counter
 from pathlib import Path
 
-from kev.data import REPOS, SOURCES, build, materialize, source_seed
+from kev.data import REPOS, SOURCES, TRANSFER_REPOS, TRANSFER_SOURCES, build, dataset_ref, materialize, source_seed
 from kev.model import encode, load_tokenizer
 
 SPLITS = ("train", "calibration", "development", "test")
@@ -112,35 +112,50 @@ def select_unique(records, count, seen, tokenizers, report):
     raise ValueError(f"only {len(selected)}/{count} records fit the common context policy")
 
 
-def freeze(directory, train=300, calibration=40, development=80, test=80, seed=20260918, holdout=("mnli", "sst5")):
+def training_state_hashes(suite_dir):
+    """Normalized state hashes of a frozen suite's training + calibration partitions, for exact-match contamination checks."""
+    hashes = set()
+    for split in ("train", "calibration"):
+        for record in load_split(suite_dir, split):
+            hashes.add(record["_meta"]["text_sha256"])
+    return hashes
+
+
+def freeze(directory, train=300, calibration=40, development=80, test=80, seed=20260918, holdout=("mnli", "sst5"),
+           sources=None, repos=None, exclude_states_from=None):
     from huggingface_hub import HfApi
 
+    sources = SOURCES if sources is None else sources
+    repos = REPOS if repos is None else repos
+    eval_only = set(holdout) >= set(sources)
     directory = Path(directory)
     if directory.exists():
         raise FileExistsError(f"refusing to overwrite frozen suite {directory}")
     hub = HfApi()
-    revisions = {repo: hub.dataset_info(repo).sha for repo in REPOS.values()}
+    revisions = {repo: hub.dataset_info(*dataset_ref(repo)[:1], revision=dataset_ref(repo)[1]).sha for repo in set(repos.values())}
     base_revisions = {base: hub.model_info(base).sha for base in BASES}
     tokenizers = [load_tokenizer(base, revision=revision) for base, revision in base_revisions.items()]
     manifest = {
-        "version": 1, "seed": seed, "holdout_sources": list(holdout),
+        "version": 1, "seed": seed, "holdout_sources": list(holdout), "eval_only": eval_only,
         "dataset_revisions": revisions, "base_revisions": base_revisions,
         "context": {"max_state": 384, "max_branch": 1024, "max_packed": 2048, "truncate": False},
         "selection": "Normalized exact-state deduplication across partitions; common tokenizer context admission; no fuzzy decontamination or pretraining-contamination claim.",
         "legacy_checkpoints": "Training/calibration overlap for pre-manifest checkpoints is unknown; exploratory only.",
         "objective": "Negative macro-average clean development NLL, equal weight per task; raw probabilities.",
+        "excluded_training_states_from": str(exclude_states_from) if exclude_states_from else None,
         "files": {}, "admission": {},
     }
     partitions = {split: [] for split in SPLITS}
-    seen = set()
-    for source in SOURCES:
+    seen = set(training_state_hashes(exclude_states_from)) if exclude_states_from else set()
+    manifest["excluded_training_state_hashes"] = len(seen)
+    for source in sources:
         report = Counter()
-        train_pool = build(max(3 * (train + calibration), 800), "train", seed, only=[source], revisions=revisions)
-        test_pool = build(max(3 * (development + test), 600), "test", seed, only=[source], revisions=revisions)
+        test_pool = build(max(3 * (development + test), 600), "test", seed, only=[source], revisions=revisions, sources=sources, repos=repos)
         chosen = select_unique(test_pool, development + test, seen, tokenizers, report)
         partitions["development"].extend(chosen[:development])
         partitions["test"].extend(chosen[development:])
         if source not in holdout:
+            train_pool = build(max(3 * (train + calibration), 800), "train", seed, only=[source], revisions=revisions, sources=sources, repos=repos)
             chosen = select_unique(train_pool, train + calibration, seen, tokenizers, report)
             partitions["calibration"].extend(chosen[:calibration])
             partitions["train"].extend(chosen[calibration:])
@@ -178,10 +193,16 @@ def main():
     ap.add_argument("--development", type=int, default=80)
     ap.add_argument("--test", type=int, default=80)
     ap.add_argument("--seed", type=int, default=20260918)
+    ap.add_argument("--transfer", action="store_true", help="eval-only suite from TRANSFER_SOURCES (no train/calibration partitions)")
+    ap.add_argument("--exclude-states-from", help="frozen suite whose train+calibration states must not appear here")
     a = ap.parse_args()
-    if min(a.train, a.calibration, a.development, a.test) < 1:
-        ap.error("all split sizes must be positive")
-    freeze(a.out, a.train, a.calibration, a.development, a.test, a.seed)
+    if min(a.development, a.test) < 1 or (not a.transfer and min(a.train, a.calibration) < 1):
+        ap.error("split sizes must be positive")
+    if a.transfer:
+        freeze(a.out, 0, 0, a.development, a.test, a.seed, holdout=tuple(TRANSFER_SOURCES), sources=TRANSFER_SOURCES,
+               repos=TRANSFER_REPOS, exclude_states_from=a.exclude_states_from)
+    else:
+        freeze(a.out, a.train, a.calibration, a.development, a.test, a.seed, exclude_states_from=a.exclude_states_from)
 
 
 if __name__ == "__main__":

@@ -126,7 +126,7 @@ def paired_bootstrap(candidate, reference, samples=1000, seed=0, metric="nll"):
             "samples": samples, "unit": "source-stratified original record; sibling questions stay together"}
 
 
-def summarize(rows, temperature=1.0):
+def summarize(rows, temperature=1.0, heldout_sources=("mnli", "sst5")):
     clean = [r for r in rows if r["variant"] == "clean"]
     tasks = grouped_metrics(clean, "task")
     variants = grouped_metrics(rows, "variant")
@@ -140,7 +140,7 @@ def summarize(rows, temperature=1.0):
             flips.append(int(np.argmax(aligned) != np.argmax(original["p"])))
     return {"objective": -float(np.mean([v["nll"] for v in tasks.values()])),
             "clean": metrics(clean), "tasks": tasks, "variants": variants,
-            "heldout_tasks": grouped_metrics([r for r in clean if r["source"] in ("mnli", "sst5")], "task"),
+            "heldout_tasks": grouped_metrics([r for r in clean if r["source"] in heldout_sources], "task") if any(r["source"] in heldout_sources for r in clean) else {},
             "permutation": {"n": len(diffs), "mean_max_delta": float(np.mean(diffs)) if diffs else None,
                             "flip_rate": float(np.mean(flips)) if flips else None},
             "temperature": temperature, "calibrated_clean": metrics(clean, temperature),
@@ -169,7 +169,7 @@ class LocalPredictor:
                 "latency_ms": 1000 * (time.perf_counter() - start), "input_tokens": len(enc["ids"])}
 
 
-def evaluate_records(records, predictor, directory, temperature=1.0):
+def evaluate_records(records, predictor, directory, temperature=1.0, heldout_sources=("mnli", "sst5")):
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=False)
     coverage = {"requested_records": len(records), "requested_questions": sum(len(r["questions"]) for r in records),
@@ -194,7 +194,7 @@ def evaluate_records(records, predictor, directory, temperature=1.0):
             if coverage["evaluated_records"] % 50 == 0:
                 print(f"evaluated {coverage['evaluated_records']}/{len(records)}", flush=True)
     write_json(directory / "rows.json", rows)
-    report = summarize(rows, temperature)
+    report = summarize(rows, temperature, heldout_sources)
     report.update(coverage=coverage, latency_ms={"median": float(np.median(latencies)), "p95": float(np.quantile(latencies, .95))})
     write_json(directory / "report.json", report)
     return report, rows
@@ -210,7 +210,8 @@ def main():
     a = ap.parse_args()
     split = "test" if a.allow_test else "development"
     records = load_split(a.suite, split, allow_test=a.allow_test)
-    report, _ = evaluate_records(records, LocalPredictor(a.run, a.device), a.out)
+    heldout = json.loads((Path(a.suite) / "manifest.json").read_text())["holdout_sources"]
+    report, _ = evaluate_records(records, LocalPredictor(a.run, a.device), a.out, heldout_sources=tuple(heldout))
     report.update(suite_sha256=digest(Path(a.suite) / "manifest.json"), run=a.run, split=split, calibration_applied=False)
     write_json(Path(a.out) / "report.json", report)
     print(json.dumps({"objective": report["objective"], "clean": report["clean"], "coverage": report["coverage"]}, indent=2))

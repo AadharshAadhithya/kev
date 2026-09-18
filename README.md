@@ -262,6 +262,8 @@ Trials are configuration-only: `kev.experiment` refuses configs outside a bounde
 
 ![kev vs Jev, preliminary per-task accuracy on the frozen development suite](docs/kev-vs-jev.png)
 
+**Outside kev's training data** (`evals/transfer-v1`: TREC, DBpedia-14, Emotion, IMDB, Amazon, QNLI, TweetEval offensive, MMLU; zero exact-match overlap with any kev training state): kev-0.5b 63.3% vs Jev 82.3% on 640 clean questions, macro difference **−19.1 pp, 95% CI [−23.1, −15.0]**. kev is the better-calibrated of the two out of domain (ECE 0.052 vs 0.075) and Jev's option-order flip rate is 0.000 (kev 0.208). The in-distribution parity above does not transfer. Details: `runs/kev-vs-jev-transfer-v1.json`; plan for closing the gap: [PLAN.md](PLAN.md).
+
 | Mechanism test | Result |
 |---|---|
 | Isolation — secret in sibling question / absent / in state | `p = 0.03` / `0.03` / **`0.99`** |

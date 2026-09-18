@@ -3,6 +3,7 @@ import json
 import os
 import re
 import subprocess
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -28,7 +29,7 @@ def provision_key(scope):
 class JevPredictor:
     def __init__(self, key, budget=0.1, max_calls=700):
         self.budget, self.max_calls = budget, max_calls
-        self.calls, self.input_tokens, self.output_tokens = 0, 0, 0
+        self.calls, self.input_tokens, self.output_tokens, self.retries = 0, 0, 0, 0
         self.started_at = datetime.now(timezone.utc).isoformat()
         worker = Path(__file__).resolve().parents[1] / "playground/scripts/jev-evaluate.mjs"
         self.process = subprocess.Popen(["node", str(worker)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -47,15 +48,22 @@ class JevPredictor:
         if self.calls >= self.max_calls or (self.input_tokens + 65536) * PRICE_PER_MILLION / 1e6 > self.budget:
             raise RuntimeError("Jev evaluation reached the request/token cost cap")
         request = api_request(record)
-        self.process.stdin.write(json.dumps(request) + "\n")
-        self.process.stdin.flush()
-        line = self.process.stdout.readline()
-        if not line:
-            raise RuntimeError("Jev SDK worker exited without a response")
-        result = json.loads(line)
-        self.calls += 1
-        if "error" in result:
-            raise RuntimeError(f"Jev request failed: {result['error']['name']} (HTTP {result['error']['status']})")
+        for attempt in range(4):
+            self.process.stdin.write(json.dumps(request) + "\n")
+            self.process.stdin.flush()
+            line = self.process.stdout.readline()
+            if not line:
+                raise RuntimeError("Jev SDK worker exited without a response")
+            result = json.loads(line)
+            self.calls += 1
+            if "error" not in result:
+                break
+            status = result["error"]["status"]
+            # bounded retry for hosted-side failures only; client errors (4xx) are real and must surface
+            if attempt == 3 or (status is not None and status < 500):
+                raise RuntimeError(f"Jev request failed: {result['error']['name']} (HTTP {status})")
+            self.retries += 1
+            time.sleep(2 ** attempt)
         usage = result["usage"]
         if usage.get("inputTokens") is None:
             raise RuntimeError("Jev returned no input token usage; cannot account for cost")
@@ -73,7 +81,7 @@ class JevPredictor:
     def accounting(self):
         return {"model": "typesafe-ai/jev", "model_revision": "Gateway alias; provider revision not exposed by SDK result",
                 "started_at": self.started_at, "calls": self.calls, "input_tokens": self.input_tokens,
-                "output_tokens": self.output_tokens, "listed_input_usd_per_million": PRICE_PER_MILLION,
+                "output_tokens": self.output_tokens, "retries_after_5xx": self.retries, "listed_input_usd_per_million": PRICE_PER_MILLION,
                 "estimated_usd": self.input_tokens * PRICE_PER_MILLION / 1e6,
                 "budget_usd": self.budget, "sdk": "ai@7.0.105", "zero_data_retention_requested": True}
 
@@ -98,7 +106,8 @@ def main():
         ap.error("Set AI_GATEWAY_API_KEY or explicitly select --provision-scope")
     predictor = JevPredictor(key, a.budget, a.max_calls)
     try:
-        report, _ = evaluate_records(records, predictor, a.out)
+        heldout = json.loads((Path(a.suite) / "manifest.json").read_text())["holdout_sources"]
+        report, _ = evaluate_records(records, predictor, a.out, heldout_sources=tuple(heldout))
         report.update(suite_sha256=digest(Path(a.suite) / "manifest.json"), split="development", provider=predictor.accounting())
         write_json(Path(a.out) / "report.json", report)
         print(json.dumps({"clean": report["clean"], "variants": report["variants"], "provider": report["provider"]}, indent=2))

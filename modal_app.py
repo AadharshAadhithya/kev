@@ -53,7 +53,7 @@ def local_source_hashes():
     return source_hashes()
 
 
-@app.function(image=image, gpu=GPU, cpu=2, memory=(32768, 49152), max_containers=4, retries=0, timeout=1800,
+@app.function(image=image, gpu=GPU, cpu=2, memory=(32768, 49152), max_containers=8, retries=0, timeout=7200,
               volumes={RUNS_MOUNT: runs_volume, HF_MOUNT: hf_cache}, secrets=secrets)
 def run_trial(study, index, label, config, suite, expected_sources, git_commit, existing=None, transfer=None):
     """One trial in one container. `existing` is a checkpoint path on the runs volume or a Hub id (legacy scoring)."""
@@ -95,8 +95,8 @@ def launch(suite, plan_path, name, gpu, existing=(), transfer=None, budget=20.0,
         raise ValueError("study name must be a simple unique identifier")
     if (ROOT / "runs" / name).exists():
         raise FileExistsError("choose a new study name; existing results are immutable")
-    if not 60 <= timeout <= 1800 or not 0 < budget <= 25:
-        raise ValueError("timeout must be 60..1800 seconds and study budget <= $25")
+    if not 60 <= timeout <= 7200 or not 0 < budget <= 250:   # overnight authorization: $500 total, tracked in PLAN.md
+        raise ValueError("timeout must be 60..7200 seconds and study budget <= $250")
     trials = load_plan(ROOT / suite, ROOT / plan_path) if plan_path else []
     rates = {"H100": 3.95, "T4": .59}
     if gpu not in rates:
@@ -110,7 +110,7 @@ def launch(suite, plan_path, name, gpu, existing=(), transfer=None, budget=20.0,
         print("warning: kev/ or evals/ has uncommitted changes; provenance records the last commit, not the working tree", flush=True)
     entries = [(None, p) for p in existing] + [(t, None) for t in trials]
     jobs = [(name, i, Path(ex).name if ex else f"trial-{i}", cfg or {}, suite, sources, commit, ex, transfer) for i, (cfg, ex) in enumerate(entries)]
-    fn = run_trial.with_options(gpu=gpu, timeout=timeout, retries=0, max_containers=4)
+    fn = run_trial.with_options(gpu=gpu, timeout=timeout, retries=0, max_containers=8)
     print(f"launching {len(jobs)} trial(s) on {gpu} for study {name}", flush=True)
     results = list(fn.starmap(jobs, return_exceptions=True))
     for job, result in zip(jobs, results):

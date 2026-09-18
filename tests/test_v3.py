@@ -162,3 +162,15 @@ def test_none_pair_is_minimal_and_relabelled():
     assert absent["questions"]["reason"]["label"] not in req["questions"]["reason"]["criteria"]
     materialize(present); materialize(absent)
     assert none_pair({"state": "s", "questions": {"q": {"type": "noul", "instructions": "i", "label": True, "src": "t"}}}, random.Random(0)) == []
+
+
+def test_option_isolation_mask_rule():
+    from kev.model import branch_mask_batch, OPT_NONE, OPT_DECIDE
+    seg = [0, 0, 1, 1, 1, 1, 1, 1, 1]           # state x2, then q: instr x2, option0 x2, option1 x2, decide
+    opt = [OPT_NONE, OPT_NONE, OPT_NONE, OPT_NONE, 0, 0, 1, 1, OPT_DECIDE]
+    m = branch_mask_batch([seg], "cpu", opts=[opt])[0, 0] == 0
+    assert m[6, 4] == False and m[7, 5] == False      # option1 never sees option0
+    assert m[6, 2] and m[6, 3] and m[6, 0]           # option sees instruction and state
+    assert m[7, 6] and m[5, 4]                        # option sees itself (causal within span)
+    assert all(m[8, j] for j in range(9))             # decide sees everything in its question
+    assert m[3, 4] == False                           # instruction never sees options (causal)

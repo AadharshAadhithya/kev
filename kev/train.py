@@ -54,6 +54,9 @@ def main():
     ap.add_argument("--batch", type=int, default=1, help="records per forward pass (padded batch); optimizer step every --accum micro-batches")
     ap.add_argument("--dtype", choices=["fp32", "bf16"], default="fp32", help="bf16 = autocast forward with fp32 master weights (CUDA only)")
     ap.add_argument("--checkpointing", type=int, choices=[0, 1], default=0)
+    ap.add_argument("--option_isolation", type=int, choices=[0, 1], default=0, help="option spans are isolated sub-branches with shared positions (exact permutation invariance)")
+    ap.add_argument("--special_embeddings", type=int, choices=[0, 1], default=0, help="also train the embeddings of the 5 delimiter tokens")
+    ap.add_argument("--head_dim", type=int, default=256, help="pointer head dimension")
     ap.add_argument("--base_revision", default="", help="pin the base commit when the suite manifest does not pin this base")
     ap.add_argument("--p_none", type=float, default=0.1)
     ap.add_argument("--p_none_distract", type=float, default=0.12)
@@ -86,7 +89,8 @@ def main():
     if manifest and not revision:
         raise ValueError("base not pinned by the suite; pass --base_revision")
     tok = load_tokenizer(a.base, revision=revision)
-    model = DecisionModel(a.base, tok, dev, lora=a.lora, revision=revision)
+    model = DecisionModel(a.base, tok, dev, lora=a.lora, revision=revision, head_dim=a.head_dim,
+                          option_isolation=bool(a.option_isolation), special_embeddings=bool(a.special_embeddings))
     if a.checkpointing:
         model.lm.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
     model.lm.config.use_cache = False
@@ -132,12 +136,12 @@ def main():
                     variants += none_pair(req, item_rng)
                 for v in variants:
                     rec = materialize(v)
-                    enc = encode(tok, rec, strict=True)
+                    enc = model.encode(tok, rec, strict=True)
                     if len(enc["ids"]) > 2048:
                         raise ValueError("training request exceeds 2048 packed tokens")
                     recs.append(rec); encs.append(enc); tokens_seen += len(enc["ids"])
                 if a.perm_kl > 0 and item_rng.random() < a.perm_frac and any(q["qtype"] == "choice" and len(q["options"]) >= 3 for q in rec["questions"]):
-                    rec2, perms = permuted_copy(rec, item_rng); perm_jobs.append((len(recs) - 1, encode(tok, rec2, strict=True), perms))
+                    rec2, perms = permuted_copy(rec, item_rng); perm_jobs.append((len(recs) - 1, model.encode(tok, rec2, strict=True), perms))
             with autocast:
                 logits_b = model.forward_batch(encs)
                 logits2_b = model.forward_batch([e for _, e, _ in perm_jobs]) if perm_jobs else []
@@ -168,7 +172,8 @@ def main():
                     run = Counter()
     os.makedirs(a.out, exist_ok=True)
     model.lm.save_pretrained(a.out)
-    torch.save({"head": model.head.state_dict(), "base": a.base, "base_revision": revision, "lora": a.lora,
+    torch.save({"head": model.head.state_dict(), "base": a.base, "base_revision": revision, "lora": a.lora, "head_dim": a.head_dim,
+                "option_isolation": bool(a.option_isolation), "special_embeddings": bool(a.special_embeddings),
                 "holdout": holdout, "args": vars(a), "suite_sha256": suite_hash}, f"{a.out}/head.pt")
     tok.save_pretrained(a.out)
     write_json(out_dir / "training_metrics.json", {"wall_seconds": time.time() - t0, "records_seen": seen,

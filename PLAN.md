@@ -103,3 +103,14 @@ Modal documentation: [images](https://modal.com/docs/guide/images), [volumes](ht
 - [ ] Deferred: final release/model-card/Hub updates until generalization and calibration justify them.
 
 Relevant code: [suite builder](kev/study_v3.py), [rule generator](kev/composition.py), [experiment runner](kev/experiment.py), [benchmark](kev/benchmark.py), [Modal app](modal_app.py), [v3 tests](tests/test_v3.py).
+
+## Autoresearch log
+
+Maintained by `kev.autoresearch`; full table in [`runs/leaderboard.md`](runs/leaderboard.md). Selection uses development partitions only.
+
+- **Qwen3-0.6B-Base** incumbent (v4 suites): transfer 0.605, dev 0.800, seeds [2], knobs `{"epochs": 2, "p_none_pair": 0.25}`
+- **Qwen3-4B-Base**: no eligible trial yet
+- **Qwen3-8B-Base**: no eligible trial yet
+
+| round | base | trials | best transfer | best knobs | incumbent after | spend |
+|---|---|---|---|---|---|---|

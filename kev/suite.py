@@ -123,7 +123,7 @@ def training_state_hashes(suite_dir):
 
 
 def freeze(directory, train=300, calibration=40, development=80, test=80, seed=20260918, holdout=("mnli", "sst5"),
-           sources=None, repos=None, exclude_states_from=None, contrastive_pairs=0, contrastive_holdout_families=()):
+           sources=None, repos=None, exclude_states_from=None, contrastive_pairs=0, contrastive_holdout_families=(), contrastive_eval_pairs=40):
     from huggingface_hub import HfApi
 
     sources = SOURCES if sources is None else sources
@@ -177,17 +177,20 @@ def freeze(directory, train=300, calibration=40, development=80, test=80, seed=2
         # training/calibration pairs and development/test pairs come from disjoint seeds within trainable families;
         # held-out families appear only in development/test (never trained anywhere)
         train_recs, rep_train = generate(contrastive_pairs, seed=f"{seed}-train", families=trainable_fams) if trainable_fams and not eval_only else ([], {})
-        eval_families = (held or families) if eval_only else families
-        eval_recs, rep_eval = generate(max(contrastive_pairs // 4, 4), seed=f"{seed}-eval", families=eval_families)
+        # eval-only suites carry the held-out families only; trainable suites carry their trainable families only
+        eval_families = (held or families) if eval_only else trainable_fams
+        eval_recs, rep_eval = generate(contrastive_eval_pairs, seed=f"{seed}-eval", families=eval_families)
         for r in train_recs + eval_recs:
             r["_meta"].update(group_id=r["_meta"]["family_id"], variant="clean")   # siblings are one bootstrap unit
             if r["_meta"]["text_sha256"] in seen: raise ValueError("contrastive state collides with an existing state")
         seen.update(r["_meta"]["text_sha256"] for r in train_recs + eval_recs)
         n_cal = 2 * max(len(train_recs) // 20, 1) if train_recs else 0
         partitions["calibration"].extend(train_recs[:n_cal]); partitions["train"].extend(train_recs[n_cal:])
-        half = len(eval_recs) // 2 // 2 * 2   # even split, siblings stay adjacent
-        partitions["development"].extend(eval_recs[:half]); partitions["test"].extend(eval_recs[half:])
-        manifest["contrastive"] = {"pairs_per_family_train": contrastive_pairs, "trainable_families": trainable_fams, "eval_only_families": held,
+        # stratified by family: alternate pairs (siblings adjacent) between development and test
+        for i in range(0, len(eval_recs), 2):
+            partitions["development" if (i // 2) % 2 == 0 else "test"].extend(eval_recs[i : i + 2])
+        manifest["contrastive"] = {"pairs_per_family_train": contrastive_pairs, "pairs_per_family_eval": contrastive_eval_pairs,
+                                   "eval_families": eval_families, "trainable_families": trainable_fams, "eval_only_families": held,
                                    "train_report": rep_train, "eval_report": rep_eval,
                                    "note": "labels from rule evaluators; ablation + invariance checks passed for every kept pair; no LLM"}
         if trainable_fams and not eval_only: manifest["trainable_sources"].append("contrastive")

@@ -43,12 +43,12 @@
     ]
   },
   "dataset_revisions": {
-    "allenai/sciq": "2c94ad3e1aafab77146f384e23536f97a4849815",
-    "cais/mmlu": "c30699e8356da336a370243923dbaf21066bb9fe",
-    "google-research-datasets/paws": "161ece9501cf0a11f3e48bd356eaa82de46d6a09",
-    "nyu-mll/glue": "bcdcba79d07bc864c1c254ccfcedcce55bcc9a8c",
     "dair-ai/emotion": "cab853a1dbdf4c42c2b3ef2173804746df8825fe",
-    "cardiffnlp/tweet_eval": "b3a375baf0f409c77e6bc7aa35102b7b3534f8be"
+    "nyu-mll/glue": "bcdcba79d07bc864c1c254ccfcedcce55bcc9a8c",
+    "cardiffnlp/tweet_eval": "b3a375baf0f409c77e6bc7aa35102b7b3534f8be",
+    "google-research-datasets/paws": "161ece9501cf0a11f3e48bd356eaa82de46d6a09",
+    "allenai/sciq": "2c94ad3e1aafab77146f384e23536f97a4849815",
+    "cais/mmlu": "c30699e8356da336a370243923dbaf21066bb9fe"
   },
   "base_revisions": {
     "Qwen/Qwen2.5-0.5B": "060db6499f32faf8b98477b0a26969ef7d8b9987",
@@ -76,14 +76,14 @@
       "questions": 0
     },
     "development.jsonl": {
-      "sha256": "6be5cc4ed1f60dc81182a12266920daf608bf676543fea2d29330bd7e3895072",
-      "records": 618,
-      "questions": 618
+      "sha256": "02732ee2e662b7ec0c276f7f89ae29f44e7ce262ffac8e9c116c5bc82e5608b8",
+      "records": 668,
+      "questions": 668
     },
     "test.jsonl": {
-      "sha256": "922f90cfe99ff4a67fb9d40a1d71d46e0a48f45e2df68fddb59aefa2c280e9ce",
-      "records": 618,
-      "questions": 618
+      "sha256": "96c06100b7e94772c4eddbd61b42c1a1a9d60911ddb2c23767c11c8980618dde",
+      "records": 668,
+      "questions": 668
     }
   },
   "admission": {
@@ -119,6 +119,11 @@
   "excluded_training_state_hashes": 3878,
   "contrastive": {
     "pairs_per_family_train": 60,
+    "pairs_per_family_eval": 40,
+    "eval_families": [
+      "authorization",
+      "deadline"
+    ],
     "trainable_families": [
       "return_window",
       "spend_threshold",
@@ -132,12 +137,12 @@
     "train_report": {},
     "eval_report": {
       "authorization": {
-        "pairs": 15,
+        "pairs": 40,
         "rejected": 0,
         "reasons": {}
       },
       "deadline": {
-        "pairs": 15,
+        "pairs": 40,
         "rejected": 0,
         "reasons": {}
       }
@@ -148,6 +153,6 @@
     "data.py": "147ddbe271c07d14c4988651374c873d26f53e97a18d42ad492102ea7d4da7df",
     "api.py": "cdb0602684d798ccd3fc2c86be622f2a8e7bcdeee64d07f95604c7d3fd4701ec",
     "model.py": "1366fc0c08154d9bffca5b0bb293f6732344b8fb157377083039de303441a383",
-    "suite.py": "9b304b6e30a382802885b62877ecf813ba0ecb0ca97501f975e0c12d65cb762f"
+    "suite.py": "c4db818f83d7abaf4d8349a5b58f20f70439e04127b0989eb1f831be85578d87"
   }
 }

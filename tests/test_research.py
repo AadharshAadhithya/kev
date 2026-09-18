@@ -246,3 +246,16 @@ def test_permuted_variants_pair_with_their_parent_not_their_group():
             rows += prediction_rows(rec, {"probabilities": {"reason": {k: (0.7 if k == rec["questions"]["reason"]["label"] else 0.3 / (len(keys) - 1)) for k in keys}}})
     report = summarize(rows)
     assert report["permutation"]["n"] == 2 and report["permutation"]["flip_rate"] == 0.0
+
+
+def test_contrastive_eval_split_is_stratified_by_family():
+    from collections import Counter
+    from kev.contrastive import generate
+    recs, _ = generate(6, seed="t", families=["authorization", "deadline"])
+    dev, test = [], []
+    for i in range(0, len(recs), 2):
+        (dev if (i // 2) % 2 == 0 else test).extend(recs[i : i + 2])
+    for part in (dev, test):
+        fams = Counter(r["_meta"]["family"] for r in part)
+        assert set(fams) == {"authorization", "deadline"} and all(v == 6 for v in fams.values())
+        assert all(a["_meta"]["pair_id"] == b["_meta"]["pair_id"] for a, b in zip(part[::2], part[1::2]))

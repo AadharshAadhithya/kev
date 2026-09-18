@@ -41,15 +41,15 @@
   },
   "dataset_revisions": {
     "CogComp/trec": "65752bf53af25bc935a0dce92fb5b6c930728450",
-    "google/boolq": "35b264d03638db9f4ce671b711558bf7ff0f80d5",
-    "nyu-mll/multi_nli": "da70db2af9d09693783c3320c4249840212ee221",
-    "stanfordnlp/imdb": "e6281661ce1c48d982bc483cf8a173c1bbeb5d31",
-    "SetFit/sst5": "e51bdcd8cd3a30da231967c1a249ba59361279a3",
-    "Yelp/yelp_review_full": "c1f9ee939b7d05667af864ee1cb066393154bf85",
-    "SetFit/amazon_reviews_multi_en": "ec73b665e4be0f567b69d39425355401cfe0d29b",
-    "fancyzhx/ag_news": "eb185aade064a813bc0b7f42de02595523103ca4",
     "legacy-datasets/banking77": "f54121560de48f2852f90be299010d1d6dc612ec",
-    "fancyzhx/dbpedia_14": "9abd46cf7fc8b4c64290f26993c540b92aa145ac"
+    "stanfordnlp/imdb": "e6281661ce1c48d982bc483cf8a173c1bbeb5d31",
+    "fancyzhx/ag_news": "eb185aade064a813bc0b7f42de02595523103ca4",
+    "SetFit/amazon_reviews_multi_en": "ec73b665e4be0f567b69d39425355401cfe0d29b",
+    "fancyzhx/dbpedia_14": "9abd46cf7fc8b4c64290f26993c540b92aa145ac",
+    "google/boolq": "35b264d03638db9f4ce671b711558bf7ff0f80d5",
+    "SetFit/sst5": "e51bdcd8cd3a30da231967c1a249ba59361279a3",
+    "nyu-mll/multi_nli": "da70db2af9d09693783c3320c4249840212ee221",
+    "Yelp/yelp_review_full": "c1f9ee939b7d05667af864ee1cb066393154bf85"
   },
   "base_revisions": {
     "Qwen/Qwen2.5-0.5B": "060db6499f32faf8b98477b0a26969ef7d8b9987",
@@ -77,14 +77,14 @@
       "questions": 568
     },
     "development.jsonl": {
-      "sha256": "4a439dd349088c7a00c3d0b2cb8e6c93594b834ff26797b50b2cfc0b3db87f50",
-      "records": 1106,
-      "questions": 1370
+      "sha256": "10e5a72102b844a167ade94c60cf4556cc63950b2ded17fb87bf96028cb557f1",
+      "records": 1176,
+      "questions": 1440
     },
     "test.jsonl": {
-      "sha256": "b1066a088621fb9e39ec0c99e4a025570f2a4e394ac83e581509a07ccbeed63f",
-      "records": 1106,
-      "questions": 1370
+      "sha256": "cd7d129a84232e0c7a4e92b4840a6dfe14c8bb93c5d1904b526fa8c085325d2d",
+      "records": 1176,
+      "questions": 1440
     }
   },
   "admission": {
@@ -135,6 +135,13 @@
   "excluded_training_state_hashes": 0,
   "contrastive": {
     "pairs_per_family_train": 60,
+    "pairs_per_family_eval": 40,
+    "eval_families": [
+      "return_window",
+      "spend_threshold",
+      "age_eligibility",
+      "quantity_limit"
+    ],
     "trainable_families": [
       "return_window",
       "spend_threshold",
@@ -169,32 +176,22 @@
     },
     "eval_report": {
       "return_window": {
-        "pairs": 15,
+        "pairs": 40,
         "rejected": 0,
         "reasons": {}
       },
       "spend_threshold": {
-        "pairs": 15,
-        "rejected": 0,
-        "reasons": {}
-      },
-      "authorization": {
-        "pairs": 15,
+        "pairs": 40,
         "rejected": 0,
         "reasons": {}
       },
       "age_eligibility": {
-        "pairs": 15,
+        "pairs": 40,
         "rejected": 0,
         "reasons": {}
       },
       "quantity_limit": {
-        "pairs": 15,
-        "rejected": 0,
-        "reasons": {}
-      },
-      "deadline": {
-        "pairs": 15,
+        "pairs": 40,
         "rejected": 0,
         "reasons": {}
       }
@@ -205,6 +202,6 @@
     "data.py": "147ddbe271c07d14c4988651374c873d26f53e97a18d42ad492102ea7d4da7df",
     "api.py": "cdb0602684d798ccd3fc2c86be622f2a8e7bcdeee64d07f95604c7d3fd4701ec",
     "model.py": "1366fc0c08154d9bffca5b0bb293f6732344b8fb157377083039de303441a383",
-    "suite.py": "9b304b6e30a382802885b62877ecf813ba0ecb0ca97501f975e0c12d65cb762f"
+    "suite.py": "c4db818f83d7abaf4d8349a5b58f20f70439e04127b0989eb1f831be85578d87"
   }
 }

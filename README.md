@@ -215,10 +215,30 @@ uv run python -m kev.train --n_per_source 1500 --epochs 2 --perm_kl 0 --ord_w 0 
 | `--perm_kl` | `0` | Optional symmetric KL between predictions under two option orders |
 | `--ord_w` | `0` | Optional ranked probability score for ordered levels |
 | `--suite` | – | Train on a frozen suite's training partition |
+| `--batch`, `--dtype` | `1`, `fp32` | Padded batch size; `bf16` autocast on CUDA (fp32 master weights) |
+| `--device` | auto | `cuda`, `mps`, or `cpu` |
 
 The released `kev-0.5b` used cross-entropy without either extra loss. The current data conversion and sampling have changed, so rerunning this command does not reproduce its weights exactly. The optional ordinal loss now compares cumulative probabilities, a proper scoring rule, rather than absolute error of the expected level. Full historical recipe in the [model card](MODEL_CARD.md).
 
-Run one training job at a time. Two jobs on the same Apple GPU slow each other by about 10×.
+On a Mac, run one training job at a time; two jobs on the same Apple GPU slow each other by about 10×. The MBP path is kept working, but anything longer than a smoke run goes to Modal.
+
+### Modal
+
+Studies run as one H100 container per trial, in parallel, with results pulled back into `runs/` and ranked by the same code that runs locally.
+
+```bash
+uv run modal token new                                    # once; opens the browser
+KEV_GPU=T4 uv run modal run modal_app.py::smoke           # end-to-end check, ~1 minute of GPU
+
+uv run modal run modal_app.py::study \
+    --suite evals/decision-v2 --plan experiments/data-ablation-v2.json \
+    --name ablation-v2 --transfer evals/transfer-v2 \
+    --existing jaredpalmer/kev-0.5b                       # legacy checkpoints scored alongside
+
+uv run modal run modal_app.py::evaluate --run jaredpalmer/kev-0.5b --suite evals/transfer-v2 --name transfer-kev
+```
+
+A plan is a JSON list of 1–8 trials over an allowlisted set of training parameters (`kev/experiment.py`). Each trial records the local git commit, the suite hash, and the hashes of the shipped `kev/*.py`; the container refuses to run if they differ from what the launcher hashed. Training uses TF32 and optional bf16; evaluation is fp32-exact (TF32 alone moves probabilities by ~1e-3, enough to trip the isolation gate). Measured: 0.019 s/record for Qwen2.5-0.5B at batch 8 on an H100 vs 0.34 s/record on an M5, ~$0.15–0.30 per 0.5B trial.
 
 ## Evaluation
 

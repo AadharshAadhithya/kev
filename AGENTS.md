@@ -21,6 +21,11 @@ See README.md (deep dive) and MODEL_CARD.md (checkpoint recipe + metrics). READM
   needs `AI_GATEWAY_API_KEY` or `--provision-scope`; budget-capped). `kev.compare` pairs two result dirs (record-clustered
   bootstrap). Historical checkpoints (`runs/kev`, `runs/kev2`) overlap the suite's training data: exploratory only.
   `--ord_w` is now the ranked probability score (proper); the old |E[level]-y| term was removed. `--perm_kl`/`--ord_w` default 0.
+- Modal (default for anything beyond smoke): `modal_app.py`; `uv run modal run modal_app.py::{smoke,study,evaluate}`. Image = `uv_sync`
+  of pyproject/uv.lock (Linux torch wheel is CUDA) + `kev/` + `evals/`; Volumes `kev-hf-cache` (HF_HOME) and `kev-runs` (trial outputs,
+  pulled to runs/<study> then ranked by `kev.experiment --aggregate`). `KEV_GPU` picks the GPU type (H100 default). Legacy checkpoints:
+  Hub id, or `modal volume put kev-runs runs/<run> /legacy/<run>` then `--existing /runs/legacy/<run>`. Eval on CUDA is fp32-exact
+  (TF32 + fused SDPA off in `LocalPredictor`); training keeps TF32 and may use `--dtype bf16`. `--transfer <suite>` scores OOD per trial.
 - Plot (README figure): `uv run python -m kev.plot --logs runs/logs/train_kev.log:kev-0.5b --eval runs/kev/eval.json --out docs/training.png`
   Training logs to keep go in `runs/logs/train_*.log` (only path under runs/ besides eval.json that is committed).
 - Publish: `uv run python -m kev.publish --run runs/<run> --repo jaredpalmer/kev-<size>` (needs `hf auth login`). Repos are named by

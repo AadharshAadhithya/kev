@@ -38,13 +38,19 @@ cd playground && npm install && cd ..
 
 ### Download the weights
 
-`kev-0.5b` (38 MB: LoRA adapter, readout head, tokenizer) is published as a [GitHub release](https://github.com/jaredpalmer/kev/releases/tag/v0.1.0). The base model downloads from the Hub on first load.
+Trained adapters live on the Hugging Face Hub under [`jaredpalmer/kev-*`](https://huggingface.co/collections/jaredpalmer/kev-6aad9d0ea49f2589665e07cd), named by base model size. `--run` accepts a Hub id directly; the base model downloads on first load.
+
+| repo | base | status |
+|---|---|---|
+| [`jaredpalmer/kev-0.5b`](https://huggingface.co/jaredpalmer/kev-0.5b) | Qwen2.5-0.5B | v0.1, the checkpoint in this README |
+| `jaredpalmer/kev-0.6b` | Qwen3-0.6B-Base | planned |
+| `jaredpalmer/kev-4b`, `kev-8b` | Qwen3-4B/8B-Base | planned |
 
 ```bash
-mkdir -p runs
-gh release download v0.1.0 -R jaredpalmer/kev -p 'kev-0.5b.tar.gz' -O - | tar xz -C runs
-mv runs/kev-0.5b runs/kev
+uv run --extra serve python -m kev.serve --run jaredpalmer/kev-0.5b --port 8009
 ```
+
+The same files are attached to the [GitHub release](https://github.com/jaredpalmer/kev/releases/tag/v0.1.0) as `kev-0.5b.tar.gz`.
 
 ## Quick Start
 

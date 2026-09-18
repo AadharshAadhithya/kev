@@ -7,7 +7,7 @@
 4. isolation: can question B read a secret placed in sibling question A? (must not) / in state (should)
 5. latency + equality: packed N questions vs N separate calls
 """
-import argparse, json, math, random, time, string
+import argparse, json, math, os, random, time, string
 from collections import defaultdict
 import numpy as np
 import torch
@@ -25,7 +25,15 @@ def ece(conf, correct, bins=10):
     return float(e)
 
 
+def resolve_run(run):
+    """Local run directory, or a Hub repo id like jaredpalmer/kev-0.5b (downloaded to the HF cache)."""
+    if os.path.isdir(run): return run
+    from huggingface_hub import snapshot_download
+    return snapshot_download(run, allow_patterns=["*.json", "*.safetensors", "*.pt", "*.txt", "*.jinja"])
+
+
 def load(run, dev):
+    run = resolve_run(run)
     meta = torch.load(f"{run}/head.pt", map_location="cpu")
     tok = load_tokenizer(meta["base"])
     m = DecisionModel(meta["base"], tok, dev, lora=None)

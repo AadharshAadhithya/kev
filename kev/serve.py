@@ -2,7 +2,7 @@
 
 Run: uv run --extra serve python -m kev.serve --run runs/kev --port 8008
 """
-import argparse, json, os, random, threading, time
+import argparse, json, os, random, re, threading, time
 import torch
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -155,8 +155,11 @@ def main():
     ap.add_argument("--fallback", default="runs/smoke")
     ap.add_argument("--port", type=int, default=8008)
     a = ap.parse_args()
-    run = a.run if os.path.exists(f"{a.run}/head.pt") else a.fallback
+    from .evaluate import resolve_run
+    is_hub_id = re.fullmatch(r"[\w.-]+/[\w.-]+", a.run) and not os.path.isdir(a.run)
+    run = a.run if is_hub_id or os.path.exists(f"{a.run}/head.pt") else a.fallback
     if run != a.run: print(f"{a.run} not found, falling back to {run}")
+    run = resolve_run(run)
     dev = "mps" if torch.backends.mps.is_available() else "cpu"
     meta = torch.load(f"{run}/head.pt", map_location="cpu")
     tok, model = load(run, dev)

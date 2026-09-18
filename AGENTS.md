@@ -15,6 +15,9 @@ See README.md (deep dive) and MODEL_CARD.md (checkpoint recipe + metrics). READM
 - Smoke: `--n_per_source 40 --accum 4 --out runs/smoke` (~1 min)
 - Plot (README figure): `uv run python -m kev.plot --logs runs/logs/train_kev.log:kev-0.5b --eval runs/kev/eval.json --out docs/training.png`
   Training logs to keep go in `runs/logs/train_*.log` (only path under runs/ besides eval.json that is committed).
+- Publish: `uv run python -m kev.publish --run runs/<run> --repo jaredpalmer/kev-<size>` (needs `hf auth login`). Naming: kev-<base size>:
+  kev-0.5b = Qwen2.5-0.5B, kev-0.6b = Qwen3-0.6B, kev-4b / kev-8b = Qwen3-4B/8B-Base. Collection: huggingface.co/collections/jaredpalmer/kev-6aad9d0ea49f2589665e07cd
+  Tag releases with `hf repos tag create jaredpalmer/kev-<size> vX.Y`. `--run` in serve/evaluate accepts a Hub id.
 - Serve: `uv run --extra serve python -m kev.serve --run runs/kev --port 8008` (falls back to runs/smoke)
   - TypeSafe-compatible: `POST /v1/systemone`, `GET /v1/models` (no auth). Playground routes under `/api/*`.
   - SDK: `TypeSafeClient(api_key="local", base_url="http://127.0.0.1:8008", model="kev-latest")`

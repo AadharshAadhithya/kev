@@ -196,18 +196,18 @@ def launch_detached(suite, plan_path, name, gpu, existing=(), transfer=None, bud
         print("warning: kev/ or evals/ has uncommitted changes; provenance records the last commit, not the working tree", flush=True)
     entries = [(None, p) for p in existing] + [(t, None) for t in trials]
     jobs = [(name, i, Path(ex).name if ex else f"trial-{i}", cfg or {}, suite, sources, commit, ex, transfer) for i, (cfg, ex) in enumerate(entries)]
-    # spawn through the *deployed* app (modal deploy modal_app.py) so the fan-out is durable regardless of this client or
-    # the ephemeral app's lifetime; falls back to the ephemeral function if the app is not deployed
+    # Every trial is its own independent function call on the *deployed* app (modal deploy modal_app.py): no long-lived
+    # parent whose loss would cancel children, nothing tied to this client. Results land on the volume; `pull` collects them.
     try:
-        target = modal.Function.from_name(APP_NAME, "run_study")
-        target.hydrate()
+        target = modal.Function.from_name(APP_NAME, "run_trial"); target.hydrate()
     except Exception as error:
-        print(f"deployed app not found ({type(error).__name__}); using the ephemeral app - run `modal deploy modal_app.py` for durable studies", flush=True)
-        target = run_study
-    call = target.spawn(name, suite, jobs, gpu)
+        print(f"deployed app not found ({type(error).__name__}); using the ephemeral function - run `modal deploy modal_app.py` for durable studies", flush=True)
+        target = run_trial
+    fn = target.with_options(gpu=gpu, timeout=timeout, retries=0)
+    calls = [fn.spawn(*job) for job in jobs]
     (ROOT / "runs").mkdir(exist_ok=True)
-    (ROOT / "runs" / f"{name}.spawn.json").write_text(json.dumps({"call_id": call.object_id, "name": name, "trials": len(jobs), "bound_usd": round(upper, 2), "timeout": timeout}))
-    print(f"spawned study {name}: {len(jobs)} trial(s) on {gpu}, bound ${upper:.2f}, call {call.object_id}. Pull later: modal run modal_app.py::pull --name {name}", flush=True)
+    (ROOT / "runs" / f"{name}.spawn.json").write_text(json.dumps({"name": name, "calls": {j[2]: c.object_id for j, c in zip(jobs, calls)}, "bound_usd": round(upper, 2), "timeout": timeout}))
+    print(f"spawned study {name}: {len(jobs)} independent trial(s) on {gpu}, bound ${upper:.2f}. Pull later: modal run modal_app.py::pull --name {name}", flush=True)
 
 
 def pull_study(study):
@@ -264,6 +264,36 @@ def study(suite: str, plan: str, name: str, gpu: str = GPU, existing: str = "", 
     attached behaviour (pulls automatically, but dies with the local client)."""
     if detached: launch_detached(suite, plan, name, gpu, [e for e in existing.split(",") if e], transfer or None, budget, timeout)
     else: launch(suite, plan, name, gpu, [e for e in existing.split(",") if e], transfer or None, budget, timeout)
+
+
+@app.function(image=image, gpu=GPU, cpu=2, memory=(32768, 49152), retries=0, timeout=7200,
+              volumes={RUNS_MOUNT: runs_volume, HF_MOUNT: hf_cache}, secrets=secrets)
+def run_resume(study, trial, suite, transfer, expected_sources, git_commit):
+    """Finish calibration/development/transfer scoring for an interrupted trial whose checkpoint is complete."""
+    from kev.experiment import execute_trial
+    os.environ["KEV_GIT_COMMIT"] = git_commit
+    out = Path(RUNS_MOUNT) / study / trial
+    runs_volume.reload()
+    try:
+        report, _ = execute_trial(None, Path("/root") / suite, out, expected_sources, "cuda", None, Path("/root") / transfer if transfer else None, resume=True)
+    finally:
+        runs_volume.commit()
+    return {"trial": trial, "objective": report["objective"], "transfer_acc": (report.get("transfer") or {}).get("clean", {}).get("acc")}
+
+
+@app.local_entrypoint()
+def resume(study: str, suite: str, transfer: str = "evals/v4/transfer-v4", gpu: str = GPU):
+    """Spawn evaluation for every trial in a study that has checkpoint/head.pt but no result.json."""
+    entries = json.loads(subprocess.run([sys.executable, "-m", "modal", "volume", "ls", "kev-runs", f"/{study}", "--json"], capture_output=True, text=True, cwd=ROOT).stdout or "[]")
+    trials = sorted(Path(e["filename"]).name for e in entries if e.get("type") == "dir")
+    fn = modal.Function.from_name(APP_NAME, "run_resume").with_options(gpu=gpu)
+    for t in trials:
+        files = {Path(e["filename"]).name for e in json.loads(subprocess.run([sys.executable, "-m", "modal", "volume", "ls", "kev-runs", f"/{study}/{t}", "--json"], capture_output=True, text=True, cwd=ROOT).stdout or "[]")}
+        ck = {Path(e["filename"]).name for e in json.loads(subprocess.run([sys.executable, "-m", "modal", "volume", "ls", "kev-runs", f"/{study}/{t}/checkpoint", "--json"], capture_output=True, text=True, cwd=ROOT).stdout or "[]")} if "checkpoint" in files else set()
+        if "head.pt" in ck and "result.json" not in files:
+            c = fn.spawn(study, t, suite, transfer, local_source_hashes(), local_git_commit()); print(f"resuming {study}/{t}: call {c.object_id}")
+        else:
+            print(f"skip {study}/{t}: {'has result' if 'result.json' in files else 'no finished checkpoint'}")
 
 
 @app.local_entrypoint()

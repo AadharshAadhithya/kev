@@ -1,20 +1,33 @@
 # Leaderboard
 
-Generated 2026-09-19T01:39+00:00 from runs/*/result.json. Selection on development partitions only; the locked test is never read here.
+Generated 2026-09-19T02:56+00:00 from runs/*/result.json. Selection on development partitions only; the locked test is never read here.
 
 - **Qwen/Qwen3-0.6B-Base** incumbent: transfer 0.592, dev 0.812, seeds [0, 0] (auto-06b-r1/00-trial-0, v4-06b-hardened/00-trial-0)
-- **Qwen/Qwen3-4B-Base** incumbent: transfer 0.735, dev 0.834, seeds [1] (v4-4b-baseline/01-trial-1)
+- **Qwen/Qwen3-4B-Base** incumbent: transfer 0.759, dev 0.843, seeds [0] (lowdrift-4b-v4/01-trial-1)
 
 | study/trial | base | seed | dev acc | transfer acc | Brier | conf-err | held-out pairs | none_present | perm flip | gates | $ | knobs |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | v3-8b-s0/00-trial-0 | Qwen3-8B-Base | 0 | 0.843 | 0.765 | 0.377 | 0.104 | 0.56 | 0.83 | 0.02 | fail | 1.45 | accum=4, epochs=2, train_sources=banking77,boolq,agnews,mnli,sst5,yelp,trec,dbpedia14,amazon,imdb,legacy_policy |
+| knowledge-4b-v6/01-trial-1 | Qwen3-4B-Base | 0 | 0.854 | 0.759 | 0.351 | 0.046 | 0.55 | 0.85 | 0.05 | fail | 1.93 | lr=0.0001, p_none_pair=0.25 |
+| lowdrift-4b-v4/01-trial-1 | Qwen3-4B-Base | 0 | 0.843 | 0.759 | 0.346 | 0.055 | 0.62 | 0.85 | 0.00 | fail | 2.56 | epochs=2, lr=5e-05, p_none_pair=0.25 |
+| mix-4b-knobs/03-trial-3 | Qwen3-4B-Base | 0 | 0.840 | 0.752 | 0.361 | 0.062 | 0.58 | 0.87 | 0.00 | fail | 1.94 | epochs=2, option_isolation=1, p_none_pair=0.25, public_frac=0.33, synthetic_repeat=2 |
 | v3-data-capacity-s1/03-trial-3 | Qwen3-4B-Base | 1 | 0.840 | 0.750 | 0.357 | 0.052 | 0.62 | 0.82 | 0.00 | fail | 1.09 | epochs=2, train_sources=banking77,boolq,agnews,mnli,sst5,yelp,trec,dbpedia14,amazon,imdb,compositional |
 | v3-data-capacity-s0/03-trial-3 | Qwen3-4B-Base | 0 | 0.825 | 0.747 | 0.382 | 0.088 | 0.52 | 0.83 | 0.08 | fail | 0.89 | epochs=2, train_sources=banking77,boolq,agnews,mnli,sst5,yelp,trec,dbpedia14,amazon,imdb,compositional |
+| lowdrift-4b-v4/03-trial-3 | Qwen3-4B-Base | 0 | 0.842 | 0.742 | 0.366 | 0.066 | 0.55 | 0.80 | 0.08 | fail | 1.88 | epochs=2, lora=4, lora_targets=qv, p_none_pair=0.25 |
+| mix-4b-knobs/01-trial-1 | Qwen3-4B-Base | 0 | 0.846 | 0.741 | 0.393 | 0.093 | 0.58 | 0.82 | 0.03 | fail | 1.16 | epochs=2, p_none_pair=0.25, public_frac=0.33 |
 | v3-8b-s0/01-trial-1 | Qwen3-8B-Base | 0 | 0.840 | 0.741 | 0.375 | 0.082 | 0.61 | 0.83 | 0.02 | fail | 1.63 | accum=4, epochs=2, train_sources=banking77,boolq,agnews,mnli,sst5,yelp,trec,dbpedia14,amazon,imdb,compositional |
+| lowdrift-4b-v4/00-trial-0 | Qwen3-4B-Base | 0 | 0.841 | 0.738 | 0.377 | 0.067 | 0.48 | 0.83 | 0.10 | fail | 2.02 | epochs=2, lora=8, lora_targets=attn, lr=0.0001, p_none_pair=0.25 |
+| lowdrift-4b-v4/02-trial-2 | Qwen3-4B-Base | 0 | 0.839 | 0.738 | 0.369 | 0.038 | 0.52 | 0.83 | 0.08 | fail | 1.11 | lora_targets=attn, p_none_pair=0.25 |
 | v4-4b-baseline/01-trial-1 | Qwen3-4B-Base | 1 | 0.834 | 0.735 | 0.373 | 0.052 | 0.47 | 0.85 | 0.02 | fail | 2.84 | epochs=2, p_none_pair=0.25 |
+| mix-4b-knobs/02-trial-2 | Qwen3-4B-Base | 0 | 0.846 | 0.732 | 0.398 | 0.073 | 0.53 | 0.85 | 0.00 | fail | 3.23 | epochs=2, option_isolation=1, p_none_pair=0.25 |
+| mix-4b-v4-b/01-trial-1 | Qwen3-4B-Base | 0 | 0.833 | 0.732 | 0.379 | 0.027 | 0.56 | 0.72 | 0.03 | fail | 1.54 | p_none_pair=0.25 |
+| knowledge-4b-v6/00-trial-0 | Qwen3-4B-Base | 0 | 0.865 | 0.726 | 0.406 | 0.099 | 0.53 | 0.90 | 0.03 | fail | 3.17 | epochs=2, p_none_pair=0.25 |
 | v3-data-capacity-s0/02-trial-2 | Qwen3-4B-Base | 0 | 0.824 | 0.721 | 0.409 | 0.088 | 0.45 | 0.82 | 0.03 | fail | 0.89 | epochs=2, train_sources=banking77,boolq,agnews,mnli,sst5,yelp,trec,dbpedia14,amazon,imdb,legacy_policy |
 | v3-data-capacity-s1/02-trial-2 | Qwen3-4B-Base | 1 | 0.826 | 0.721 | 0.414 | 0.116 | 0.47 | 0.80 | 0.03 | fail | 0.94 | epochs=2, train_sources=banking77,boolq,agnews,mnli,sst5,yelp,trec,dbpedia14,amazon,imdb,legacy_policy |
+| mix-4b-v4-b/00-trial-0 | Qwen3-4B-Base | 0 | 0.834 | 0.718 | 0.437 | 0.111 | 0.50 | 0.88 | 0.00 | fail | 2.98 | epochs=2, p_none_pair=0.25, train_sources=banking77,boolq,agnews,mnli,sst5,yelp,trec,dbpedia14,amazon,imdb,compositional |
+| mix-4b-v5/01-trial-1 | Qwen3-4B-Base | 0 | 0.858 | 0.713 | 0.408 | 0.072 | 0.50 | 0.93 | 0.00 | fail | 3.03 | p_none_pair=0.25, train_sources=banking77,boolq,agnews,mnli,sst5,yelp,trec,dbpedia14,amazon,imdb,compositional |
 | v4-4b-baseline/00-trial-0 | Qwen3-4B-Base | 0 | 0.849 | 0.704 | 0.463 | 0.113 | 0.58 | 0.93 | 0.02 | fail | 3.02 | epochs=2, p_none_pair=0.25 |
+| mix-4b-knobs/00-trial-0 | Qwen3-4B-Base | 0 | 0.850 | 0.686 | 0.435 | 0.076 | 0.45 | 0.92 | 0.02 | fail | 3.09 | epochs=2, p_none_pair=0.25, synthetic_repeat=3 |
 | ablation-v2/07-trial-7 | Qwen3-0.6B-Base | 1 | 0.793 | 0.621 | 0.532 |  | 0.07 | 0.74 | 0.04 | pass | 0.31 | epochs=2 |
 | ablation-v2/06-trial-6 | Qwen3-0.6B-Base | 0 | 0.816 | 0.620 | 0.525 |  | 0.03 | 0.76 | 0.06 | pass | 0.34 | epochs=2 |
 | arch-06b/06-trial-6 | Qwen3-0.6B-Base | 0 | 0.799 | 0.610 | 0.519 | 0.062 | 0.14 | 0.85 | 0.02 | fail | 0.31 | epochs=2, lr=0.0001, p_none_pair=0.25 |
@@ -44,6 +57,7 @@ Generated 2026-09-19T01:39+00:00 from runs/*/result.json. Selection on developme
 | v3-data-capacity-s0/00-trial-0 | Qwen3-0.6B-Base | 0 | 0.722 | 0.546 | 0.584 | 0.023 | 0.03 | 0.75 | 0.05 | fail | 0.29 | epochs=2, train_sources=banking77,boolq,agnews,mnli,sst5,yelp,trec,dbpedia14,amazon,imdb,legacy_policy |
 | ablation-v2/05-trial-5 | Qwen2.5-0.5B | 1 | 0.657 | 0.482 | 0.580 |  | 0.05 | 0.44 | 0.14 | fail | 0.22 | epochs=2 |
 | ablation-v2/02-trial-2 | Qwen2.5-0.5B | 0 | 0.552 | 0.466 | 0.614 |  | 0.00 | 0.22 | 0.25 | pass | 0.15 | epochs=2, train_sources=banking77,boolq,agnews,mnli,sst5,yelp |
+| mix-4b-v5/00-trial-0 | Qwen3-4B-Base | 0 | 0.581 | 0.463 | 0.631 | 0.030 | 0.00 | 0.48 | 0.30 | fail | 6.02 | epochs=2, p_none_pair=0.25 |
 | v3-smoke-02/01-trial-1 | Qwen3-4B-Base | 0 | 0.421 | 0.349 | 1.140 | 0.363 | 0.00 | 0.10 | 0.70 | fail | 0.1 | train_sources=banking77,boolq,agnews,mnli,sst5,yelp,trec,dbpedia14,amazon,imdb,legacy_policy |
 | v3-smoke-02/00-trial-0 | Qwen3-0.6B-Base | 0 | 0.474 | 0.341 | 0.918 | 0.174 | 0.00 | 0.10 | 0.90 | fail | 0.05 | train_sources=banking77,boolq,agnews,mnli,sst5,yelp,trec,dbpedia14,amazon,imdb,compositional |
 | backbone-v1/00-kev-0.5b | legacy |  | 0.797 |  |  |  |  | 0.78 | 0.03 | pass | 0.03 | defaults |

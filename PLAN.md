@@ -244,7 +244,11 @@ the 70% screen; seed 0 does not, so under the two-seed rule this is not yet a re
 4B seed are running; the deadline family needs a different idea (the model still hedges to the middle level).
 
 **Anchoring** (`kev.anchors` + `--anchor_w`, KL toward the frozen base's zero-shot distribution, targets keyed by option
-key): study `anchor-4b-v6` running (anchor on the knowledge MCQ sources at w=0.5 and 1.0; on everything at w=0.3).
+key; `anchor-4b-v6`): w=0.5 on the knowledge MCQ sources transfer 0.773 (+2.6 pp [-1.8, +6.8] vs the un-anchored v6
+recipe), w=0.3 on everything 0.761 with the best calibration of any 4B (Brier 0.338, confident errors 3.4%), w=1.0 0.741.
+MMLU stays 0.66-0.69 and PAWS 0.68-0.70 under every setting. **Not a lever**: at lr 5e-5 the 4B already matches its base
+on MMLU (0.69 vs 0.688); the remaining PAWS gap (0.70 vs base 0.79) is not closed by anchoring the output distribution,
+which points at the readout/format rather than at drift (the third outcome in the anchoring experiment's table).
 
 Ops: two studies were lost to the local client disconnecting (Modal cancels `.starmap` inputs when the caller dies; `--detach`
 keeps only the last-triggered function). Studies now fan out server-side from the **deployed** app (`modal deploy modal_app.py`;

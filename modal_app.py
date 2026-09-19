@@ -163,6 +163,12 @@ def run_study(name, suite, jobs, gpu):
     """Server-side fan-out: runs every trial of a study and records the outcome on the volume. Spawned by `launch_detached`
     so the study survives the local client disconnecting; pull results later with `modal run modal_app.py::pull`."""
     import time
+    study_dir = Path(RUNS_MOUNT) / name; study_dir.mkdir(parents=True, exist_ok=True)
+    lock = study_dir / "study.lock"
+    runs_volume.reload()
+    if lock.exists():   # a second execution of the same spawn (retry/duplicate) must not launch or overwrite anything
+        return {"study": name, "duplicate_execution": True, "started_by": lock.read_text()}
+    lock.write_text(json.dumps({"started": time.time(), "trials": len(jobs)})); runs_volume.commit()
     fn = run_trial.with_options(gpu=gpu, retries=0, max_containers=8)
     started = time.time()
     results = list(fn.starmap(jobs, return_exceptions=True))

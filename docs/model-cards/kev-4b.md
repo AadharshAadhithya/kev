@@ -64,7 +64,7 @@ model-index:
 
 Per-source out-of-domain accuracy (kev-4b / Jev): QNLI 0.89 / 0.925, SciQ 0.99 / 0.99, TweetEval-offensive 0.71 / 0.81, PAWS 0.64 / 0.79, MMLU 0.68 / 0.90, Emotion 0.60 / 0.60, deadline (3-level date arithmetic) 0.60 / 0.95.
 
-Seeds: the recipe was run at two seeds on this suite (transfer 0.759 / 0.758) and twice more on a superset suite (0.755 / 0.761); the spread is ~1 pp. The improvement over the default learning rate is +4.7 pp, 95% CI [+0.4, +9.6], record-clustered paired bootstrap.
+Seeds: the recipe was run at three seeds on this suite (transfer 0.759 / 0.758 / 0.759; in-distribution 0.843 / 0.853 / 0.855) and twice more on a superset suite (0.755 / 0.761); the spread is ~1 pp. The improvement over the default learning rate is +4.7 pp, 95% CI [+0.4, +9.6], record-clustered paired bootstrap.
 
 **Locked test, one exploratory read** (`runs/locked/kev-4b-preview-ungated/`, labelled ungated because the checkpoint fails the held-out-pair screen): in-distribution **0.852** (Brier 0.221), out-of-domain **0.794** (Brier 0.296, confident errors 3.7%). Both above the development numbers, as for kev-0.6b, so development-set selection did not overfit. This partition will not be read again for this checkpoint.
 

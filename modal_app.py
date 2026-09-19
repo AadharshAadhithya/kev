@@ -76,6 +76,38 @@ def run_trial(study, index, label, config, suite, expected_sources, git_commit, 
             "wall_seconds": report["wall_seconds"], "gates": report["gates"]["checks"]}
 
 
+@app.function(image=image, gpu=GPU, cpu=2, memory=(32768, 49152), retries=0, timeout=3600,
+              volumes={RUNS_MOUNT: runs_volume, HF_MOUNT: hf_cache}, secrets=secrets)
+def run_locked_test(trial_path, name, suites, git_commit):
+    """Read the locked test partitions ONCE for a promoted trial. Writes /runs/locked/<name>/... ; refuses to rerun."""
+    import json
+    from kev.benchmark import LocalPredictor, evaluate_records
+    from kev.suite import digest, load_split, write_json
+    os.environ["KEV_GIT_COMMIT"] = git_commit
+    trial = Path(RUNS_MOUNT) / trial_path
+    out = Path(RUNS_MOUNT) / "locked" / name
+    if out.exists():
+        raise FileExistsError(f"locked test already read for {name}; a second read is not allowed")
+    out.mkdir(parents=True)
+    result = json.loads((trial / "result.json").read_text())
+    if not result["gates"]["passed"] and not name.endswith("-ungated"):
+        raise RuntimeError("trial did not pass its gates; name the read '<name>-ungated' to record an exploratory read")
+    temperature = result.get("temperature", 1.0)
+    predictor = LocalPredictor(str(trial / "checkpoint"), "cuda")
+    summary = {"trial": trial_path, "trial_result_sha256": digest(trial / "result.json"), "temperature": temperature, "git_commit": git_commit, "suites": {}}
+    try:
+        for label, suite in suites.items():
+            records = load_split(Path("/root") / suite, "test", allow_test=True)
+            report, _ = evaluate_records(records, predictor, out / label, temperature, heldout_sources=tuple(r["_meta"]["source"] for r in records))
+            summary["suites"][label] = {"suite": suite, "suite_sha256": digest(Path("/root") / suite / "manifest.json"), "clean": report["clean"], "tasks": report["tasks"],
+                                        "paired_flip": report["paired_flip"], "variants": report["variants"], "permutation": report["permutation"], "coverage": report["coverage"]}
+            print(f"[{name}] {label} test: acc {report['clean']['acc']:.3f} brier {report['clean']['brier']:.3f}", flush=True)
+    finally:
+        write_json(out / "summary.json", summary)
+        runs_volume.commit()
+    return summary
+
+
 def pull_study(study):
     """Download a study directory from the runs volume into runs/<study> and rank it."""
     target = ROOT / "runs" / study
@@ -127,6 +159,19 @@ def launch(suite, plan_path, name, gpu, existing=(), transfer=None, budget=20.0,
 @app.local_entrypoint()
 def study(suite: str, plan: str, name: str, gpu: str = GPU, existing: str = "", transfer: str = "", budget: float = 20.0, timeout: int = 1800):
     launch(suite, plan, name, gpu, [e for e in existing.split(",") if e], transfer or None, budget, timeout)
+
+
+@app.local_entrypoint()
+def locked_test(trial: str, name: str, decision: str = "evals/v4/decision-v4", transfer: str = "evals/v4/transfer-v4", gpu: str = GPU):
+    """One locked-test read for a promoted trial (path under the runs volume, e.g. v4-4b-baseline/01-trial-1)."""
+    target = ROOT / "runs/locked" / name
+    if target.exists():
+        raise FileExistsError(f"{target} exists; the locked test is read once per candidate")
+    fn = run_locked_test.with_options(gpu=gpu)
+    summary = fn.remote(trial, name, {"decision": decision, "transfer": transfer}, local_git_commit())
+    target.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run([sys.executable, "-m", "modal", "volume", "get", "kev-runs", f"/locked/{name}", str(target.parent)], check=True)
+    print(json.dumps({k: {"acc": v["clean"]["acc"], "brier": v["clean"]["brier"]} for k, v in summary["suites"].items()}, indent=1))
 
 
 @app.local_entrypoint()

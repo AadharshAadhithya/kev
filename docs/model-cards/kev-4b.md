@@ -62,7 +62,7 @@ model-index:
 | held-out policy structures, both siblings correct | – | 0.11 | 0.62 | 0.95 |
 | option-order flip rate | 0.21 | 0.02 | 0.00 | 0.00 |
 
-Per-source out-of-domain accuracy (kev-4b / Jev): 0.89 0.89 / 0.925, SciQ 0.99 / 0.99, TweetEval-offensive 0.71 / 0.81, 0.64 0.64 / 0.79, 0.68 0.68 / 0.90, Emotion 0.60 / 0.60, deadline (3-level date arithmetic) 0.60 / 0.95.
+Per-source out-of-domain accuracy (kev-4b / Jev): QNLI 0.89 / 0.925, SciQ 0.99 / 0.99, TweetEval-offensive 0.71 / 0.81, PAWS 0.64 / 0.79, MMLU 0.68 / 0.90, Emotion 0.60 / 0.60, deadline (3-level date arithmetic) 0.60 / 0.95.
 
 Seeds: the recipe was run at two seeds on this suite (transfer 0.759 / 0.758) and twice more on a superset suite (0.755 / 0.761); the spread is ~1 pp. The improvement over the default learning rate is +4.7 pp, 95% CI [+0.4, +9.6], record-clustered paired bootstrap.
 
@@ -71,7 +71,7 @@ Seeds: the recipe was run at two seeds on this suite (transfer 0.759 / 0.758) an
 ## What we learned building it
 
 - **Capacity dominates out of domain.** With public examples and synthetic budget held equal, 0.6B → 4B is +14–19 pp; 4B → 8B is +1–7 pp.
-- **Fine-tuning erodes base capability, and the learning rate controls it.** The 4B base, zero-shot with a letter readout, scores 0.688 on the same 0.68 items and 0.787 on 0.64; the default recipe (lr 2e-4) trained down to 0.60–0.66 / 0.56–0.71. Lowering lr to 5e-5 recovers most of it and is the single largest recipe improvement we found; fewer LoRA target modules and smaller ranks help less.
+- **Fine-tuning erodes base capability, and the learning rate controls it.** The 4B base, zero-shot with a letter readout, scores 0.688 on the same MMLU items and 0.787 on PAWS; the default recipe (lr 2e-4) trained down to 0.60–0.66 / 0.56–0.71. Lowering lr to 5e-5 recovers most of it and is the single largest recipe improvement we found; fewer LoRA target modules and smaller ranks help less.
 - **More public training data raises in-distribution accuracy and lowers transfer** at 4B (10k vs 3.4k records: −3 pp). Knowledge MCQ sources (ARC, OpenBookQA, CommonsenseQA) raise in-distribution accuracy to 0.86 without moving transfer.
 - Programmatic contrastive policy pairs teach the trained rule structures (both-correct 0.85–1.0) but transfer to unseen structures only partially (0.5–0.6 at 4B, 0.03–0.11 at 0.6B).
 

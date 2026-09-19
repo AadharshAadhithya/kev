@@ -75,7 +75,7 @@ def validate_training(records, manifest):
 
 
 def freeze(out, source="evals/decision-v2", transfer="evals/transfer-v2", public_train=None, synthetic_scale=1, inherit_eval=None,
-           random_structures=0, groups_per_structure=8, train_styles=(0, 1), matched_arms=True, legacy_families=FAMILIES):
+           random_structures=0, groups_per_structure=8, train_styles=(0, 1), matched_arms=True, legacy_families=FAMILIES, structures_seed=None):
     """random_structures > 0: the compositional arm is generated from that many random rule trees (negation anywhere,
     held-out and locked structures excluded by canonical key) instead of the eight fixed TRAIN_SHAPES."""
     """inherit_eval: a frozen decision suite whose development/test bytes are reused verbatim (only train/calibration are
@@ -141,7 +141,7 @@ def freeze(out, source="evals/decision-v2", transfer="evals/transfer-v2", public
         dev_synthetic = admit_groups(legacy(12, "v3-control-dev", excluded=reserved)) + admit_groups(compose(4, "v3-composition-dev"))
     old_train, old_cal = grouped_split(admit_groups(legacy(64 * synthetic_scale, "v3-control", families=legacy_families, excluded=reserved)), 8 * synthetic_scale)
     if random_structures:
-        trees = {f"rand:{canonical(t)}": t for t in sample_trees(random_structures, f"{out.name}-structures")}
+        trees = {f"rand:{canonical(t)}": t for t in sample_trees(random_structures, f"{structures_seed or out.name}-structures")}
         new_train, new_cal = grouped_split(admit_groups(compose(groups_per_structure, "v7-composition", styles=train_styles, trees=trees)), 1)
     else:
         new_train, new_cal = grouped_split(admit_groups(compose(16 * synthetic_scale, "v3-composition")), 2 * synthetic_scale)
@@ -165,6 +165,7 @@ def freeze(out, source="evals/decision-v2", transfer="evals/transfer-v2", public
         "protocol": {"train_shapes": TRAIN_SHAPES, "transfer_shapes": DEV_SHAPES, "locked_shapes": TEST_SHAPES,
                      "train_render_styles": list(train_styles), "locked_render_styles": [2],
                      "random_structures": random_structures, "groups_per_structure": groups_per_structure if random_structures else None,
+                     "structures_seed": f"{structures_seed or out.name}-structures" if random_structures else None,
                      "excluded_structure_keys": sorted(HELD_OUT_KEYS), "legacy_families_trainable": list(legacy_families),
                      "public_train_records": len(parts["train"]) - len(old_train) - len(new_train),
                      "public_train_pool": str(public_train) if public_train else str(source), "synthetic_scale": synthetic_scale,
@@ -241,7 +242,8 @@ def main():
     ap.add_argument("--groups-per-structure", type=int, default=8)
     ap.add_argument("--train-styles", default="0,1", help="rendering styles for training compositional records (2 is locked-test only)")
     ap.add_argument("--unmatched-arms", action="store_true", help="allow the two synthetic arms to differ in size")
-    ap.add_argument("--legacy-families", default="v3", choices=["v3", "all"], help="'all' adds the four ordinal Score threshold families (deadline stays held out)")
+    ap.add_argument("--legacy-families", default="v3", choices=["v3", "all"], help="'all' adds the ordinal Score threshold families (deadline stays held out)")
+    ap.add_argument("--structures-seed", help="reuse another version's random structures (e.g. v7) so only the legacy arm differs")
     a = ap.parse_args()
     styles = tuple(int(x) for x in a.train_styles.split(","))
     if 2 in styles: ap.error("rendering style 2 is reserved for the locked test")
@@ -250,7 +252,7 @@ def main():
     else:
         freeze(a.out, public_train=a.public_train, synthetic_scale=a.synthetic_scale, inherit_eval=a.inherit_eval,
                random_structures=a.random_structures, groups_per_structure=a.groups_per_structure, train_styles=styles, matched_arms=not a.unmatched_arms,
-               legacy_families=FAMILIES + ORDINAL_FAMILIES if a.legacy_families == "all" else FAMILIES)
+               legacy_families=FAMILIES + ORDINAL_FAMILIES if a.legacy_families == "all" else FAMILIES, structures_seed=a.structures_seed)
 
 
 if __name__ == "__main__":

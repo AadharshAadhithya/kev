@@ -190,7 +190,15 @@ def launch_detached(suite, plan_path, name, gpu, existing=(), transfer=None, bud
         print("warning: kev/ or evals/ has uncommitted changes; provenance records the last commit, not the working tree", flush=True)
     entries = [(None, p) for p in existing] + [(t, None) for t in trials]
     jobs = [(name, i, Path(ex).name if ex else f"trial-{i}", cfg or {}, suite, sources, commit, ex, transfer) for i, (cfg, ex) in enumerate(entries)]
-    call = run_study.spawn(name, suite, jobs, gpu)
+    # spawn through the *deployed* app (modal deploy modal_app.py) so the fan-out is durable regardless of this client or
+    # the ephemeral app's lifetime; falls back to the ephemeral function if the app is not deployed
+    try:
+        target = modal.Function.from_name(APP_NAME, "run_study")
+        target.hydrate()
+    except Exception as error:
+        print(f"deployed app not found ({type(error).__name__}); using the ephemeral app - run `modal deploy modal_app.py` for durable studies", flush=True)
+        target = run_study
+    call = target.spawn(name, suite, jobs, gpu)
     (ROOT / "runs").mkdir(exist_ok=True)
     (ROOT / "runs" / f"{name}.spawn.json").write_text(json.dumps({"call_id": call.object_id, "name": name, "trials": len(jobs), "bound_usd": round(upper, 2), "timeout": timeout}))
     print(f"spawned study {name}: {len(jobs)} trial(s) on {gpu}, bound ${upper:.2f}, call {call.object_id}. Pull later: modal run modal_app.py::pull --name {name}", flush=True)

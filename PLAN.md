@@ -193,6 +193,32 @@ Final replication (03:30): 4B lr 5e-5 at three seeds transfer 0.759 / 0.758 / 0.
 0.774 / 0.779 / 0.774. Both recipes are stable to ~0.5 pp. Spend for the night: ~$180 of the $500 authorized
 (89 trials indexed; `runs/leaderboard.md`).
 
+## Toward v0.2: crossing the release screen (2026-09-19)
+
+Where the 8B loses the 70% held-out-pair screen (64 relevant pairs; needs 45, has 39-43; Jev 55):
+
+| held-out family | kev-8b seeds 0 / 1 | Jev | missing from training |
+|---|---|---|---|
+| authorization | 20/20, 20/20 | 20/20 | - |
+| (A or B) and C | 6/8, 8/8 | 6/8 | - |
+| if A then not B else C | 2/8, 4/8 | 5/8 | negation nested inside a conditional |
+| (A and B) or not C | 1/8, 2/8 | 7/8 | negation nested inside a disjunction |
+| deadline (3-level Score, grace period) | 10/20, 9/20 | 17/20 | any ordinal-threshold Score family; date arithmetic only as yes/no |
+
+Training had eight fixed rule shapes with negation only at the top level, and no Score question whose levels are
+threshold intervals. The 8B *base* scores 0.58 zero-shot on the held-out rule items (near chance), so rule composition
+is learned from our synthetic data, which is why structural coverage is the lever.
+
+`decision-v7` ([manifest](evals/v7/decision-v7/manifest.json); dev/test bytes identical to v4, so every number is
+comparable; scored against `transfer-v4`): 10k public (v4 pool) + legacy policy arm with four new ordinal Score families
+(warranty claim by date, SLA response hours, late-fee days, volume discount; 896 records) + compositional arm from
+**60 random rule trees** with negation anywhere, depth 2-3, rendering styles 0/1/3/4 (1,680 records). Held-out and
+locked structures are excluded by a canonical key that is invariant to commutation, leaf numbering and De Morgan
+pushing ([`kev/composition.py`](kev/composition.py) `canonical`, `push_negation`, `sample_trees`).
+
+Release rule tightened: the screen must pass on **every seed** of a config (`kev.autoresearch release-check`), not one
+seed of 64 pairs. Study `v7-release-candidates`: 4B and 8B at lr 5e-5, two seeds each.
+
 ## Status and deferred work
 
 - [x] Modal CUDA/batched path and backbone-v1 study completed; MBP path retained.

@@ -222,10 +222,33 @@ def plan_section():
     return "\n".join(lines)
 
 
+def compare(studies, reference, tasks=("mmlu", "paws", "qnli", "emotion", "tweet_offensive", "contrastive_deadline")):
+    """Print every trial of the given studies with a record-clustered paired bootstrap on transfer accuracy vs `reference`
+    (a runs/<study>/<trial> path). Development-set selection only."""
+    from kev.benchmark import paired_bootstrap
+    def rows(p): return json.loads((ROOT / p / "transfer/rows.json").read_text())
+    ref_rows = rows(reference)
+    print(f"reference: {reference}")
+    print(f"{'trial':34} {'dev':>6} {'trf':>6} {'brier':>6} {'cerr':>6} {'pairs':>6} {'d trf':>7} {'ci95':>18}  knobs / tasks")
+    for study in studies:
+        for d in sorted((ROOT / "runs" / study).iterdir()):
+            if not (d / "result.json").exists(): continue
+            r = json.loads((d / "result.json").read_text()); tr = r.get("transfer")
+            if not tr: continue
+            cfg = r["provenance"]["config"]
+            knobs = {k: v for k, v in cfg.items() if k not in ("base", "dtype", "seed", "batch", "checkpointing", "accum", "base_revision", "perm_frac") and DEFAULTS.get(k) != v and not (k == "epochs" and v == 2) and not (k == "p_none_pair" and v == 0.25)}
+            try:
+                b = paired_bootstrap(rows(f"runs/{study}/{d.name}"), ref_rows, metric="acc"); delta, ci = b["macro_acc_delta"], [round(x, 3) for x in b["ci95"]]
+            except ValueError:
+                delta, ci = float("nan"), "n/a (different suite)"
+            print(f"{study + '/' + d.name:34} {r['clean']['acc']:6.3f} {tr['clean']['acc']:6.3f} {tr['clean']['brier']:6.3f} {tr['clean']['confident_error_rate']:6.3f} {tr['paired_flip']['both_correct_rate']:6.2f} {delta:+7.3f} {str(ci):>18}  {knobs} {({k: round(tr['tasks'][k]['acc'], 2) for k in tasks if k in tr['tasks']})}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("leaderboard")
+    p = sub.add_parser("compare"); p.add_argument("--studies", required=True); p.add_argument("--reference", default="runs/v4-4b-baseline/01-trial-1")
     p = sub.add_parser("propose"); p.add_argument("--base", required=True); p.add_argument("--n", type=int, default=8); p.add_argument("--seed", type=int, default=0); p.add_argument("--out", required=True)
     for cmd in ("round", "loop"):
         p = sub.add_parser(cmd); p.add_argument("--base", required=True); p.add_argument("--n", type=int, default=7)
@@ -234,6 +257,8 @@ def main():
         if cmd == "round": p.add_argument("--name", required=True)
         else: p.add_argument("--rounds", type=int, default=3); p.add_argument("--prefix", default="auto")
     a = ap.parse_args()
+    if a.cmd == "compare":
+        compare(a.studies.split(","), a.reference); return
     if a.cmd == "leaderboard":
         rows, inc, _, _ = refresh_leaderboard(); update_plan(plan_section()); print(f"{len(rows)} trials;", {b.split('/')[-1]: (i and round(i['transfer_acc'], 3)) for b, i in inc.items()})
     elif a.cmd == "propose":

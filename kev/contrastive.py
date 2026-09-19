@@ -192,10 +192,31 @@ def family_volume_discount(rng):
     return build(a), build(b)
 
 
+def family_shipping_delay(rng):
+    """Day-precision date arithmetic with small thresholds (the skill `deadline` tests): promised vs delivered dates."""
+    name = rng.choice(NAMES); item = rng.choice(ITEMS); promised = date(2026, rng.randint(1, 11), rng.randint(1, 28))
+    minor, major = rng.choice([(1, 4), (2, 7), (3, 10)]); carrier = rng.choice(["the courier", "the postal service", "a freight partner"])
+    def evaluate(f):
+        if not _need(f, "delivered", "promised"): return UNDETERMINED
+        late = (f["delivered"] - f["promised"]).days
+        return 0 if late <= minor else 1 if late <= major else 2
+    def build(offset):
+        delivered = promised + timedelta(days=offset)
+        return {"policy": f"Deliveries up to {minor} day{'s' if minor > 1 else ''} after the promised date count as on time. Deliveries {minor + 1} to {major} days after it are a minor delay and earn a shipping refund. Later deliveries are a major delay and earn a full refund.",
+                "sentences": [(f"{name} ordered {item} with delivery promised for {_day(promised)}.", {"promised": promised}),
+                              (f"The parcel was delivered on {_day(delivered)}.", {"delivered": delivered}),
+                              (f"It was shipped by {carrier}.", {})],
+                "evaluate": evaluate, "question": {"type": "score", "instructions": "How is this delivery classified?", "criteria": ["On time", "Minor delay: shipping refund", "Major delay: full refund"]}}
+    levels = [rng.randint(-3, minor), rng.randint(minor + 1, major), major + rng.randint(1, 30)]
+    a, b = rng.sample(levels, 2)
+    return build(a), build(b)
+
+
 FAMILIES = {"return_window": family_return_window, "spend_threshold": family_spend_threshold, "authorization": family_authorization,
             "age_eligibility": family_age_eligibility, "quantity_limit": family_quantity_limit, "deadline": family_deadline,
-            "warranty_claim": family_warranty_claim, "sla_response": family_sla_response, "late_fee": family_late_fee, "volume_discount": family_volume_discount}
-ORDINAL_FAMILIES = ("warranty_claim", "sla_response", "late_fee", "volume_discount")   # trainable Score-threshold families (deadline stays held out)
+            "warranty_claim": family_warranty_claim, "sla_response": family_sla_response, "late_fee": family_late_fee, "volume_discount": family_volume_discount,
+            "shipping_delay": family_shipping_delay}
+ORDINAL_FAMILIES = ("warranty_claim", "sla_response", "late_fee", "volume_discount", "shipping_delay")   # trainable Score-threshold families (deadline stays held out)
 
 
 def label_of(item, drop=None):

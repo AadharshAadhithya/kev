@@ -354,5 +354,6 @@ def materialize(req):
     for q, m, (qid, src_q) in zip(rec["questions"], meta, req["questions"].items()):
         y = src_q["label"]
         q["label"] = int(y) if m["type"] == "noul" else m["keys"].index(y) if m["type"] == "choice" else int(y)
-        q["src"] = src_q["src"]; q["qtype"] = m["type"]
+        q["src"] = src_q["src"]; q["qtype"] = m["type"]; q["qid"] = qid
+        q["keys"] = m["keys"] if m["type"] == "choice" else ["false", "true"] if m["type"] == "noul" else [str(i) for i in range(len(q["options"]))]
     return rec

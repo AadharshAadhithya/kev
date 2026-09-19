@@ -251,3 +251,27 @@ def test_top_bins_and_confidence_bias():
     m = metrics(rows)
     assert m["top_bins"]["0.99"] == {"n": 2, "errors": 1, "error_rate": 0.5} and m["top_bins"]["0.9"]["n"] == 2
     assert abs(m["confidence_bias"] - ((0.99 + 0.99 + 0.6) / 3 - 2 / 3)) < 1e-9
+
+
+def test_anchor_loss_aligns_by_key_and_skips_changed_option_sets():
+    import torch
+    from kev.train import anchor_loss
+    q = {"keys": ["b", "a"]}
+    z = torch.tensor([0.0, 0.0])
+    # teacher puts 0.9 on 'a'; student uniform -> KL(teacher||student) > 0 and the same for either key order
+    l1 = anchor_loss(z, {"keys": ["a", "b"]}, {"a": 0.9, "b": 0.1}, "cpu"); l2 = anchor_loss(z, q, {"a": 0.9, "b": 0.1}, "cpu")
+    assert l1 is not None and abs(l1.item() - l2.item()) < 1e-6 and l1.item() > 0
+    assert anchor_loss(z, {"keys": ["a", "b", "none"]}, {"a": 0.9, "b": 0.1}, "cpu") is None      # none-option inserted -> skip
+    assert anchor_loss(z, q, None, "cpu") is None
+    peaked = torch.tensor([10.0, -10.0])                                                       # student already matches teacher's argmax key 'b'? keys=[b,a]: p(b)=1
+    assert anchor_loss(peaked, q, {"b": 1.0, "a": 0.0}, "cpu").item() < 1e-3
+
+
+def test_anchor_trial_validation():
+    from kev.experiment import validated_trial
+    m = {"base_revisions": {"m": "x"}, "trainable_sources": ["arc", "boolq"]}
+    with pytest.raises(ValueError, match="anchor"):
+        validated_trial({"base": "m", "anchor_w": 0.5}, m)
+    with pytest.raises(ValueError, match="anchor_sources"):
+        validated_trial({"base": "m", "anchor": "runs/anchors/x.json", "anchor_w": 0.5, "anchor_sources": "mmlu"}, m)
+    assert validated_trial({"base": "m", "anchor": "runs/anchors/x.json", "anchor_w": 0.5, "anchor_sources": "arc"}, m)["anchor_w"] == 0.5

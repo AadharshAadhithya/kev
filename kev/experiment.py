@@ -32,16 +32,16 @@ from kev.suite import digest, load_split, record_digest, write_json
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULTS = {"epochs": 1, "seed": 0, "lr": 0.0002, "lora": 16, "accum": 8, "batch": 1,
             "perm_kl": 0.0, "perm_frac": 0.3, "ord_w": 0.0,
-            "p_none": 0.1, "p_none_distract": 0.12, "p_distract": 0.15, "p_none_pair": 0.0, "synthetic_repeat": 1, "public_frac": 1.0, "head_lr": 0.0, "weight_decay": 0.01}
+            "p_none": 0.1, "p_none_distract": 0.12, "p_distract": 0.15, "p_none_pair": 0.0, "synthetic_repeat": 1, "public_frac": 1.0, "head_lr": 0.0, "weight_decay": 0.01, "anchor_w": 0.0}
 RANGES = {"epochs": (1, 5), "seed": (0, 10000), "lr": (1e-6, 0.001), "lora": (1, 64), "accum": (1, 64), "batch": (1, 64),
           "perm_kl": (0, 2), "perm_frac": (0, 1), "ord_w": (0, 2),
-          "p_none": (0, 0.4), "p_none_distract": (0, 0.4), "p_distract": (0, 0.4), "p_none_pair": (0, 1), "synthetic_repeat": (1, 6), "public_frac": (0.05, 1.0), "head_lr": (0, 0.01), "weight_decay": (0, 0.3)}
+          "p_none": (0, 0.4), "p_none_distract": (0, 0.4), "p_distract": (0, 0.4), "p_none_pair": (0, 1), "synthetic_repeat": (1, 6), "public_frac": (0.05, 1.0), "head_lr": (0, 0.01), "weight_decay": (0, 0.3), "anchor_w": (0, 5)}
 CHOICES = {"dtype": ("fp32", "bf16"), "checkpointing": (0, 1), "option_isolation": (0, 1), "special_embeddings": (0, 1), "head_dim": (128, 256, 512, 1024),
            "lora_targets": ("all", "attn", "qv")}
 
 
 def validated_trial(value, manifest):
-    if not isinstance(value, dict) or set(value) - (DEFAULTS.keys() | CHOICES.keys() | {"base", "train_sources", "base_revision"}):
+    if not isinstance(value, dict) or set(value) - (DEFAULTS.keys() | CHOICES.keys() | {"base", "train_sources", "base_revision", "anchor", "anchor_sources"}):
         raise ValueError("trial may change only the allowlisted training parameters and base")
     result = {**DEFAULTS, **value}
     if result.get("base") not in manifest["base_revisions"]:
@@ -50,6 +50,12 @@ def validated_trial(value, manifest):
             raise ValueError("base must have a revision pinned in the suite, or the trial must pin a 40-hex base_revision")
     elif "base_revision" in result and result["base_revision"] != manifest["base_revisions"][result["base"]]:
         raise ValueError("trial base_revision conflicts with the suite's pinned revision")
+    if ("anchor" in result) != (result.get("anchor_w", 0) > 0):
+        raise ValueError("anchor (a targets file) and anchor_w > 0 must be given together")
+    if "anchor" in result and not re.fullmatch(r"[\w./-]+\.json", str(result["anchor"])):
+        raise ValueError("anchor must be a .json path")
+    if "anchor_sources" in result and (not isinstance(result["anchor_sources"], str) or set(result["anchor_sources"].split(",")) - set(manifest.get("trainable_sources", []))):
+        raise ValueError("anchor_sources must be trainable sources of the suite")
     if "train_sources" in result:
         names = result["train_sources"].split(",") if isinstance(result["train_sources"], str) else None
         if not names or set(names) - set(manifest.get("trainable_sources", [])):

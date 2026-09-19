@@ -31,6 +31,14 @@ def question_loss(z, q, dev, ord_w):
     return loss
 
 
+def anchor_loss(z, q, target, dev):
+    """KL(teacher || student) for one question, teacher = frozen base zero-shot distribution keyed by option key.
+    Skips (returns None) when the current option set is not exactly the teacher's (e.g. a none-option was inserted)."""
+    if target is None or set(target) != set(q["keys"]): return None
+    t = torch.tensor([target[k] for k in q["keys"]], device=dev, dtype=torch.float32).clamp_min(1e-6); t = t / t.sum()
+    return F.kl_div(F.log_softmax(z, -1), t, reduction="sum")
+
+
 def accumulation_records(n, batch, accum, microbatch):
     start = (microbatch // accum) * accum * batch
     return min(accum * batch, n - start)
@@ -67,6 +75,9 @@ def main():
     ap.add_argument("--p_none_pair", type=float, default=0.0, help="fraction of Choice records that additionally emit a none-present/none-absent minimal pair")
     ap.add_argument("--synthetic_repeat", type=int, default=1, help="oversample synthetic policy sources (legacy_policy, compositional, contrastive) this many times per epoch")
     ap.add_argument("--public_frac", type=float, default=1.0, help="deterministic subsample of public-source training records (mix ablations)")
+    ap.add_argument("--anchor", default="", help="JSON of frozen-base zero-shot distributions {record_id: {qid: {key: p}}} (kev.anchors); enables the anchoring loss")
+    ap.add_argument("--anchor_w", type=float, default=0.0, help="weight of KL(base || model) toward the frozen base model's zero-shot distribution, per anchored question")
+    ap.add_argument("--anchor_sources", default="", help="comma-separated sources to anchor (default: every record with a target)")
     ap.add_argument("--out", default="runs/kev")
     ap.add_argument("--seed", type=int, default=0)
     a = ap.parse_args()
@@ -75,8 +86,13 @@ def main():
         ap.error("epochs, accum, n_per_source, lora, batch and synthetic_repeat must be positive; 0 < public_frac <= 1")
     if a.dtype == "bf16" and a.device != "cuda":
         ap.error("--dtype bf16 requires --device cuda")
-    if a.lr <= 0 or a.head_lr < 0 or a.weight_decay < 0 or min(a.ord_w, a.perm_kl) < 0 or not 0 <= a.perm_frac <= 1:
+    if a.lr <= 0 or a.head_lr < 0 or a.weight_decay < 0 or min(a.ord_w, a.perm_kl, a.anchor_w) < 0 or not 0 <= a.perm_frac <= 1:
         ap.error("invalid learning rate or loss weights")
+    if bool(a.anchor) != (a.anchor_w > 0):
+        ap.error("--anchor and --anchor_w > 0 go together")
+    anchors = json.loads(Path(a.anchor).read_text()).get("targets", {}) if a.anchor else {}
+    if a.anchor: print(f"anchor targets: {len(anchors)} records from {a.anchor}", flush=True)
+    anchor_sources = set(a.anchor_sources.split(",")) if a.anchor_sources else None
     out_dir = Path(a.out)
     if out_dir.exists():
         ap.error("refusing to overwrite an existing run")
@@ -147,7 +163,7 @@ def main():
         rng.shuffle(reqs)
         for mb in range(micro_per_epoch):
             chunk = reqs[mb * a.batch : (mb + 1) * a.batch]
-            recs, encs, perm_jobs = [], [], []
+            recs, encs, perm_jobs, rec_ids, rec_sources = [], [], [], [], []
             for req in chunk:
                 item_rng = random.Random(source_seed(a.seed, f"{ep}:{req['_meta']['id']}"))
                 variants = [augment(req, item_rng, p_none=a.p_none, p_none_distract=a.p_none_distract, p_distract=a.p_distract)]  # fresh permutation / distractors each epoch
@@ -159,15 +175,20 @@ def main():
                     if len(enc["ids"]) > 2048:
                         raise ValueError("training request exceeds 2048 packed tokens")
                     recs.append(rec); encs.append(enc); tokens_seen += len(enc["ids"])
+                    rec_ids.append(req["_meta"]["id"]); rec_sources.append(req["_meta"]["source"])
                 if a.perm_kl > 0 and item_rng.random() < a.perm_frac and any(q["qtype"] == "choice" and len(q["options"]) >= 3 for q in rec["questions"]):
                     rec2, perms = permuted_copy(rec, item_rng); perm_jobs.append((len(recs) - 1, model.encode(tok, rec2, strict=True), perms))
             with autocast:
                 logits_b = model.forward_batch(encs)
                 logits2_b = model.forward_batch([e for _, e, _ in perm_jobs]) if perm_jobs else []
             loss = 0.0
-            for logits, rec in zip(logits_b, recs):
+            for logits, rec, rid, src in zip(logits_b, recs, rec_ids, rec_sources):
                 ce = sum(question_loss(z.float(), q, dev, a.ord_w) for z, q in zip(logits, rec["questions"])) / len(logits)
                 run["ce"] += ce.item(); loss = loss + ce
+                if anchors and rid in anchors and (anchor_sources is None or src in anchor_sources):
+                    terms = [t for t in (anchor_loss(z.float(), q, anchors[rid].get(q["qid"]), dev) for z, q in zip(logits, rec["questions"])) if t is not None]
+                    if terms:
+                        kl_a = sum(terms) / len(terms); loss = loss + a.anchor_w * kl_a; run["anchor"] += kl_a.item(); run["anchor_n"] += 1
             for (ri, enc2, perms), logits2 in zip(perm_jobs, logits2_b):
                 kl, n = 0.0, 0; tokens_seen += len(enc2["ids"])
                 for z1, z2, perm in zip(logits_b[ri], logits2, perms):
@@ -187,7 +208,7 @@ def main():
                 opt.step(); sched.step(); opt.zero_grad(); step += 1
                 if dev == "mps": torch.mps.empty_cache()
                 if step % 10 == 0:
-                    print(f"ep{ep} step {step}/{steps} loss {run['ce']/run['n']:.3f} kl {run['kl']/max(run['kl_n'],1):.3f} {(time.time()-t0)/seen:.3f}s/rec", flush=True)
+                    print(f"ep{ep} step {step}/{steps} loss {run['ce']/run['n']:.3f} kl {run['kl']/max(run['kl_n'],1):.3f} anchor {run['anchor']/max(run['anchor_n'],1):.3f} {(time.time()-t0)/seen:.3f}s/rec", flush=True)
                     run = Counter()
     os.makedirs(a.out, exist_ok=True)
     model.lm.save_pretrained(a.out)

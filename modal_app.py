@@ -126,6 +126,27 @@ def run_base_probe(base, suite, name, tasks="all"):
     return json.loads((out / "report.json").read_text())["clean"]
 
 
+@app.function(image=image, gpu=GPU, cpu=2, memory=(32768, 65536), retries=0, timeout=3600,
+              volumes={RUNS_MOUNT: runs_volume, HF_MOUNT: hf_cache}, secrets=secrets)
+def run_anchors(base, suite, name, revision=None):
+    """Frozen-base zero-shot targets for a suite's training partition -> /runs/anchors/<name>.json (kev.anchors)."""
+    from kev.anchors import build
+    out = Path(RUNS_MOUNT) / "anchors" / f"{name}.json"
+    if out.exists():
+        raise FileExistsError(f"anchors {name} exist")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        meta = build(base, Path("/root") / suite, out, device="cuda", revision=revision)
+    finally:
+        runs_volume.commit(); hf_cache.commit()
+    return meta
+
+
+@app.local_entrypoint()
+def anchors(base: str, suite: str, name: str, revision: str = "", gpu: str = GPU):
+    print(json.dumps(run_anchors.with_options(gpu=gpu).remote(base, suite, name, revision or None)))
+
+
 @app.local_entrypoint()
 def base_probe(base: str, name: str, suite: str = "evals/v4/transfer-v4", tasks: str = "all", gpu: str = GPU):
     """e.g. --base Qwen/Qwen3-30B-A3B-Base --name qwen3-30b-a3b-transfer-v4"""

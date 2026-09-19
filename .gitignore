@@ -88,3 +88,11 @@ runs/*/*/*
 !runs/leaderboard.md
 !runs/leaderboard.jsonl
 !runs/autoresearch.jsonl
+# frozen-suite partitions over ~10 MB live on the Hub mirror (jaredpalmer/kev-suites, pinned in kev/suite.py); manifests,
+# development and test partitions stay in git and load_split fetches + sha256-verifies the rest on first use
+evals/v5/decision-v5/train.jsonl
+evals/v6/decision-v6/train.jsonl
+evals/v4/decision-v4/train.jsonl
+evals/public-pool-v5/train.jsonl
+evals/public-pool-v6/train.jsonl
+evals/public-pool-v4/train.jsonl

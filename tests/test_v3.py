@@ -174,3 +174,23 @@ def test_option_isolation_mask_rule():
     assert m[7, 6] and m[5, 4]                        # option sees itself (causal within span)
     assert all(m[8, j] for j in range(9))             # decide sees everything in its question
     assert m[3, 4] == False                           # instruction never sees options (causal)
+
+
+def test_missing_partition_is_fetched_and_verified(tmp_path, monkeypatch):
+    import json
+    from kev import suite as S
+    evals = tmp_path / "evals" / "x" / "decision-x"; evals.mkdir(parents=True)
+    payload = b'{"state": "s", "questions": {}, "_meta": {}}\n'
+    import hashlib
+    S.write_json(evals / "manifest.json", {"files": {"train.jsonl": {"sha256": hashlib.sha256(payload).hexdigest(), "records": 1}}})
+    served = tmp_path / "served.jsonl"; served.write_bytes(payload)
+    calls = []
+    def fake_download(repo, path, repo_type, revision):
+        calls.append((repo, path, repo_type, revision)); return str(served)
+    monkeypatch.setattr("huggingface_hub.hf_hub_download", fake_download)
+    assert len(S.load_split(evals, "train")) == 1
+    assert calls == [(S.SUITES_DATASET, "x/decision-x/train.jsonl", "dataset", S.SUITES_REVISION)]
+    # a tampered mirror is rejected by the manifest hash
+    (evals / "train.jsonl").unlink(); served.write_bytes(b'{"tampered": 1}\n')
+    with pytest.raises(ValueError, match="checksum"):
+        S.load_split(evals, "train")

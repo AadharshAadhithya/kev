@@ -11,6 +11,11 @@ from kev.model import encode, load_tokenizer
 
 SPLITS = ("train", "calibration", "development", "test")
 BASES = ("Qwen/Qwen2.5-0.5B", "Qwen/Qwen3-0.6B-Base")
+# Frozen suites are mirrored on the Hub. Manifests (with the sha256 of every partition) and the development/test
+# partitions live in git; large training partitions are fetched from this dataset on first use and verified against
+# the manifest, so the suite hash and every provenance record stay unchanged.
+SUITES_DATASET = "jaredpalmer/kev-suites"
+SUITES_REVISION = "fd41beb5fe1d621a9e0db9402cade5f4caec37e9"
 
 
 def digest(path):
@@ -37,12 +42,28 @@ def load_split(directory, split, allow_test=False):
     directory = Path(directory)
     manifest = json.loads((directory / "manifest.json").read_text())
     path = directory / f"{split}.jsonl"
+    if not path.exists():
+        fetch_partition(directory, path.name)
     if digest(path) != manifest["files"][path.name]["sha256"]:
         raise ValueError(f"suite checksum mismatch: {path}")
     records = [json.loads(line) for line in path.read_text().splitlines()]
     if len(records) != manifest["files"][path.name]["records"]:
         raise ValueError("suite record count mismatch")
     return records
+
+
+def fetch_partition(directory, filename):
+    """Download one partition of a frozen suite from the Hub mirror into place. The caller verifies the sha256."""
+    import shutil
+    from huggingface_hub import hf_hub_download
+    directory = Path(directory).resolve()
+    evals_root = next((p for p in directory.parents if p.name == "evals"), None)
+    if evals_root is None:
+        raise FileNotFoundError(f"{directory / filename} is missing and is not under an evals/ tree")
+    relative = directory.relative_to(evals_root) / filename
+    cached = hf_hub_download(SUITES_DATASET, str(relative), repo_type="dataset", revision=SUITES_REVISION)
+    shutil.copyfile(cached, directory / filename)
+    print(f"fetched {relative} from {SUITES_DATASET}@{SUITES_REVISION[:10]}", flush=True)
 
 
 def case_copy(record, variant):

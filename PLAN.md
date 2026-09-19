@@ -163,8 +163,8 @@ Relevant code: [suite builder](kev/study_v3.py), [rule generator](kev/compositio
 Maintained by `kev.autoresearch`; full table in [`runs/leaderboard.md`](runs/leaderboard.md). Selection uses development partitions only.
 
 - **Qwen3-0.6B-Base** incumbent (v4 suites): transfer 0.610, dev 0.799, seeds [0], knobs `{"epochs": 2, "lr": 0.0001, "p_none_pair": 0.25}`
-- **Qwen3-4B-Base** incumbent (v4 suites): transfer 0.759, dev 0.843, seeds [0], knobs `{"epochs": 2, "lr": 5e-05, "p_none_pair": 0.25}`
-- **Qwen3-8B-Base** incumbent (v4 suites): transfer 0.765, dev 0.843, seeds [0], knobs `{"epochs": 2, "train_sources": "banking77,boolq,agnews,mnli,sst5,yelp,trec,dbpedia14,amazon,imdb,legacy_policy"}`
+- **Qwen3-4B-Base** incumbent (v4 suites): transfer 0.761, dev 0.849, seeds [0], knobs `{"epochs": 2, "lr": 3e-05, "p_none_pair": 0.25}`
+- **Qwen3-8B-Base** incumbent (v4 suites): transfer 0.774, dev 0.869, seeds [0], knobs `{"epochs": 2, "lr": 5e-05, "p_none_pair": 0.25}`
 
 | round | base | trials | best transfer | best knobs | incumbent after | spend |
 |---|---|---|---|---|---|---|

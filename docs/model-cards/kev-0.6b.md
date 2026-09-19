@@ -71,7 +71,7 @@ Jev (`typesafe-ai/jev` via Vercel AI Gateway) on the same frozen development set
 - **Held-out policy reasoning fails**: on programmatic policy pairs whose rule structure was never trained, both-siblings-correct is 6–11%. The release screen requires 70%.
 - **Ordinal hedging**: on 3-level Score questions with date arithmetic it collapses to the middle level.
 - Confident-error rate out of domain is 5% (≥0.9 confidence and wrong); raw ECE 0.08 in-domain, 0.16 out of domain. Probabilities are usable in-domain; treat them as advisory elsewhere.
-- Not evaluated on the locked test partitions as a release candidate. If an exploratory locked-test read exists for this checkpoint it is recorded under `runs/locked/` in the repository and labelled `-ungated`.
+- **Locked test, one exploratory read** (`runs/locked/kev-06b-preview-ungated/`, labelled ungated because the checkpoint fails the held-out-pair screen): in-distribution accuracy **0.819** (Brier 0.264, ECE 0.072), out-of-domain **0.631** (Brier 0.489, ECE 0.115, confident errors 3.7%). Both are slightly above the development numbers, so the development set was not over-fitted by selection. Out of domain, the none-of-the-above option is still chosen wrongly when the true option is present (accuracy 0.25 on those 36 items); in-domain the fix holds (0.79). This partition will not be read again for this checkpoint.
 
 ## Architecture
 

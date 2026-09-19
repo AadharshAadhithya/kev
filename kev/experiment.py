@@ -31,10 +31,10 @@ from kev.suite import digest, load_split, record_digest, write_json
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULTS = {"epochs": 1, "seed": 0, "lr": 0.0002, "lora": 16, "accum": 8, "batch": 1,
             "perm_kl": 0.0, "perm_frac": 0.3, "ord_w": 0.0,
-            "p_none": 0.1, "p_none_distract": 0.12, "p_distract": 0.15, "p_none_pair": 0.0}
+            "p_none": 0.1, "p_none_distract": 0.12, "p_distract": 0.15, "p_none_pair": 0.0, "synthetic_repeat": 1, "public_frac": 1.0}
 RANGES = {"epochs": (1, 5), "seed": (0, 10000), "lr": (1e-6, 0.001), "lora": (1, 64), "accum": (1, 64), "batch": (1, 64),
           "perm_kl": (0, 2), "perm_frac": (0, 1), "ord_w": (0, 2),
-          "p_none": (0, 0.4), "p_none_distract": (0, 0.4), "p_distract": (0, 0.4), "p_none_pair": (0, 1)}
+          "p_none": (0, 0.4), "p_none_distract": (0, 0.4), "p_distract": (0, 0.4), "p_none_pair": (0, 1), "synthetic_repeat": (1, 6), "public_frac": (0.05, 1.0)}
 CHOICES = {"dtype": ("fp32", "bf16"), "checkpointing": (0, 1), "option_isolation": (0, 1), "special_embeddings": (0, 1), "head_dim": (128, 256, 512, 1024)}
 
 

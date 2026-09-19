@@ -62,12 +62,14 @@ def main():
     ap.add_argument("--p_none_distract", type=float, default=0.12)
     ap.add_argument("--p_distract", type=float, default=0.15)
     ap.add_argument("--p_none_pair", type=float, default=0.0, help="fraction of Choice records that additionally emit a none-present/none-absent minimal pair")
+    ap.add_argument("--synthetic_repeat", type=int, default=1, help="oversample synthetic policy sources (legacy_policy, compositional, contrastive) this many times per epoch")
+    ap.add_argument("--public_frac", type=float, default=1.0, help="deterministic subsample of public-source training records (mix ablations)")
     ap.add_argument("--out", default="runs/kev")
     ap.add_argument("--seed", type=int, default=0)
     a = ap.parse_args()
 
-    if min(a.epochs, a.accum, a.n_per_source, a.lora, a.batch) < 1:
-        ap.error("epochs, accum, n_per_source, lora and batch must be positive")
+    if min(a.epochs, a.accum, a.n_per_source, a.lora, a.batch, a.synthetic_repeat) < 1 or not 0 < a.public_frac <= 1:
+        ap.error("epochs, accum, n_per_source, lora, batch and synthetic_repeat must be positive; 0 < public_frac <= 1")
     if a.dtype == "bf16" and a.device != "cuda":
         ap.error("--dtype bf16 requires --device cuda")
     if a.lr <= 0 or min(a.ord_w, a.perm_kl) < 0 or not 0 <= a.perm_frac <= 1:
@@ -112,6 +114,17 @@ def main():
     if manifest:
         from .study_v3 import validate_training
         validate_training(reqs, manifest)
+    SYNTHETIC = ("legacy_policy", "compositional", "contrastive")
+    if a.public_frac < 1:
+        mix_rng = random.Random(source_seed(a.seed, "public_frac"))
+        public = [r for r in reqs if r["_meta"]["source"] not in SYNTHETIC]; synth = [r for r in reqs if r["_meta"]["source"] in SYNTHETIC]
+        keep = sorted(mix_rng.sample(range(len(public)), int(round(a.public_frac * len(public)))))
+        reqs = [public[i] for i in keep] + synth
+        print(f"mix: public_frac {a.public_frac} -> {len(keep)} public + {len(synth)} synthetic records", flush=True)
+    if a.synthetic_repeat > 1:
+        extra = [r for r in reqs if r["_meta"]["source"] in SYNTHETIC] * (a.synthetic_repeat - 1)
+        reqs = reqs + extra
+        print(f"mix: synthetic_repeat {a.synthetic_repeat} -> +{len(extra)} records", flush=True)
     suite_hash = digest(Path(a.suite) / "manifest.json") if manifest else None
     write_json(out_dir / "training_config.json", {"args": vars(a), "suite_sha256": suite_hash, "base_revision": revision,
                                                 "ordinal_objective": "ranked_probability_score", "holdout": holdout})

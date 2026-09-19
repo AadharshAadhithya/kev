@@ -112,7 +112,29 @@ Findings so far tonight (v4 suites; Jev dev 0.845 / transfer 0.855):
 - **More public data hurts 4B transfer**: 4B on v4 (10.9k) transfer 0.704 / 0.735 vs 0.747 / 0.750 on v3 (3.4k), while
   dev rises 0.825 -> 0.849. The lever at 4B is the data *mix*, not volume; `synthetic_repeat` / `public_frac` knobs
   added; the v4-vs-v5 mix studies were killed before finishing.
-- Option isolation trains normally at 0.6B (dev 0.800) with a measured flip rate of exactly 0.0.
+- Option isolation trains normally at 0.6B (dev 0.800) with a measured flip rate of exactly 0.0; transfer 0.58-0.60
+  (parity with the plain encoding; six salvaged arch-screen trials all within noise of the incumbent).
+- **Fine-tuning loses base capability** ([`scripts/base_mmlu_probe.py`](scripts/base_mmlu_probe.py): the base model,
+  zero-shot, next-token logits over option letters, same 80 frozen items per task):
+
+  | task (transfer-v4 dev) | 0.6B base | kev 0.6B | 4B base | kev 4B | 8B base | kev 8B | Jev |
+  |---|---|---|---|---|---|---|---|
+  | MMLU | 0.425 | 0.46 | 0.688 | 0.60-0.66 | **0.762** | 0.65 | 0.90 |
+  | PAWS | 0.70 | 0.56 | 0.787 | 0.56-0.71 | **0.85** | 0.70-0.78 | 0.79 |
+  | SciQ | 0.912 | 0.86 | 0.975 | 0.95-0.97 | 1.0 | 0.99-1.0 | 0.99 |
+  | QNLI | 0.775 | 0.85 | 0.812 | 0.84-0.91 | 0.887 | 0.84-0.88 | 0.925 |
+  | Emotion | 0.287 | 0.50 | - | 0.53-0.62 | 0.30 | 0.53-0.56 | 0.60 |
+  | TweetEval offensive | 0.588 | 0.69 | - | 0.64-0.80 | 0.637 | 0.69-0.75 | 0.81 |
+
+  The fine-tune helps on classification-shaped tasks and *hurts* on knowledge and paraphrase: -11 pp MMLU at 8B,
+  -14 pp PAWS at 0.6B. The 8B base zero-shot already beats Jev on PAWS. Hypotheses under test: low-drift LoRA
+  (`lowdrift-4b-v4`: fewer target modules, r=4-8, lr 5e-5..1e-4, 1 epoch) and a knowledge-MCQ training mix
+  (`knowledge-4b-v6`: ARC-Challenge, OpenBookQA, CommonsenseQA added as trainable sources; MMLU/SciQ stay eval-only).
+- 4B on v5 (20k public, compositional arm, 1 epoch): dev 0.858 (best 4B dev), transfer 0.713: more public data keeps
+  raising in-distribution accuracy and not transfer.
+- kev-0.6b research preview published ([`jaredpalmer/kev-0.6b`](https://huggingface.co/jaredpalmer/kev-0.6b),
+  card [`docs/model-cards/kev-0.6b.md`](docs/model-cards/kev-0.6b.md)); one exploratory (ungated) locked-test read:
+  decision 0.819, transfer 0.631 ([`runs/locked/kev-06b-preview-ungated/summary.json`](runs/locked/kev-06b-preview-ungated/summary.json)).
 
 ## Status and deferred work
 

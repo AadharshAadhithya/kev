@@ -87,7 +87,12 @@ def metrics(rows, temperature=1.0):
     confidence, correct = np.asarray(conf), np.asarray(acc, dtype=bool)
     high = confidence >= 0.9
     result.update(confident_error_rate=float(np.mean(high & ~correct)), coverage_at_0_9=float(high.mean()),
-                  accuracy_at_0_9=float(correct[high].mean()) if high.any() else None)
+                  accuracy_at_0_9=float(correct[high].mean()) if high.any() else None,
+                  # signed over-confidence (mean top probability minus accuracy) and errors within the top confidence bins;
+                  # the sign is diagnostic: untrained readouts run positive, outcome-trained ones near zero or negative
+                  confidence_bias=float(confidence.mean() - correct.mean()),
+                  top_bins={str(t): {"n": int((confidence >= t).sum()), "errors": int(((confidence >= t) & ~correct).sum()),
+                                     "error_rate": float((~correct[confidence >= t]).mean()) if (confidence >= t).any() else None} for t in (0.9, 0.95, 0.99)})
     result["selective"] = {}
     for fraction in (0.5, 0.8):
         cutoff = np.sort(confidence)[-max(1, math.ceil(len(rows) * fraction))]
@@ -194,6 +199,41 @@ class LocalPredictor:
                 "latency_ms": 1000 * (time.perf_counter() - start), "input_tokens": len(enc["ids"])}
 
 
+class RemotePredictor:
+    """Score any TypeSafe System One-compatible endpoint (POST <base_url>/v1/systemone) on frozen records. Probabilities are
+    taken from the response as returned (renormalised by validate_distribution like every other predictor). Records the
+    server-reported model id so the manifest can pin what was scored."""
+
+    def __init__(self, base_url, model="kev-latest", api_key="local", timeout=120, retries=3):
+        import urllib.request
+        self.base_url, self.model, self.api_key, self.timeout, self.retries = base_url.rstrip("/"), model, api_key, timeout, retries
+        self.served_model = None; self._request = urllib.request
+
+    def __call__(self, record):
+        payload = json.dumps({**api_request(record), "model": self.model}).encode()
+        req = self._request.Request(f"{self.base_url}/v1/systemone", data=payload, method="POST",
+                                    headers={"content-type": "application/json", "authorization": f"Bearer {self.api_key}"})
+        last = None
+        for attempt in range(self.retries):
+            try:
+                start = time.perf_counter()
+                with self._request.urlopen(req, timeout=self.timeout) as resp:
+                    body = json.loads(resp.read())
+                latency = 1000 * (time.perf_counter() - start)
+                break
+            except Exception as error:   # 5xx / timeouts: retry with backoff; anything persistent surfaces as a rejected record
+                last = error; time.sleep(2 ** attempt)
+        else:
+            raise RuntimeError(f"remote endpoint failed after {self.retries} attempts: {last}")
+        self.served_model = body.get("model", self.served_model)
+        probs = {}
+        for qid, q in record["questions"].items():
+            a = body["answers"][qid]
+            if q["type"] == "noul": probs[qid] = {"true": float(a["noul"]), "false": 1 - float(a["noul"])}
+            else: probs[qid] = {str(k): float(v) for k, v in a["probabilities"].items()}
+        return {"probabilities": probs, "latency_ms": latency, "input_tokens": (body.get("usage") or {}).get("input_tokens")}
+
+
 def evaluate_records(records, predictor, directory, temperature=1.0, heldout_sources=("mnli", "sst5")):
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=False)
@@ -227,17 +267,23 @@ def evaluate_records(records, predictor, directory, temperature=1.0, heldout_sou
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--run", required=True)
+    ap.add_argument("--run", help="checkpoint dir or Hub id (local scoring)")
+    ap.add_argument("--remote", help="base URL of a System One-compatible endpoint to score instead of a local checkpoint")
+    ap.add_argument("--remote-model", default="kev-latest")
     ap.add_argument("--suite", required=True)
     ap.add_argument("--out", required=True)
     ap.add_argument("--device", choices=["cpu", "mps", "cuda"], default=default_device())
     ap.add_argument("--allow-test", action="store_true")
     a = ap.parse_args()
+    if bool(a.run) == bool(a.remote): ap.error("give exactly one of --run or --remote")
     split = "test" if a.allow_test else "development"
     records = load_split(a.suite, split, allow_test=a.allow_test)
     heldout = json.loads((Path(a.suite) / "manifest.json").read_text())["holdout_sources"]
-    report, _ = evaluate_records(records, LocalPredictor(a.run, a.device), a.out, heldout_sources=tuple(heldout))
-    report.update(suite_sha256=digest(Path(a.suite) / "manifest.json"), run=a.run, split=split, calibration_applied=False)
+    import os
+    predictor = RemotePredictor(a.remote, a.remote_model, os.environ.get("KEV_REMOTE_API_KEY", "local")) if a.remote else LocalPredictor(a.run, a.device)
+    report, _ = evaluate_records(records, predictor, a.out, heldout_sources=tuple(heldout))
+    report.update(suite_sha256=digest(Path(a.suite) / "manifest.json"), run=a.run or a.remote, split=split, calibration_applied=False,
+                  remote={"base_url": a.remote, "requested_model": a.remote_model, "served_model": predictor.served_model} if a.remote else None)
     write_json(Path(a.out) / "report.json", report)
     print(json.dumps({"objective": report["objective"], "clean": report["clean"], "coverage": report["coverage"]}, indent=2))
 

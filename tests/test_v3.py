@@ -222,3 +222,32 @@ def test_ordinal_threshold_families_are_balanced_minimal_pairs():
         materialize(a)
     counts = collections.Counter((r["_meta"]["family"], r["questions"]["decision"]["label"]) for r in recs)
     assert all(counts[(f, level)] >= 8 for f in ORDINAL_FAMILIES for level in (0, 1, 2))   # every level appears in every family
+
+
+def test_remote_predictor_maps_system_one_answers_and_retries(monkeypatch):
+    import io, json
+    from kev.benchmark import RemotePredictor
+    rec = {"state": "s", "questions": {"q": {"type": "choice", "instructions": "i", "criteria": {"a": "A", "b": "B"}, "label": "a", "src": "t"},
+                                       "y": {"type": "noul", "instructions": "i", "label": True, "src": "t"}}}
+    calls = []
+    class Resp:
+        def __init__(self, body): self.body = body
+        def read(self): return json.dumps(self.body).encode()
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+    def urlopen(req, timeout):
+        calls.append(json.loads(req.data))
+        if len(calls) == 1: raise OSError("503")
+        return Resp({"model": "openjev-x", "answers": {"q": {"type": "choice", "probabilities": {"a": 0.7, "b": 0.3}}, "y": {"type": "noul", "noul": 0.2}}, "usage": {"input_tokens": 12}})
+    p = RemotePredictor("http://example.test/", retries=2); monkeypatch.setattr(p._request, "urlopen", urlopen); monkeypatch.setattr("time.sleep", lambda s: None)
+    out = p(rec)
+    assert out["probabilities"] == {"q": {"a": 0.7, "b": 0.3}, "y": {"true": 0.2, "false": 0.8}} and p.served_model == "openjev-x" and len(calls) == 2
+    assert calls[0]["model"] == "kev-latest" and "label" not in json.dumps(calls[0])        # labels never leave the machine
+
+
+def test_top_bins_and_confidence_bias():
+    from kev.benchmark import metrics
+    rows = [{"p": [0.99, 0.01], "label": 0, "type": "noul"}, {"p": [0.99, 0.01], "label": 1, "type": "noul"}, {"p": [0.6, 0.4], "label": 0, "type": "noul"}]
+    m = metrics(rows)
+    assert m["top_bins"]["0.99"] == {"n": 2, "errors": 1, "error_rate": 0.5} and m["top_bins"]["0.9"]["n"] == 2
+    assert abs(m["confidence_bias"] - ((0.99 + 0.99 + 0.6) / 3 - 2 / 3)) < 1e-9

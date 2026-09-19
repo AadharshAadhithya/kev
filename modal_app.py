@@ -37,6 +37,7 @@ image = (
     .add_local_file(ROOT / "uv.lock", "/root/uv.lock")
     .add_local_file(ROOT / "pyproject.toml", "/root/pyproject.toml")
     .add_local_dir(ROOT / "evals", "/root/evals")
+    .add_local_dir(ROOT / "scripts", "/root/scripts")
 )
 hf_cache = modal.Volume.from_name("kev-hf-cache", create_if_missing=True)
 runs_volume = modal.Volume.from_name("kev-runs", create_if_missing=True)
@@ -106,6 +107,35 @@ def run_locked_test(trial_path, name, suites, git_commit):
         write_json(out / "summary.json", summary)
         runs_volume.commit()
     return summary
+
+
+@app.function(image=image, gpu=GPU, cpu=2, memory=(32768, 65536), retries=0, timeout=3600,
+              volumes={RUNS_MOUNT: runs_volume, HF_MOUNT: hf_cache}, secrets=secrets)
+def run_base_probe(base, suite, name, tasks="all"):
+    """Untrained baseline: the base model's zero-shot letter-logit readout on a frozen suite's development partition
+    (scripts/base_mmlu_probe.py). Writes benchmark-compatible rows/report under /runs/probes/<name>."""
+    import subprocess as sp
+    out = Path(RUNS_MOUNT) / "probes" / name
+    if out.exists():
+        raise FileExistsError(f"probe {name} exists")
+    try:
+        sp.run([sys.executable, "/root/scripts/base_mmlu_probe.py", "--base", base, "--suite", f"/root/{suite}", "--tasks", tasks, "--device", "cuda", "--out", str(out)],
+               check=True, cwd="/root", env={**os.environ, "PYTHONPATH": "/root"})
+    finally:
+        runs_volume.commit(); hf_cache.commit()
+    return json.loads((out / "report.json").read_text())["clean"]
+
+
+@app.local_entrypoint()
+def base_probe(base: str, name: str, suite: str = "evals/v4/transfer-v4", tasks: str = "all", gpu: str = GPU):
+    """e.g. --base Qwen/Qwen3-30B-A3B-Base --name qwen3-30b-a3b-transfer-v4"""
+    target = ROOT / "runs/probes" / name
+    if target.exists():
+        raise FileExistsError(f"{target} exists")
+    clean = run_base_probe.with_options(gpu=gpu).remote(base, suite, name, tasks)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run([sys.executable, "-m", "modal", "volume", "get", "kev-runs", f"/probes/{name}", str(target.parent)], check=True)
+    print(json.dumps({"acc": clean["acc"], "brier": clean["brier"], "confident_error_rate": clean["confident_error_rate"]}))
 
 
 def pull_study(study):

@@ -1,6 +1,6 @@
 # Leaderboard
 
-Generated 2026-09-19T04:11+00:00 from runs/*/result.json. Selection on development partitions only; the locked test is never read here.
+Generated 2026-09-19T04:16+00:00 from runs/*/result.json. Selection on development partitions only; the locked test is never read here.
 
 - **Qwen/Qwen3-0.6B-Base** incumbent: transfer 0.610, dev 0.799, seeds [0] (arch-06b/06-trial-6)
 - **Qwen/Qwen3-4B-Base** incumbent: transfer 0.761, dev 0.849, seeds [0] (recipe-4b-r1/03-trial-3)

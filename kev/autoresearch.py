@@ -28,7 +28,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from kev.experiment import CHOICES, DEFAULTS, RANGES, validated_trial
-from kev.suite import record_digest, write_json
+from kev.suite import write_json
+
+
+def record_digest(value):
+    """Canonical (key-sorted) digest for config identity; kev.suite.record_digest keeps insertion order for provenance."""
+    import hashlib
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 ROOT = Path(__file__).resolve().parents[1]
 SUITE, TRANSFER = "evals/v4/decision-v4", "evals/v4/transfer-v4"
@@ -129,7 +135,7 @@ def propose(rows, base, n, seed, suite_manifest, incumbent_cfg=None, rng_seed=0)
     rng = random.Random(rng_seed)
     parent = dict(incumbent_cfg or {**DEFAULTS, **BASE_DEFAULTS[base], "base": base, "epochs": 2})
     parent.pop("seed", None); parent.pop("train_sources", None)
-    tried = {record_digest({**strip_seed(r["config"]), "seed": seed}) for r in rows if r["config"]}
+    tried = {record_digest(validated_trial({**strip_seed(r["config"]), "seed": seed}, suite_manifest)) for r in rows if r["config"] and r["base"] == base}
     candidates, seen = [], set()
     knobs = list(SPACE)
     for _ in range(400):
@@ -137,7 +143,7 @@ def propose(rows, base, n, seed, suite_manifest, incumbent_cfg=None, rng_seed=0)
         k = rng.sample(knobs, rng.choice([1, 1, 1, 2]))
         cfg = dict(parent)
         for knob in k:
-            current = parent.get(knob, DEFAULTS.get(knob, 0 if knob in ("option_isolation", "special_embeddings") else 256 if knob == "head_dim" else None))
+            current = parent.get(knob, DEFAULTS.get(knob, 0 if knob in ("option_isolation", "special_embeddings") else 256 if knob == "head_dim" else "all" if knob == "lora_targets" else None))
             choices = [v for v in SPACE[knob] if v != current]
             if not choices: continue
             cfg[knob] = rng.choice(choices)

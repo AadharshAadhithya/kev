@@ -121,8 +121,81 @@ def family_deadline(rng):
     return build(-rng.randint(0, 10)), build(rng.choice([rng.randint(1, grace), grace + rng.randint(1, 20)]))
 
 
+# --- ordinal threshold families as Score questions (PLAN.md: the deadline failure is "no idea how ordinal thresholds work").
+# Each has three ordered levels split by two thresholds; one is date-based like deadline but with a different template.
+
+def family_warranty_claim(rng):
+    name = rng.choice(NAMES); item = rng.choice(ITEMS); bought = date(2026, rng.randint(1, 6), rng.randint(1, 28))
+    standard, extended = rng.choice([(90, 365), (180, 730), (365, 1095)]); part = rng.choice(['stitching', 'battery', 'housing', 'zipper', 'switch'])
+    def evaluate(f):
+        if not _need(f, "claim", "purchase"): return UNDETERMINED
+        age = (f["claim"] - f["purchase"]).days
+        return 0 if age <= standard else 1 if age <= extended else 2
+    def build(age):
+        claim = bought + timedelta(days=age)
+        return {"policy": f"Warranty claims made within {standard} days of purchase are covered in full. Claims made after that but within {extended} days are covered at half cost. Later claims are not covered.",
+                "sentences": [(f"{name} purchased {item} on {_day(bought)}.", {"purchase": bought}),
+                              (f"A warranty claim for it was filed on {_day(claim)}.", {"claim": claim}),
+                              (f"The claim describes a defect in the {part}.", {})],
+                "evaluate": evaluate, "question": {"type": "score", "instructions": "How is this claim covered?", "criteria": ["Covered in full", "Covered at half cost", "Not covered"]}}
+    a = rng.choice([rng.randint(1, standard), rng.randint(standard + 1, extended), extended + rng.randint(1, 200)])
+    b = rng.choice([x for x in [rng.randint(1, standard), rng.randint(standard + 1, extended), extended + rng.randint(1, 200)] if evaluate({"claim": bought + timedelta(days=x), "purchase": bought}) != evaluate({"claim": bought + timedelta(days=a), "purchase": bought})] or [a])
+    return build(a), build(b)
+
+
+def family_sla_response(rng):
+    name = rng.choice(NAMES); target, breach = rng.choice([(4, 24), (8, 48), (24, 72), (1, 8)])
+    unit = "hours"; topic = rng.choice(['a login failure', 'a duplicate charge', 'a missing invoice', 'an export error']); queue = rng.choice(['email', 'chat', 'phone'])
+    def evaluate(f):
+        if not _need(f, "hours"): return UNDETERMINED
+        return 0 if f["hours"] <= target else 1 if f["hours"] <= breach else 2
+    def build(h):
+        return {"policy": f"Support responses within {target} {unit} meet the service level. Responses after {target} but within {breach} {unit} are a minor breach. Anything slower is a major breach.",
+                "sentences": [(f"{name} opened a priority ticket about {topic}.", {}),
+                              (f"The first response arrived {h} {unit} after the ticket was opened.", {"hours": h}),
+                              (f"The ticket was routed through the {queue} queue.", {})],
+                "evaluate": evaluate, "question": {"type": "score", "instructions": "How does this response time rate against the service level?", "criteria": ["Met", "Minor breach", "Major breach"]}}
+    levels = [rng.randint(1, target), rng.randint(target + 1, breach), breach + rng.randint(1, 100)]
+    a, b = rng.sample(levels, 2)
+    return build(a), build(b)
+
+
+def family_late_fee(rng):
+    name = rng.choice(NAMES); grace, cap = rng.choice([(5, 30), (10, 60), (15, 45)]); amount = rng.choice([120, 450, 980, 2300]); method = rng.choice(['bank transfer', 'card', 'cheque'])
+    def evaluate(f):
+        if not _need(f, "days_late"): return UNDETERMINED
+        return 0 if f["days_late"] <= grace else 1 if f["days_late"] <= cap else 2
+    def build(d):
+        return {"policy": f"Invoices paid within {grace} days after the due date incur no fee. Payments between {grace + 1} and {cap} days late incur a 2% fee. Payments later than {cap} days incur a 10% fee and a hold on the account.",
+                "sentences": [(f"{name}'s invoice for ${amount:,} fell due last quarter.", {}),
+                              (f"Payment was received {d} days after the due date.", {"days_late": d}),
+                              (f"The payment was made by {method}.", {})],
+                "evaluate": evaluate, "question": {"type": "score", "instructions": "Which fee tier applies?", "criteria": ["No fee", "2% fee", "10% fee and account hold"]}}
+    levels = [rng.randint(0, grace), rng.randint(grace + 1, cap), cap + rng.randint(1, 60)]
+    a, b = rng.sample(levels, 2)
+    return build(a), build(b)
+
+
+def family_volume_discount(rng):
+    name = rng.choice(NAMES); item = rng.choice(ITEMS); t1, t2 = rng.choice([(10, 50), (25, 100), (5, 20), (100, 500)]); dest = rng.choice(['warehouse', 'storefront', 'branch office'])
+    def evaluate(f):
+        if not _need(f, "units"): return UNDETERMINED
+        return 0 if f["units"] < t1 else 1 if f["units"] < t2 else 2
+    def build(u):
+        return {"policy": f"Orders of fewer than {t1} units are charged the list price. Orders of {t1} to {t2 - 1} units receive the volume discount. Orders of {t2} units or more receive the wholesale rate.",
+                "sentences": [(f"{name} placed a business order for {item}.", {}),
+                              (f"The order is for {u} units.", {"units": u}),
+                              (f"Delivery is to a {dest}.", {})],
+                "evaluate": evaluate, "question": {"type": "score", "instructions": "Which pricing tier applies?", "criteria": ["List price", "Volume discount", "Wholesale rate"]}}
+    levels = [rng.randint(1, t1 - 1), rng.randint(t1, t2 - 1), t2 + rng.randint(0, t2)]
+    a, b = rng.sample(levels, 2)
+    return build(a), build(b)
+
+
 FAMILIES = {"return_window": family_return_window, "spend_threshold": family_spend_threshold, "authorization": family_authorization,
-            "age_eligibility": family_age_eligibility, "quantity_limit": family_quantity_limit, "deadline": family_deadline}
+            "age_eligibility": family_age_eligibility, "quantity_limit": family_quantity_limit, "deadline": family_deadline,
+            "warranty_claim": family_warranty_claim, "sla_response": family_sla_response, "late_fee": family_late_fee, "volume_discount": family_volume_discount}
+ORDINAL_FAMILIES = ("warranty_claim", "sla_response", "late_fee", "volume_discount")   # trainable Score-threshold families (deadline stays held out)
 
 
 def label_of(item, drop=None):

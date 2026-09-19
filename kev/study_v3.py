@@ -7,8 +7,8 @@ from pathlib import Path
 
 from huggingface_hub import HfApi
 
-from kev.composition import DEV_SHAPES, TEST_SHAPES, TRAIN_SHAPES, check_group, generate as compose
-from kev.contrastive import generate
+from kev.composition import DEV_SHAPES, HELD_OUT_KEYS, TEST_SHAPES, TRAIN_SHAPES, canonical, check_group, generate as compose, sample_trees
+from kev.contrastive import ORDINAL_FAMILIES, generate
 from kev.data import materialize
 from kev.model import encode, load_tokenizer
 from kev.suite import SPLITS, digest, load_split, record_digest, write_json
@@ -65,13 +65,19 @@ def validate_training(records, manifest):
         m = r["_meta"]
         if m["source"] in forbidden or (allowed and m["source"] not in allowed):
             raise ValueError(f"eval-only or undeclared training source: {m['source']}")
-        if m["source"] == "compositional" and m["family"] not in TRAIN_SHAPES:
-            raise ValueError("held-out compositional structure in training")
+        if m["source"] == "compositional":
+            held_shape = m["family"] in DEV_SHAPES + TEST_SHAPES
+            held_structure = m.get("structure") in HELD_OUT_KEYS
+            if held_shape or held_structure or (m["family"] not in TRAIN_SHAPES and not m["family"].startswith("rand:")):
+                raise ValueError("held-out compositional structure in training")
     if not records:
         raise ValueError("empty training partition")
 
 
-def freeze(out, source="evals/decision-v2", transfer="evals/transfer-v2", public_train=None, synthetic_scale=1, inherit_eval=None):
+def freeze(out, source="evals/decision-v2", transfer="evals/transfer-v2", public_train=None, synthetic_scale=1, inherit_eval=None,
+           random_structures=0, groups_per_structure=8, train_styles=(0, 1), matched_arms=True, legacy_families=FAMILIES):
+    """random_structures > 0: the compositional arm is generated from that many random rule trees (negation anywhere,
+    held-out and locked structures excluded by canonical key) instead of the eight fixed TRAIN_SHAPES."""
     """inherit_eval: a frozen decision suite whose development/test bytes are reused verbatim (only train/calibration are
     regenerated), so results stay comparable across suite versions that differ in training data only."""
     """public_train: optional larger public training pool (a frozen suite dir). Its train+calibration partitions replace
@@ -133,9 +139,13 @@ def freeze(out, source="evals/decision-v2", transfer="evals/transfer-v2", public
         dev_synthetic = []
     else:
         dev_synthetic = admit_groups(legacy(12, "v3-control-dev", excluded=reserved)) + admit_groups(compose(4, "v3-composition-dev"))
-    old_train, old_cal = grouped_split(admit_groups(legacy(64 * synthetic_scale, "v3-control", excluded=reserved)), 8 * synthetic_scale)
-    new_train, new_cal = grouped_split(admit_groups(compose(16 * synthetic_scale, "v3-composition")), 2 * synthetic_scale)
-    if len(old_train) != len(new_train) or len(old_cal) != len(new_cal):
+    old_train, old_cal = grouped_split(admit_groups(legacy(64 * synthetic_scale, "v3-control", families=legacy_families, excluded=reserved)), 8 * synthetic_scale)
+    if random_structures:
+        trees = {f"rand:{canonical(t)}": t for t in sample_trees(random_structures, f"{out.name}-structures")}
+        new_train, new_cal = grouped_split(admit_groups(compose(groups_per_structure, "v7-composition", styles=train_styles, trees=trees)), 1)
+    else:
+        new_train, new_cal = grouped_split(admit_groups(compose(16 * synthetic_scale, "v3-composition")), 2 * synthetic_scale)
+    if matched_arms and (len(old_train) != len(new_train) or len(old_cal) != len(new_cal)):
         raise ValueError("synthetic arms have unequal record budgets")
     parts["train"] += old_train + new_train
     parts["calibration"] += old_cal + new_cal
@@ -153,11 +163,14 @@ def freeze(out, source="evals/decision-v2", transfer="evals/transfer-v2", public
         "eval_only_sources": old_transfer["eval_only_sources"] + ["legacy_holdout", "composition_holdout"],
         "context": original["context"],
         "protocol": {"train_shapes": TRAIN_SHAPES, "transfer_shapes": DEV_SHAPES, "locked_shapes": TEST_SHAPES,
-                     "train_render_styles": [0, 1], "locked_render_styles": [2],
+                     "train_render_styles": list(train_styles), "locked_render_styles": [2],
+                     "random_structures": random_structures, "groups_per_structure": groups_per_structure if random_structures else None,
+                     "excluded_structure_keys": sorted(HELD_OUT_KEYS), "legacy_families_trainable": list(legacy_families),
                      "public_train_records": len(parts["train"]) - len(old_train) - len(new_train),
                      "public_train_pool": str(public_train) if public_train else str(source), "synthetic_scale": synthetic_scale,
                      "inherited_eval": str(inherit_eval) if inherit_eval else None,
-                     "synthetic_records_per_arm": len(old_train), "calibration": "shared; stratified by family and group",
+                     "synthetic_records_per_arm": len(old_train) if matched_arms else {"legacy_policy": len(old_train), "compositional": len(new_train)},
+                     "calibration": "shared; stratified by family and group",
                      "arm_selection": "train_sources selects public sources plus exactly one synthetic arm",
                      "primary": "macro development NLL; transfer and confident-error checks required; no automatic release",
                      "legacy_test": "Inherited v2 locked test bytes retained without inspecting examples; only new structures added to transfer test",
@@ -224,11 +237,20 @@ def main():
     ap.add_argument("--public-train", help="frozen suite whose train/calibration public partitions replace the source's (larger pool)")
     ap.add_argument("--synthetic-scale", type=int, default=1, help="multiply synthetic training pairs/groups per arm (both arms stay equal)")
     ap.add_argument("--inherit-eval", help="decision suite whose development/test bytes are reused verbatim")
+    ap.add_argument("--random-structures", type=int, default=0, help="compositional arm from N random rule trees (held-out structures excluded)")
+    ap.add_argument("--groups-per-structure", type=int, default=8)
+    ap.add_argument("--train-styles", default="0,1", help="rendering styles for training compositional records (2 is locked-test only)")
+    ap.add_argument("--unmatched-arms", action="store_true", help="allow the two synthetic arms to differ in size")
+    ap.add_argument("--legacy-families", default="v3", choices=["v3", "all"], help="'all' adds the four ordinal Score threshold families (deadline stays held out)")
     a = ap.parse_args()
+    styles = tuple(int(x) for x in a.train_styles.split(","))
+    if 2 in styles: ap.error("rendering style 2 is reserved for the locked test")
     if a.smoke_from:
         smoke_subset(a.smoke_from, a.out)
     else:
-        freeze(a.out, public_train=a.public_train, synthetic_scale=a.synthetic_scale, inherit_eval=a.inherit_eval)
+        freeze(a.out, public_train=a.public_train, synthetic_scale=a.synthetic_scale, inherit_eval=a.inherit_eval,
+               random_structures=a.random_structures, groups_per_structure=a.groups_per_structure, train_styles=styles, matched_arms=not a.unmatched_arms,
+               legacy_families=FAMILIES + ORDINAL_FAMILIES if a.legacy_families == "all" else FAMILIES)
 
 
 if __name__ == "__main__":

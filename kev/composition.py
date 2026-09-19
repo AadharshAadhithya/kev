@@ -77,9 +77,22 @@ def atom_text(atom):
 
 
 def render_rule(tree, atoms, style):
+    """Five surface styles for the same rule tree. 0 = logic-like, 1 = 'both/at least one of' lists, 2 = reserved for the
+    locked test, 3 = plain prose, 4 = clause per line."""
     if isinstance(tree, int): return atom_text(atoms[tree])
     op, *children = tree
     parts = [render_rule(c, atoms, style) for c in children]
+    if style == 3:
+        if op == "not": return f"the condition \"{parts[0]}\" fails"
+        if op == "and": return f"{parts[0]}, and also {parts[1]}"
+        if op == "or": return f"either {parts[0]}, or else {parts[1]}"
+        if op == "unless": return f"{parts[0]}, except when {parts[1]}"
+        return f"when {parts[0]} the requirement is that {parts[1]}, and when it is not the requirement is that {parts[2]}"
+    if style == 4:
+        if op == "not": return f"[NOT: {parts[0]}]"
+        if op in ("and", "or"): return f"[{'ALL' if op == 'and' else 'ANY'} of: {parts[0]} | {parts[1]}]"
+        if op == "unless": return f"[{parts[0]} UNLESS {parts[1]}]"
+        return f"[IF {parts[0]} THEN {parts[1]} ELSE {parts[2]}]"
     if op == "not": return f"NOT ({parts[0]})" if style == 0 else f"it is not the case that ({parts[0]})"
     if op in ("and", "or"):
         if style == 0: return f"({parts[0]}) {op.upper()} ({parts[1]})"
@@ -87,6 +100,96 @@ def render_rule(tree, atoms, style):
         return f"{connector} these conditions hold: [({parts[0]}); ({parts[1]})]"
     if op == "unless": return f"({parts[0]}) holds and the exception ({parts[1]}) does not hold"
     return f"if ({parts[0]}), use ({parts[1]}); otherwise use ({parts[2]})"
+
+
+# --- random rule trees (PLAN.md: structural diversity, negation anywhere) ---------------------------------------------
+
+def skeleton(tree):
+    """Structure with leaf identities erased: used to order commutative children independently of atom numbering."""
+    if isinstance(tree, int): return "_"
+    op, *children = tree
+    parts = [skeleton(c) for c in children]
+    if op in ("and", "or"): parts = sorted(parts)
+    return f"{op}({','.join(parts)})"
+
+
+def sort_commutative(tree):
+    if isinstance(tree, int): return tree
+    op, *children = tree
+    children = [sort_commutative(c) for c in children]
+    if op in ("and", "or"): children = sorted(children, key=skeleton)
+    return (op, *children)
+
+
+def canonical(tree):
+    """Structure key: commutative children ordered by skeleton, then leaves renumbered in traversal order, so
+    (A and B) or not C and not C or (B and A) share one key."""
+    t = relabel(sort_commutative(tree))
+    def render(t):
+        if isinstance(t, int): return str(t)
+        return f"{t[0]}({','.join(render(c) for c in t[1:])})"
+    return render(t)
+
+
+def push_negation(tree):
+    """De Morgan normal form, so a random tree equivalent to a held-out shape under negation pushing is also excluded."""
+    if isinstance(tree, int): return tree
+    op, *children = tree
+    if op == "not":
+        inner = children[0]
+        if isinstance(inner, int): return tree
+        iop, *ic = inner
+        if iop == "not": return push_negation(ic[0])
+        if iop in ("and", "or"): return ("or" if iop == "and" else "and", *[push_negation(("not", c)) for c in ic])
+        if iop == "unless": return push_negation(("or", ("not", ic[0]), ic[1]))
+        return ("not", push_negation(inner))
+    if op == "unless": return ("and", push_negation(children[0]), push_negation(("not", children[1])))
+    return (op, *[push_negation(c) for c in children])
+
+
+def relabel(tree):
+    """Renumber leaves in first-appearance order so structure keys do not depend on which atom index was drawn."""
+    mapping = {}
+    def walk(t):
+        if isinstance(t, int):
+            mapping.setdefault(t, len(mapping)); return mapping[t]
+        return (t[0], *[walk(c) for c in t[1:]])
+    return walk(tree)
+
+
+def structure_keys(tree):
+    return {canonical(tree), canonical(push_negation(tree))}
+
+
+HELD_OUT_KEYS = set().union(*(structure_keys(SHAPES[s]) for s in DEV_SHAPES + TEST_SHAPES))
+
+
+def random_tree(rng, depth, next_leaf):
+    """Random rule over {and, or, not, unless, if} with negation allowed at any position; leaves are fresh atom indices."""
+    if depth == 0 or (depth < 3 and rng.random() < 0.25):
+        return next_leaf()
+    op = rng.choice(["and", "or", "not", "unless", "if", "and", "or"])
+    if op == "not": return ("not", random_tree(rng, depth - 1, next_leaf))
+    if op == "if": return ("if", random_tree(rng, depth - 1, next_leaf), random_tree(rng, depth - 1, next_leaf), random_tree(rng, depth - 1, next_leaf))
+    return (op, random_tree(rng, depth - 1, next_leaf), random_tree(rng, depth - 1, next_leaf))
+
+
+def sample_trees(n, seed, min_leaves=2, max_leaves=4, exclude=HELD_OUT_KEYS):
+    """n distinct rule structures (by canonical key), none structurally equal to a held-out or locked shape, none a
+    bare leaf, each with negation somewhere in ~60% of cases. Deterministic in `seed`."""
+    rng = random.Random(f"{seed}:trees"); trees, keys = [], set()
+    for _ in range(20000):
+        if len(trees) >= n: break
+        counter = [0]
+        def next_leaf():
+            counter[0] += 1; return counter[0] - 1
+        t = random_tree(rng, rng.choice([2, 2, 3]), next_leaf)
+        if isinstance(t, int) or not min_leaves <= counter[0] <= max_leaves: continue
+        k = structure_keys(t)
+        if k & exclude or k & keys: continue
+        keys |= k; trees.append(relabel(t))
+    if len(trees) < n: raise ValueError(f"only {len(trees)} distinct structures found")
+    return trees
 
 
 def leaf_indices(tree):
@@ -131,10 +234,20 @@ def rendered_facts(facts, order):
     return [f"The {k} is {value(facts[k])}." for k in order]
 
 
-def generate(groups_per_shape, seed, shapes=TRAIN_SHAPES, styles=(0, 1), source="compositional"):
+POLICY_WRAPPERS = {
+    0: "Approve exactly when {rule}. Otherwise deny. The routing reference does not affect eligibility.",
+    1: "Approve exactly when {rule}. Otherwise deny. The routing reference does not affect eligibility.",
+    2: "Approval requires the following rule to be true: {rule}. A false rule means denial. Routing references are irrelevant.",
+    3: "A case is approved when {rule}; any other case is denied. Routing references play no part in the decision.",
+    4: "DECISION RULE {rule} -> approve; otherwise reject. Ignore the routing reference.",
+}
+
+
+def generate(groups_per_shape, seed, shapes=TRAIN_SHAPES, styles=(0, 1), source="compositional", trees=None):
+    """trees: optional {name: tree} to generate from random structures instead of SHAPES (names must not collide)."""
     records = []
-    for shape in shapes:
-        tree = SHAPES[shape]
+    shape_trees = trees if trees is not None else {s: SHAPES[s] for s in shapes}
+    for shape, tree in shape_trees.items():
         rng = random.Random(f"{seed}:{shape}")
         for i in range(groups_per_shape):
             atoms = make_atoms(tree, rng)
@@ -161,8 +274,7 @@ def generate(groups_per_shape, seed, shapes=TRAIN_SHAPES, styles=(0, 1), source=
             order = list(facts); rng.shuffle(order)
             style = rng.choice(styles)
             rule = render_rule(tree, atoms, style)
-            policy = (f"Approve exactly when {rule}. Otherwise deny. The routing reference does not affect eligibility." if style != 2
-                      else f"Approval requires the following rule to be true: {rule}. A false rule means denial. Routing references are irrelevant.")
+            policy = POLICY_WRAPPERS[style].format(rule=rule)
             keys = ["accept", "reject"]; rng.shuffle(keys)
             criteria = {k: "The policy permits this case" if k == "accept" else "The policy does not permit this case" for k in keys}
             group = f"composition/{seed}/{shape}/{i}"
@@ -176,7 +288,7 @@ def generate(groups_per_shape, seed, shapes=TRAIN_SHAPES, styles=(0, 1), source=
                         "label": "accept" if result else "reject", "src": f"composition_{shape}"}},
                         "_meta": {"id": identifier, "group_id": group, "source": source, "variant": "clean",
                                   "pair_id": f"{group}/{kind}", "sibling": sibling, "pair_kind": kind,
-                                  "family": shape, "family_id": shape, "render_style": style,
+                                  "family": shape, "family_id": shape, "render_style": style, "structure": canonical(tree),
                                   "text_sha256": hashlib.sha256(json.dumps(state, sort_keys=True).encode()).hexdigest(),
                                   "certificate": {"tree": tree, "atoms": atoms, "facts": values, "order": order,
                                                   "deciding_field": deciding, "label": result}}})

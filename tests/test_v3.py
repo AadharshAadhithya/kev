@@ -194,3 +194,31 @@ def test_missing_partition_is_fetched_and_verified(tmp_path, monkeypatch):
     (evals / "train.jsonl").unlink(); served.write_bytes(b'{"tampered": 1}\n')
     with pytest.raises(ValueError, match="checksum"):
         S.load_split(evals, "train")
+
+
+def test_random_rule_structures_exclude_heldout_and_cover_negation():
+    from kev.composition import SHAPES, DEV_SHAPES, TEST_SHAPES, canonical, push_negation, sample_trees, generate as compose, check_group
+    assert canonical(("or", ("not", 0), ("and", 1, 2))) == canonical(SHAPES["held_or_not"])       # order/numbering-independent
+    assert canonical(("not", ("and", 0, 1))) != canonical(("or", ("not", 0), ("not", 1)))
+    assert canonical(push_negation(("not", ("and", 0, 1)))) == canonical(("or", ("not", 0), ("not", 1)))   # De Morgan
+    trees = sample_trees(30, "t")
+    held = {canonical(SHAPES[s]) for s in DEV_SHAPES + TEST_SHAPES}
+    assert len({canonical(t) for t in trees}) == 30 and not any(canonical(t) in held or canonical(push_negation(t)) in held for t in trees)
+    assert any("not(" in canonical(t) for t in trees)
+    recs = compose(1, "t", styles=(3, 4), trees={f"rand{i}": t for i, t in enumerate(trees[:5])})
+    for i in range(0, len(recs), 4):
+        assert check_group(recs[i:i + 4])
+
+
+def test_ordinal_threshold_families_are_balanced_minimal_pairs():
+    import collections
+    from kev.contrastive import ORDINAL_FAMILIES, generate
+    from kev.data import materialize
+    recs, rep = generate(30, "t", families=list(ORDINAL_FAMILIES))
+    assert all(v["pairs"] == 30 for v in rep.values())
+    for a, b in zip(recs[::2], recs[1::2]):
+        assert a["questions"]["decision"]["type"] == "score" and a["questions"]["decision"]["label"] != b["questions"]["decision"]["label"]
+        assert sum(x != y for x, y in zip(a["state"]["case"].split(". "), b["state"]["case"].split(". "))) == 1
+        materialize(a)
+    counts = collections.Counter((r["_meta"]["family"], r["questions"]["decision"]["label"]) for r in recs)
+    assert all(counts[(f, level)] >= 8 for f in ORDINAL_FAMILIES for level in (0, 1, 2))   # every level appears in every family

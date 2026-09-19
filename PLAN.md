@@ -132,6 +132,21 @@ Findings so far tonight (v4 suites; Jev dev 0.845 / transfer 0.855):
   (`knowledge-4b-v6`: ARC-Challenge, OpenBookQA, CommonsenseQA added as trainable sources; MMLU/SciQ stay eval-only).
 - 4B on v5 (20k public, compositional arm, 1 epoch): dev 0.858 (best 4B dev), transfer 0.713: more public data keeps
   raising in-distribution accuracy and not transfer.
+- **The learning rate is the lever at 4B and 8B.** Default lr 2e-4 erodes base capability; lr 5e-5 (everything else
+  equal) gives transfer 0.759 / 0.758 at two seeds on v4 and 0.755 / 0.761 on v6, +4.7 pp [+0.4, +9.6] vs the default,
+  with the best Brier (0.346). Fewer LoRA target modules and smaller ranks help less; combining low lr with
+  public_frac / synthetic_repeat / option isolation does not stack (0.748-0.752). Knowledge MCQ sources (v6) lift
+  in-distribution accuracy to 0.86 and MMLU to 0.70 without moving transfer. 8B at lr 5e-5: dev 0.869, transfer
+  0.774, Brier 0.339 (best of any size) but +0.4 pp [-3.9, +4.5] vs 4B on transfer. The 4B->8B step is flat for this
+  recipe; the remaining gap to Jev (0.855) is MMLU (0.69 vs 0.90; the 8B *base* gets 0.76 zero-shot), PAWS, emotion.
+- Mix results at 4B: public_frac 0.33 (+synthetic_repeat 2 + isolation) 0.752 at lr 2e-4; synthetic_repeat 3 hurts
+  (0.686, PAWS 0.45); 1 epoch is better calibrated (Brier 0.379, confident errors 2.7%) at equal accuracy; the
+  2-epoch 4B run on v5 (23.6k records, 5.9k steps at lr 2e-4) **collapsed** (dev 0.58) - long runs at lr 2e-4 are unstable.
+- Research previews published, each with one exploratory (ungated) locked-test read, all above their development numbers:
+  [`kev-0.6b`](https://huggingface.co/jaredpalmer/kev-0.6b) dev 0.805/0.598 -> test 0.819/0.631;
+  [`kev-4b`](https://huggingface.co/jaredpalmer/kev-4b) (lowdrift-4b-v4/01-trial-1) dev 0.843/0.759 -> test 0.852/0.794;
+  [`kev-8b`](https://huggingface.co/jaredpalmer/kev-8b) (recipe-8b-r1/00-trial-0) dev 0.869/0.774 -> test 0.869/0.799.
+  None passes the predeclared 70% held-out-pair screen (0.11 / 0.62 / 0.61), so none is a versioned release.
 - kev-0.6b research preview published ([`jaredpalmer/kev-0.6b`](https://huggingface.co/jaredpalmer/kev-0.6b),
   card [`docs/model-cards/kev-0.6b.md`](docs/model-cards/kev-0.6b.md)); one exploratory (ungated) locked-test read:
   decision 0.819, transfer 0.631 ([`runs/locked/kev-06b-preview-ungated/summary.json`](runs/locked/kev-06b-preview-ungated/summary.json)).

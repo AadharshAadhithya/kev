@@ -46,7 +46,17 @@ uv run --extra serve python -m kev.serve --run jaredpalmer/kev-0.5b --port 8009
 
 The same files are attached to the [GitHub release](https://github.com/jaredpalmer/kev/releases/tag/v0.1.0) as `kev-0.5b.tar.gz`.
 
-**Research preview:** [`jaredpalmer/kev-0.6b`](https://huggingface.co/jaredpalmer/kev-0.6b) (base Qwen3-0.6B-Base, no version tag) is the current best 0.6B checkpoint under the frozen v4 protocol: in-distribution 0.805 vs 0.712 for kev-0.5b on the same development set, out-of-domain 0.598 vs 0.575, none-of-the-above shortcut largely fixed. It does not pass the release screen (held-out policy reasoning near chance), so it is published for comparison, not for use. Card: [`docs/model-cards/kev-0.6b.md`](docs/model-cards/kev-0.6b.md).
+**Research previews** (no version tags; each fails our predeclared release screen on held-out policy reasoning and is published for comparison, with one exploratory locked-test read recorded in its card):
+
+| | base | in-distribution (dev / locked test) | out-of-domain (dev / locked test) | card |
+|---|---|---|---|---|
+| kev-0.5b (released) | Qwen2.5-0.5B | 0.712 / – | 0.575 / – | [MODEL_CARD.md](MODEL_CARD.md) |
+| [`kev-0.6b`](https://huggingface.co/jaredpalmer/kev-0.6b) | Qwen3-0.6B-Base | 0.805 / 0.819 | 0.598 / 0.631 | [card](docs/model-cards/kev-0.6b.md) |
+| [`kev-4b`](https://huggingface.co/jaredpalmer/kev-4b) | Qwen3-4B-Base | 0.843 / 0.852 | 0.759 / 0.794 | [card](docs/model-cards/kev-4b.md) |
+| [`kev-8b`](https://huggingface.co/jaredpalmer/kev-8b) | Qwen3-8B-Base | 0.869 / 0.869 | 0.774 / 0.799 | [card](docs/model-cards/kev-8b.md) |
+| Jev (reference) | – | 0.845 / – | 0.855 / – | |
+
+Same frozen items for every row (`evals/v4`). `KEV_DTYPE=bf16` serves the 4B/8B checkpoints on a 32 GB Mac.
 
 ## Quick Start
 

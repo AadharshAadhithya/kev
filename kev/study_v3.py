@@ -148,7 +148,8 @@ def freeze(out, source="evals/decision-v2", transfer="evals/transfer-v2", public
         random.Random(f"v3-{split}").shuffle(parts[split])
     manifest = {"version": 3, "base_revisions": revisions, "dataset_revisions": original["dataset_revisions"],
         "parent_files": parent_hashes, "holdout_sources": [],
-        "trainable_sources": [s for s in original["trainable_sources"] if s != "contrastive"] + ["legacy_policy", "compositional"],
+        "trainable_sources": sorted({s for s in original["trainable_sources"] if s != "contrastive"}
+                                    | ({s for s in json.loads((Path(public_train) / "manifest.json").read_text())["trainable_sources"]} if public_train else set())) + ["legacy_policy", "compositional"],
         "eval_only_sources": old_transfer["eval_only_sources"] + ["legacy_holdout", "composition_holdout"],
         "context": original["context"],
         "protocol": {"train_shapes": TRAIN_SHAPES, "transfer_shapes": DEV_SHAPES, "locked_shapes": TEST_SHAPES,

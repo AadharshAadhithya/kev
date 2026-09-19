@@ -234,18 +234,49 @@ def _sciq(split, n, rng):
     return out
 
 
+def _mcq(ex_q, labels, texts, answer_label, src, rng, state_extra=None):
+    """Knowledge MCQ -> Choice with neutral keys; option order shuffled per record so keys carry no information."""
+    order = list(range(len(texts))); rng.shuffle(order)
+    keys = [f"opt_{i + 1}" for i in range(len(texts))]
+    crit = {keys[i]: texts[j] for i, j in enumerate(order)}
+    label = keys[order.index(labels.index(answer_label))]
+    state = {"question": ex_q}
+    if state_extra: state.update(state_extra)
+    return {"state": state, "questions": {"answer": {"type": "choice", "instructions": "Which option correctly answers the question?", "criteria": crit, "label": label, "src": src}}}
+
+
+def _arc(split, n, rng):
+    ds = _dataset("allenai/ai2_arc:ARC-Challenge", split=split, rng=rng)
+    return [_mcq(ex["question"], list(ex["choices"]["label"]), list(ex["choices"]["text"]), ex["answerKey"], "arc", rng) for ex in _sample(ds, n, rng)]
+
+
+def _openbookqa(split, n, rng):
+    ds = _dataset("allenai/openbookqa:main", split=split, rng=rng)
+    return [_mcq(ex["question_stem"], list(ex["choices"]["label"]), list(ex["choices"]["text"]), ex["answerKey"], "openbookqa", rng) for ex in _sample(ds, n, rng)]
+
+
+def _csqa(split, n, rng):
+    ds = _dataset("tau/commonsense_qa", split=split, rng=rng)
+    return [_mcq(ex["question"], list(ex["choices"]["label"]), list(ex["choices"]["text"]), ex["answerKey"], "csqa", rng) for ex in _sample(ds, n, rng) if ex["answerKey"]]
+
+
 ALL_SOURCES = {**SOURCES, "trec": (_trec, "train", "test"), "dbpedia14": (_dbpedia, "train", "test"), "emotion": (_emotion, "train", "test"),
                "imdb": (_imdb, "train", "test"), "amazon": (_amazon, "train", "test"), "qnli": (_qnli, "train", "validation"),
                "tweet_offensive": (_offensive, "train", "test"), "mmlu": (_mmlu, "test", "test"),
-               "paws": (_paws, "train", "test"), "sciq": (_sciq, "train", "test")}
+               "paws": (_paws, "train", "test"), "sciq": (_sciq, "train", "test"),
+               "arc": (_arc, "train", "test"), "openbookqa": (_openbookqa, "train", "test"), "csqa": (_csqa, "train", "validation")}
 ALL_REPOS = {**REPOS, "trec": "CogComp/trec", "dbpedia14": "fancyzhx/dbpedia_14", "emotion": "dair-ai/emotion", "imdb": "stanfordnlp/imdb",
              "amazon": "SetFit/amazon_reviews_multi_en", "qnli": "nyu-mll/glue", "tweet_offensive": "cardiffnlp/tweet_eval", "mmlu": "cais/mmlu",
-             "paws": "google-research-datasets/paws", "sciq": "allenai/sciq"}
+             "paws": "google-research-datasets/paws", "sciq": "allenai/sciq",
+             "arc": "allenai/ai2_arc", "openbookqa": "allenai/openbookqa", "csqa": "tau/commonsense_qa"}
 
 # Policy (PLAN.md step 1). A source is trainable or eval-only; suites record both lists and training refuses eval-only
 # sources. MMLU is a knowledge probe and stays eval-only permanently; Emotion/TweetEval are noisy-label honesty checks;
 # QNLI/PAWS/SciQ measure reading transfer. Rotten Tomatoes (SST parent) and SNLI (MNLI sibling) are excluded entirely.
-TRAINABLE = ("banking77", "boolq", "agnews", "mnli", "sst5", "yelp", "trec", "dbpedia14", "amazon", "imdb")
+# Knowledge MCQ (ARC-Challenge, OpenBookQA, CommonsenseQA) is trainable: the hypothesis (PLAN.md, overnight) is that the
+# pointer readout under-uses the base model's knowledge (8B scores 0.65 on 4-way MMLU, below its base-model level) and
+# that a small MCQ mix teaches the head to tap it. MMLU and SciQ stay eval-only; ARC/SciQ are distinct datasets.
+TRAINABLE = ("banking77", "boolq", "agnews", "mnli", "sst5", "yelp", "trec", "dbpedia14", "amazon", "imdb", "arc", "openbookqa", "csqa")
 EVAL_ONLY = ("mmlu", "emotion", "tweet_offensive", "qnli", "paws", "sciq")
 assert set(TRAINABLE) | set(EVAL_ONLY) == set(ALL_SOURCES) and not set(TRAINABLE) & set(EVAL_ONLY)
 

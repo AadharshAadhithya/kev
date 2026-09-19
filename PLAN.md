@@ -100,6 +100,20 @@ trial through `kev.experiment.execute_trial` with provenance. New tonight:
 Sequence: 0.6B screening rounds (cheap, one seed, replicate winners) -> promote the winning knobs to 4B on v4 -> 4B on v5
 -> 8B once with the best recipe -> one locked-test read for the best gated candidate -> research-preview cards.
 
+**Blocked at 20:55: the Modal workspace hit its spend limit** (`Workspace ... has exceeded its spend limit`; metered
+$48.50, $30 credits applied, $18.50 billed). Twelve running containers were killed (arch screen 4/8 evaluated, both
+4B mix studies mid-training). Raising the limit needs the dashboard (workspace Settings -> Billing -> spend limit);
+the CLI cannot. Until then: evaluations of the six salvaged arch-screen checkpoints run on the MBP GPU
+(`kev.experiment --resume`), the 0.6B research preview is prepared locally, and 4B/8B work waits.
+
+Findings so far tonight (v4 suites; Jev dev 0.845 / transfer 0.855):
+- 0.6B is saturated on transfer at 0.59-0.61 regardless of knobs (round 1: eight mutations, all within noise; lr 5e-4
+  and lora 64 + ord_w hurt dev). Run-to-run noise at the same seed on GPU is ~1 pp.
+- **More public data hurts 4B transfer**: 4B on v4 (10.9k) transfer 0.704 / 0.735 vs 0.747 / 0.750 on v3 (3.4k), while
+  dev rises 0.825 -> 0.849. The lever at 4B is the data *mix*, not volume; `synthetic_repeat` / `public_frac` knobs
+  added; the v4-vs-v5 mix studies were killed before finishing.
+- Option isolation trains normally at 0.6B (dev 0.800) with a measured flip rate of exactly 0.0.
+
 ## Status and deferred work
 
 - [x] Modal CUDA/batched path and backbone-v1 study completed; MBP path retained.

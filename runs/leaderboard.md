@@ -1,23 +1,30 @@
 # Leaderboard
 
-Generated 2026-09-19T04:16+00:00 from runs/*/result.json. Selection on development partitions only; the locked test is never read here.
+Generated 2026-09-19T05:20+00:00 from runs/*/result.json. Selection on development partitions only; the locked test is never read here.
 
 - **Qwen/Qwen3-0.6B-Base** incumbent: transfer 0.610, dev 0.799, seeds [0] (arch-06b/06-trial-6)
-- **Qwen/Qwen3-4B-Base** incumbent: transfer 0.761, dev 0.849, seeds [0] (recipe-4b-r1/03-trial-3)
+- **Qwen/Qwen3-4B-Base** incumbent: transfer 0.767, dev 0.840, seeds [0] (auto-4b-r0-91266/01-trial-1)
 - **Qwen/Qwen3-8B-Base** incumbent: transfer 0.774, dev 0.869, seeds [0] (recipe-8b-r1/00-trial-0)
 
 | study/trial | base | seed | dev acc | transfer acc | Brier | conf-err | held-out pairs | none_present | perm flip | gates | $ | knobs |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
 | recipe-8b-r1/00-trial-0 | Qwen3-8B-Base | 0 | 0.869 | 0.774 | 0.339 | 0.082 | 0.61 | 0.88 | 0.02 | fail | 4.96 | accum=4, epochs=2, lr=5e-05, p_none_pair=0.25 |
+| auto-4b-r0-91266/01-trial-1 | Qwen3-4B-Base | 0 | 0.840 | 0.767 | 0.355 | 0.062 | 0.61 | 0.87 | 0.07 | fail | 2.76 | epochs=2, lora_targets=all, lr=3e-05, p_none_pair=0.25 |
 | v3-8b-s0/00-trial-0 | Qwen3-8B-Base | 0 | 0.843 | 0.765 | 0.377 | 0.104 | 0.56 | 0.83 | 0.02 | fail | 1.45 | accum=4, epochs=2, train_sources=banking77,boolq,agnews,mnli,sst5,yelp,trec,dbpedia14,amazon,imdb,legacy_policy |
+| auto-4b-r0-91266/02-trial-2 | Qwen3-4B-Base | 0 | 0.842 | 0.761 | 0.367 | 0.099 | 0.59 | 0.87 | 0.02 | fail | 4.06 | epochs=3, lr=3e-05, p_none=0.2, p_none_pair=0.25 |
 | recipe-4b-r1/03-trial-3 | Qwen3-4B-Base | 0 | 0.849 | 0.761 | 0.384 | 0.105 | 0.56 | 0.85 | 0.05 | fail | 3.4 | epochs=2, lr=3e-05, p_none_pair=0.25 |
+| auto-4b-r0-91266/06-trial-6 | Qwen3-4B-Base | 0 | 0.831 | 0.759 | 0.354 | 0.059 | 0.55 | 0.83 | 0.07 | fail | 2.6 | epochs=2, lr=2e-05, p_none=0.2, p_none_pair=0.25 |
 | knowledge-4b-v6/01-trial-1 | Qwen3-4B-Base | 0 | 0.854 | 0.759 | 0.351 | 0.046 | 0.55 | 0.85 | 0.05 | fail | 1.93 | lr=0.0001, p_none_pair=0.25 |
 | lowdrift-4b-v4/01-trial-1 | Qwen3-4B-Base | 0 | 0.843 | 0.759 | 0.346 | 0.055 | 0.62 | 0.85 | 0.00 | fail | 2.56 | epochs=2, lr=5e-05, p_none_pair=0.25 |
 | recipe-4b-v4-s1/00-trial-0 | Qwen3-4B-Base | 1 | 0.853 | 0.758 | 0.371 | 0.062 | 0.58 | 0.88 | 0.05 | fail | 2.9 | epochs=2, lr=5e-05, p_none_pair=0.25 |
 | recipe-8b-r1/01-trial-1 | Qwen3-8B-Base | 0 | 0.861 | 0.758 | 0.370 | 0.090 | 0.56 | 0.85 | 0.00 | fail | 2.69 | accum=4, epochs=2, lr=5e-05, option_isolation=1, p_none_pair=0.25, public_frac=0.33, synthetic_repeat=2 |
+| auto-4b-r0-91266/05-trial-5 | Qwen3-4B-Base | 0 | 0.828 | 0.756 | 0.370 | 0.064 | 0.56 | 0.83 | 0.08 | fail | 1.7 | epochs=2, lr=3e-05, p_none_pair=0.25, public_frac=0.5 |
+| auto-4b-r0-91266/00-trial-0 | Qwen3-4B-Base | 0 | 0.843 | 0.755 | 0.360 | 0.056 | 0.59 | 0.88 | 0.07 | fail | 2.8 | epochs=2, lr=3e-05, p_none_pair=0.25 |
 | recipe-4b-r1/01-trial-1 | Qwen3-4B-Base | 0 | 0.861 | 0.755 | 0.370 | 0.091 | 0.58 | 0.87 | 0.02 | fail | 3.66 | epochs=2, lr=5e-05, p_none_pair=0.25 |
 | mix-4b-knobs/03-trial-3 | Qwen3-4B-Base | 0 | 0.840 | 0.752 | 0.361 | 0.062 | 0.58 | 0.87 | 0.00 | fail | 1.94 | epochs=2, option_isolation=1, p_none_pair=0.25, public_frac=0.33, synthetic_repeat=2 |
 | v3-data-capacity-s1/03-trial-3 | Qwen3-4B-Base | 1 | 0.840 | 0.750 | 0.357 | 0.052 | 0.62 | 0.82 | 0.00 | fail | 1.09 | epochs=2, train_sources=banking77,boolq,agnews,mnli,sst5,yelp,trec,dbpedia14,amazon,imdb,compositional |
+| auto-4b-r0-91266/03-trial-3 | Qwen3-4B-Base | 0 | 0.842 | 0.748 | 0.369 | 0.056 | 0.56 | 0.85 | 0.05 | fail | 2.42 | epochs=2, lr=3e-05, p_none=0.2, p_none_pair=0.25 |
+| auto-4b-r0-91266/04-trial-4 | Qwen3-4B-Base | 0 | 0.849 | 0.748 | 0.361 | 0.052 | 0.55 | 0.85 | 0.05 | fail | 2.55 | epochs=2, lr=3e-05, p_none_distract=0.25, p_none_pair=0.25 |
 | recipe-4b-r1/00-trial-0 | Qwen3-4B-Base | 0 | 0.835 | 0.748 | 0.383 | 0.096 | 0.56 | 0.77 | 0.00 | fail | 1.46 | epochs=2, lr=5e-05, option_isolation=1, p_none_pair=0.25, public_frac=0.33, synthetic_repeat=2 |
 | recipe-4b-r1/04-trial-4 | Qwen3-4B-Base | 0 | 0.835 | 0.748 | 0.402 | 0.125 | 0.53 | 0.80 | 0.00 | fail | 2.17 | epochs=3, lr=5e-05, option_isolation=1, p_none_pair=0.25, public_frac=0.33 |
 | v3-data-capacity-s0/03-trial-3 | Qwen3-4B-Base | 0 | 0.825 | 0.747 | 0.382 | 0.088 | 0.52 | 0.83 | 0.08 | fail | 0.89 | epochs=2, train_sources=banking77,boolq,agnews,mnli,sst5,yelp,trec,dbpedia14,amazon,imdb,compositional |
@@ -79,4 +86,5 @@ Generated 2026-09-19T04:16+00:00 from runs/*/result.json. Selection on developme
 | research-smoke-runner-verified/00-trial-0 | Qwen2.5-0.5B | 0 | 0.389 |  |  |  |  | 0.33 | 1.00 | pass |  | accum=3, ord_w=0.1, perm_frac=1, perm_kl=0.1 |
 | smoke/00-trial-0 | Qwen2.5-0.5B | 0 | 0.389 |  |  |  |  | 0.33 | 1.00 | pass | 0.04 | ord_w=0.1, perm_frac=1, perm_kl=0.1 |
 | smoke-arch/00-trial-0 | Qwen2.5-0.5B | 0 | 0.222 |  |  |  |  | 0.17 | 0.00 | pass |  | head_dim=512, option_isolation=1, p_none_pair=0.5, special_embeddings=1 |
+| smoke-hl/00-trial-0 | Qwen2.5-0.5B | 0 | 0.389 |  |  |  |  | 0.33 | 0.83 | pass |  | head_lr=0.002, weight_decay=0.1 |
 | smoke-mix/00-trial-0 | Qwen2.5-0.5B | 0 | 0.389 |  |  |  |  | 0.33 | 0.83 | pass |  | public_frac=0.5, synthetic_repeat=2 |

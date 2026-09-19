@@ -36,19 +36,19 @@ H100_RATE = 3.95
 
 # Mutation space: each entry is (knob, candidate values). One knob changes per proposal, plus a few two-knob combos.
 SPACE = {
-    "lr": [1e-4, 2e-4, 3e-4, 5e-4], "lora": [8, 16, 32, 64], "epochs": [1, 2, 3],
+    "lr": [2e-5, 3e-5, 5e-5, 1e-4, 2e-4], "lora": [4, 8, 16, 32], "epochs": [1, 2, 3],
     "accum": [1, 2],                                  # with batch 8 -> effective 8 or 16
     "p_none_pair": [0.0, 0.25, 0.5], "p_none": [0.05, 0.1, 0.2], "p_none_distract": [0.06, 0.12, 0.25], "p_distract": [0.0, 0.15, 0.3],
     "perm_kl": [0.0, 0.2, 0.5], "ord_w": [0.0, 0.25, 0.5],
     "option_isolation": [0, 1], "special_embeddings": [0, 1], "head_dim": [128, 256, 512, 1024],
-    "synthetic_repeat": [1, 2, 3, 4], "public_frac": [0.25, 0.5, 1.0], "lora_targets": ["all", "attn", "qv"],
+    "synthetic_repeat": [1, 2], "public_frac": [0.33, 0.5, 1.0], "lora_targets": ["all", "attn", "qv"],
 }
 BASE_DEFAULTS = {  # per-backbone memory-safe batch shape; effective batch stays 8 unless accum is mutated
     "Qwen/Qwen3-0.6B-Base": {"batch": 8, "accum": 1, "dtype": "bf16"},
     "Qwen/Qwen3-4B-Base": {"batch": 4, "accum": 2, "dtype": "bf16", "checkpointing": 1},
     "Qwen/Qwen3-8B-Base": {"batch": 2, "accum": 4, "dtype": "bf16", "checkpointing": 1, "base_revision": "49e3418fbbbca6ecbdf9608b4d22e5a407081db4"},
 }
-TRIAL_MINUTES = {"Qwen/Qwen3-0.6B-Base": 14, "Qwen/Qwen3-4B-Base": 38, "Qwen/Qwen3-8B-Base": 65}
+TRIAL_MINUTES = {"Qwen/Qwen3-0.6B-Base": 14, "Qwen/Qwen3-4B-Base": 50, "Qwen/Qwen3-8B-Base": 80}
 
 
 def metered_spend():

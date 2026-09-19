@@ -82,6 +82,117 @@ Use at most four concurrent containers, no automatic trial retries, and an 1,800
 
 Modal documentation: [images](https://modal.com/docs/guide/images), [volumes](https://modal.com/docs/guide/volumes), [GPU](https://modal.com/docs/guide/gpu), [secrets](https://modal.com/docs/guide/secrets).
 
+## Overnight autoresearch (branch `research/overnight-1`, PR #3)
+
+Authorized: up to $500 of Modal credits; spend baseline $27.17 at 19:45. Rules unchanged: selection on development
+partitions, locked test read at most once per promoted candidate, no evaluator changes from a trial config, every
+trial through `kev.experiment.execute_trial` with provenance. New tonight:
+
+- `kev/autoresearch.py`: bounded hill-climb over the allowlisted config space; leaderboard across all studies
+  ([`runs/leaderboard.md`](runs/leaderboard.md)); spend ledger from `modal billing`; auto-maintained log below.
+- Architecture switches (flags, default off): `option_isolation` (option spans are isolated sub-branches with shared
+  positions; permutation invariance exact by construction, 1.2e-7 measured on the real model), `special_embeddings`
+  (train the five delimiter embeddings), `head_dim`.
+- Suites: `decision-v4` (10k public + 448/arm synthetic) and `decision-v5` (20k public + 1,792/arm), both with dev/test
+  bytes identical to v3 so every number since the matched study is comparable. `transfer-v4/v5` are byte-identical to v3.
+- Reference: Jev on decision-v4 dev acc 0.845, Brier 0.237, trained-structure pairs 0.86; on transfer-v4 dev acc 0.855.
+
+Sequence: 0.6B screening rounds (cheap, one seed, replicate winners) -> promote the winning knobs to 4B on v4 -> 4B on v5
+-> 8B once with the best recipe -> one locked-test read for the best gated candidate -> research-preview cards.
+
+**Blocked at 20:55: the Modal workspace hit its spend limit** (`Workspace ... has exceeded its spend limit`; metered
+$48.50, $30 credits applied, $18.50 billed). Twelve running containers were killed (arch screen 4/8 evaluated, both
+4B mix studies mid-training). Raising the limit needs the dashboard (workspace Settings -> Billing -> spend limit);
+the CLI cannot. Until then: evaluations of the six salvaged arch-screen checkpoints run on the MBP GPU
+(`kev.experiment --resume`), the 0.6B research preview is prepared locally, and 4B/8B work waits.
+
+Findings so far tonight (v4 suites; Jev dev 0.845 / transfer 0.855):
+- 0.6B is saturated on transfer at 0.59-0.61 regardless of knobs (round 1: eight mutations, all within noise; lr 5e-4
+  and lora 64 + ord_w hurt dev). Run-to-run noise at the same seed on GPU is ~1 pp.
+- **More public data hurts 4B transfer**: 4B on v4 (10.9k) transfer 0.704 / 0.735 vs 0.747 / 0.750 on v3 (3.4k), while
+  dev rises 0.825 -> 0.849. The lever at 4B is the data *mix*, not volume; `synthetic_repeat` / `public_frac` knobs
+  added; the v4-vs-v5 mix studies were killed before finishing.
+- Option isolation trains normally at 0.6B (dev 0.800) with a measured flip rate of exactly 0.0; transfer 0.58-0.60
+  (parity with the plain encoding; six salvaged arch-screen trials all within noise of the incumbent).
+- **Fine-tuning loses base capability** ([`scripts/base_mmlu_probe.py`](scripts/base_mmlu_probe.py): the base model,
+  zero-shot, next-token logits over option letters, same 80 frozen items per task):
+
+  | task (transfer-v4 dev) | 0.6B base | kev 0.6B | 4B base | kev 4B | 8B base | kev 8B | Jev |
+  |---|---|---|---|---|---|---|---|
+  | MMLU | 0.425 | 0.46 | 0.688 | 0.60-0.66 | **0.762** | 0.65 | 0.90 |
+  | PAWS | 0.70 | 0.56 | 0.787 | 0.56-0.71 | **0.85** | 0.70-0.78 | 0.79 |
+  | SciQ | 0.912 | 0.86 | 0.975 | 0.95-0.97 | 1.0 | 0.99-1.0 | 0.99 |
+  | QNLI | 0.775 | 0.85 | 0.812 | 0.84-0.91 | 0.887 | 0.84-0.88 | 0.925 |
+  | Emotion | 0.287 | 0.50 | - | 0.53-0.62 | 0.30 | 0.53-0.56 | 0.60 |
+  | TweetEval offensive | 0.588 | 0.69 | - | 0.64-0.80 | 0.637 | 0.69-0.75 | 0.81 |
+
+  The fine-tune helps on classification-shaped tasks and *hurts* on knowledge and paraphrase: -11 pp MMLU at 8B,
+  -14 pp PAWS at 0.6B. The 8B base zero-shot already beats Jev on PAWS. Hypotheses under test: low-drift LoRA
+  (`lowdrift-4b-v4`: fewer target modules, r=4-8, lr 5e-5..1e-4, 1 epoch) and a knowledge-MCQ training mix
+  (`knowledge-4b-v6`: ARC-Challenge, OpenBookQA, CommonsenseQA added as trainable sources; MMLU/SciQ stay eval-only).
+- 4B on v5 (20k public, compositional arm, 1 epoch): dev 0.858 (best 4B dev), transfer 0.713: more public data keeps
+  raising in-distribution accuracy and not transfer.
+- **The learning rate is the lever at 4B and 8B.** Default lr 2e-4 erodes base capability; lr 5e-5 (everything else
+  equal) gives transfer 0.759 / 0.758 at two seeds on v4 and 0.755 / 0.761 on v6, +4.7 pp [+0.4, +9.6] vs the default,
+  with the best Brier (0.346). Fewer LoRA target modules and smaller ranks help less; combining low lr with
+  public_frac / synthetic_repeat / option isolation does not stack (0.748-0.752). Knowledge MCQ sources (v6) lift
+  in-distribution accuracy to 0.86 and MMLU to 0.70 without moving transfer. 8B at lr 5e-5: dev 0.869, transfer
+  0.774, Brier 0.339 (best of any size) but +0.4 pp [-3.9, +4.5] vs 4B on transfer. The 4B->8B step is flat for this
+  recipe; the remaining gap to Jev (0.855) is MMLU (0.69 vs 0.90; the 8B *base* gets 0.76 zero-shot), PAWS, emotion.
+- Mix results at 4B: public_frac 0.33 (+synthetic_repeat 2 + isolation) 0.752 at lr 2e-4; synthetic_repeat 3 hurts
+  (0.686, PAWS 0.45); 1 epoch is better calibrated (Brier 0.379, confident errors 2.7%) at equal accuracy; the
+  2-epoch 4B run on v5 (23.6k records, 5.9k steps at lr 2e-4) **collapsed** (dev 0.58) - long runs at lr 2e-4 are unstable.
+- Research previews published, each with one exploratory (ungated) locked-test read, all above their development numbers:
+  [`kev-0.6b`](https://huggingface.co/jaredpalmer/kev-0.6b) dev 0.805/0.598 -> test 0.819/0.631;
+  [`kev-4b`](https://huggingface.co/jaredpalmer/kev-4b) (lowdrift-4b-v4/01-trial-1) dev 0.843/0.759 -> test 0.852/0.794;
+  [`kev-8b`](https://huggingface.co/jaredpalmer/kev-8b) (recipe-8b-r1/00-trial-0) dev 0.869/0.774 -> test 0.869/0.799.
+  None passes the predeclared 70% held-out-pair screen (0.11 / 0.62 / 0.61), so none is a versioned release.
+- kev-0.6b research preview published ([`jaredpalmer/kev-0.6b`](https://huggingface.co/jaredpalmer/kev-0.6b),
+  card [`docs/model-cards/kev-0.6b.md`](docs/model-cards/kev-0.6b.md)); one exploratory (ungated) locked-test read:
+  decision 0.819, transfer 0.631 ([`runs/locked/kev-06b-preview-ungated/summary.json`](runs/locked/kev-06b-preview-ungated/summary.json)).
+
+### Overnight synthesis (as of 02:00; spend ~$140 of $500)
+
+What moved the needle, in order of effect size, all on the same frozen development items:
+
+1. **Backbone capacity** 0.6B -> 4B: +14-19 pp transfer (matched data). 4B -> 8B: +1.5-2 pp at the low-lr recipe
+   (4B 0.759/0.758, 8B 0.774/0.779 at two seeds each).
+2. **Learning rate 2e-4 -> 5e-5**: +4.7 pp [+0.4, +9.6] at 4B, replicated at two seeds and two suites; best Brier;
+   the mechanism is reduced drift from the base model (base zero-shot probe). 3e-5 and 2e-5 are equivalent to 5e-5.
+3. **None-of-the-above minimal pairs**: none_present accuracy 0.75 -> 0.78-0.85 (0.6B), 0.85-0.93 (4B).
+4. Compositional policy data: +4-5 pp at 4B on v3 (CI touching zero), nothing at 0.6B; teaches trained structures
+   (0.85-1.0) and transfers partially to unseen ones (0.5-0.67 at 4B/8B).
+
+What did not work: more public data (raises dev, lowers or flattens transfer; a 2-epoch 23.6k-record 4B run at lr 2e-4
+collapsed); synthetic oversampling x3 (hurts PAWS badly); LoRA rank/target ablations (within noise once lr is low);
+option isolation (exact permutation invariance at no accuracy cost, but no accuracy gain); special embeddings; head_dim;
+perm_kl; ord_w; 3 epochs; knowledge MCQ sources (dev +2 pp, MMLU +2-5 pp, transfer flat). Fourteen one-knob mutations
+around the low-lr incumbent at 4B all landed in 0.748-0.767: **the config space is exhausted for this data and
+evaluation**; run-to-run noise at a fixed seed is ~1 pp.
+
+Also tried after the synthesis: WiSE-FT-style interpolation toward the base at inference (`KEV_LORA_SCALE`): alpha 0.75
+0.765 (noise), alpha 0.5 0.736 (-4.4 pp, CI excludes zero) - the head depends on the fine-tuned features, so weight-space
+interpolation is not a lever. Round auto-4b-r1 (head_lr, weight decay, rank 8, head_dim 1024, perm_kl, synthetic x2): all
+0.755-0.767; option isolation at low lr 0.729 (-5.8 pp, significant) - isolation costs accuracy at 4B.
+
+Where the remaining gap to Jev (0.855 transfer) lives, per task at 8B: MMLU 0.69-0.74 vs 0.90 (the 8B *base* is 0.76
+zero-shot - our readout still loses knowledge), PAWS 0.75 vs 0.79 (base 0.85), Emotion 0.55 vs 0.60, TweetEval 0.71 vs
+0.81, deadline 0.55-0.70 vs 0.95. Held-out policy pairs 0.61-0.67 vs the 0.70 screen.
+
+Next levers the evidence points at (not config knobs):
+- **Knowledge readout**: the pointer head under-uses what the base knows. Try a hybrid readout that adds the base
+  model's own letter/option-token logits (frozen, zero-drift) to the pointer logits, or distill the *base* model's
+  zero-shot distribution on knowledge-shaped questions into the head (self-anchoring, no Jev).
+- **Date/ordinal reasoning**: deadline stays near the middle level; needs either scratchpad-free arithmetic data with
+  varied surface forms or a Score readout that models cumulative levels directly.
+- **Held-out structure generalization**: more *rule structures* (not more pairs per structure) and rendering styles.
+- **Evaluation**: the 70% pair screen is within reach at 8B (0.59 / 0.67 / 0.61 across three seeds) but not met by
+  any seed, so no gated locked-test read happened tonight; the published previews carry ungated reads.
+
+Final replication (03:30): 4B lr 5e-5 at three seeds transfer 0.759 / 0.758 / 0.759; 8B lr 5e-5 at three seeds
+0.774 / 0.779 / 0.774. Both recipes are stable to ~0.5 pp. Spend for the night: ~$180 of the $500 authorized
+(89 trials indexed; `runs/leaderboard.md`).
+
 ## Status and deferred work
 
 - [x] Modal CUDA/batched path and backbone-v1 study completed; MBP path retained.
@@ -96,10 +207,24 @@ Modal documentation: [images](https://modal.com/docs/guide/images), [volumes](ht
       Held-out compositional structures, both siblings correct: 0.6B 3%/6%; 4B 45%/52%. Held-out authorization: 4B 100% both arms (0.6B 50%).
       Held-out deadline (3-level score) stays near chance for all cells. No cell passes the 70% held-out-pair screen; none is a locked-test candidate.
       Cost: 4 H100 trials, 0.6B ~4.5 min and 4B ~13.5 min wall each, admission bound $8.86.
-- [ ] Second seed for the four cells (budget permitting); then decide whether any candidate warrants a locked test.
+- [x] Second seed for the four v3 cells; overnight: v4/v5/v6 suites, ~60 further trials, three research previews
+      (0.6B / 4B / 8B) with one ungated locked read each. See "Overnight autoresearch" and the log below.
 - [ ] Deferred: option-order architecture experiments. Do not infer Jev's architecture from zero argmax flips.
 - [ ] Deferred: LLM-authored product scenarios, with a separate verification model and retained provenance; needs explicit API/budget decisions.
 - [ ] Deferred: 8B runs after the data-versus-capacity result, not as an automatic escalation.
 - [ ] Deferred: final release/model-card/Hub updates until generalization and calibration justify them.
 
 Relevant code: [suite builder](kev/study_v3.py), [rule generator](kev/composition.py), [experiment runner](kev/experiment.py), [benchmark](kev/benchmark.py), [Modal app](modal_app.py), [v3 tests](tests/test_v3.py).
+
+## Autoresearch log
+
+Maintained by `kev.autoresearch`; full table in [`runs/leaderboard.md`](runs/leaderboard.md). Selection uses development partitions only.
+
+- **Qwen3-0.6B-Base** incumbent (v4 suites): transfer 0.610, dev 0.799, seeds [0], knobs `{"epochs": 2, "lr": 0.0001, "p_none_pair": 0.25}`
+- **Qwen3-4B-Base** incumbent (v4 suites): transfer 0.767, dev 0.843, seeds [0], knobs `{"epochs": 2, "lr": 3e-05, "perm_kl": 0.2, "p_none_pair": 0.25, "lora_targets": "all"}`
+- **Qwen3-8B-Base** incumbent (v4 suites): transfer 0.779, dev 0.868, seeds [1], knobs `{"epochs": 2, "lr": 5e-05, "p_none_pair": 0.25}`
+
+| round | base | trials | best transfer | best knobs | incumbent after | spend |
+|---|---|---|---|---|---|---|
+| auto-06b-r1 | Qwen3-0.6B-Base | 8/8 | 0.596 | `{"epochs": 2, "accum": 1, "perm_kl": 0.5, "p_none_pair": 0.25}` | 0.592 | $9.82 |
+| auto-4b-r1 | Qwen3-4B-Base | 6/6 | 0.767 | `{"epochs": 2, "lr": 3e-05, "accum": 2, "perm_kl": 0.2, "p_none_pair": 0.25, "lora_targets": "all"}` | 0.767 | $147.26 |

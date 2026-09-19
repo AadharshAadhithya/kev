@@ -43,7 +43,7 @@ def _rec(r: Record):
 
 def _probs(rec):
     tok, model, dev = STATE["tok"], STATE["model"], STATE["dev"]
-    try: enc = encode(tok, rec, max_state=INFER_MAX_STATE, max_branch=INFER_MAX_BRANCH)
+    try: enc = model.encode(tok, rec, max_state=INFER_MAX_STATE, max_branch=INFER_MAX_BRANCH)
     except ValueError as e: raise HTTPException(422, str(e))
     with STATE["lock"]:
         if dev == "mps": torch.mps.synchronize()

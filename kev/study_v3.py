@@ -71,7 +71,9 @@ def validate_training(records, manifest):
         raise ValueError("empty training partition")
 
 
-def freeze(out, source="evals/decision-v2", transfer="evals/transfer-v2", public_train=None):
+def freeze(out, source="evals/decision-v2", transfer="evals/transfer-v2", public_train=None, synthetic_scale=1, inherit_eval=None):
+    """inherit_eval: a frozen decision suite whose development/test bytes are reused verbatim (only train/calibration are
+    regenerated), so results stay comparable across suite versions that differ in training data only."""
     """public_train: optional larger public training pool (a frozen suite dir). Its train+calibration partitions replace
     the source suite's public train/calibration; development/test still come from `source` so results stay comparable."""
     out, source, transfer = Path(out), Path(source), Path(transfer)
@@ -120,14 +122,24 @@ def freeze(out, source="evals/decision-v2", transfer="evals/transfer-v2", public
             reserved.update(hashes)
         return records
 
-    old_train, old_cal = grouped_split(admit_groups(legacy(64, "v3-control")), 8)
-    new_train, new_cal = grouped_split(admit_groups(compose(16, "v3-composition")), 2)
+    # development synthetic records are generated first, against public states only, so they do not depend on the size
+    # of the synthetic training arms (dev/test bytes stay identical across suite versions); training groups that would
+    # collide with a development state are rejected by admit_groups
+    if inherit_eval:
+        inherited_dev = load_split(inherit_eval, "development")
+        parts["development"] = inherited_dev
+        reserved.update(semantic_hash(r) for r in inherited_dev)
+        reserved.update(semantic_hash(r) for r in load_split(inherit_eval, "test", allow_test=True))
+        dev_synthetic = []
+    else:
+        dev_synthetic = admit_groups(legacy(12, "v3-control-dev", excluded=reserved)) + admit_groups(compose(4, "v3-composition-dev"))
+    old_train, old_cal = grouped_split(admit_groups(legacy(64 * synthetic_scale, "v3-control", excluded=reserved)), 8 * synthetic_scale)
+    new_train, new_cal = grouped_split(admit_groups(compose(16 * synthetic_scale, "v3-composition")), 2 * synthetic_scale)
     if len(old_train) != len(new_train) or len(old_cal) != len(new_cal):
         raise ValueError("synthetic arms have unequal record budgets")
     parts["train"] += old_train + new_train
     parts["calibration"] += old_cal + new_cal
-    parts["development"] += admit_groups(legacy(12, "v3-control-dev", excluded=reserved))
-    parts["development"] += admit_groups(compose(4, "v3-composition-dev"))
+    parts["development"] += dev_synthetic
     transfer_dev = [r for r in load_split(transfer, "development") if r["_meta"]["source"] != "contrastive"]
     transfer_dev += admit_groups(legacy(20, "v3-legacy-transfer", ("authorization", "deadline"), source="legacy_holdout"))
     transfer_dev += admit_groups(compose(8, "v3-composition-transfer", DEV_SHAPES, styles=(1,), source="composition_holdout"))
@@ -136,13 +148,15 @@ def freeze(out, source="evals/decision-v2", transfer="evals/transfer-v2", public
         random.Random(f"v3-{split}").shuffle(parts[split])
     manifest = {"version": 3, "base_revisions": revisions, "dataset_revisions": original["dataset_revisions"],
         "parent_files": parent_hashes, "holdout_sources": [],
-        "trainable_sources": [s for s in original["trainable_sources"] if s != "contrastive"] + ["legacy_policy", "compositional"],
+        "trainable_sources": sorted({s for s in original["trainable_sources"] if s != "contrastive"}
+                                    | ({s for s in json.loads((Path(public_train) / "manifest.json").read_text())["trainable_sources"]} if public_train else set())) + ["legacy_policy", "compositional"],
         "eval_only_sources": old_transfer["eval_only_sources"] + ["legacy_holdout", "composition_holdout"],
         "context": original["context"],
         "protocol": {"train_shapes": TRAIN_SHAPES, "transfer_shapes": DEV_SHAPES, "locked_shapes": TEST_SHAPES,
                      "train_render_styles": [0, 1], "locked_render_styles": [2],
                      "public_train_records": len(parts["train"]) - len(old_train) - len(new_train),
-                     "public_train_pool": str(public_train) if public_train else str(source),
+                     "public_train_pool": str(public_train) if public_train else str(source), "synthetic_scale": synthetic_scale,
+                     "inherited_eval": str(inherit_eval) if inherit_eval else None,
                      "synthetic_records_per_arm": len(old_train), "calibration": "shared; stratified by family and group",
                      "arm_selection": "train_sources selects public sources plus exactly one synthetic arm",
                      "primary": "macro development NLL; transfer and confident-error checks required; no automatic release",
@@ -162,11 +176,13 @@ def freeze(out, source="evals/decision-v2", transfer="evals/transfer-v2", public
             payload = b""
             inherited_records = inherited_questions = 0
             if split == "test":
-                old = json.loads((inherited / "manifest.json").read_text())["files"]["test.jsonl"]
-                if digest(inherited / "test.jsonl") != old["sha256"]:
+                test_src = Path(inherit_eval) if (inherit_eval and name.startswith("decision")) else inherited
+                old = json.loads((test_src / "manifest.json").read_text())["files"]["test.jsonl"]
+                if digest(test_src / "test.jsonl") != old["sha256"]:
                     raise ValueError("inherited test checksum mismatch")
-                payload = (inherited / "test.jsonl").read_bytes()
+                payload = (test_src / "test.jsonl").read_bytes()
                 inherited_records, inherited_questions = old["records"], old["questions"]
+                if inherit_eval and name.startswith("decision"): records = []   # the inherited test already contains the locked composition groups
             payload += "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in records).encode()
             path.write_bytes(payload)
             m["files"][path.name] = {"sha256": digest(path), "records": inherited_records + len(records),
@@ -206,11 +222,13 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--smoke-from")
     ap.add_argument("--public-train", help="frozen suite whose train/calibration public partitions replace the source's (larger pool)")
+    ap.add_argument("--synthetic-scale", type=int, default=1, help="multiply synthetic training pairs/groups per arm (both arms stay equal)")
+    ap.add_argument("--inherit-eval", help="decision suite whose development/test bytes are reused verbatim")
     a = ap.parse_args()
     if a.smoke_from:
         smoke_subset(a.smoke_from, a.out)
     else:
-        freeze(a.out, public_train=a.public_train)
+        freeze(a.out, public_train=a.public_train, synthetic_scale=a.synthetic_scale, inherit_eval=a.inherit_eval)
 
 
 if __name__ == "__main__":

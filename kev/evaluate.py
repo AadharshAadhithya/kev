@@ -32,20 +32,32 @@ def resolve_run(run):
     return snapshot_download(run, allow_patterns=["*.json", "*.safetensors", "*.pt", "*.txt", "*.jinja"])
 
 
-def load(run, dev):
+def load(run, dev, dtype=None):
+    """dtype: None = fp32 (exact; what every reported number uses). KEV_DTYPE=bf16 or dtype=torch.bfloat16 halves memory
+    for serving large backbones; probabilities then differ from the fp32 numbers in the third decimal."""
+    import os
     run = resolve_run(run)
     meta = torch.load(f"{run}/head.pt", map_location="cpu")
+    dtype = dtype or {"bf16": torch.bfloat16, "fp16": torch.float16}.get(os.environ.get("KEV_DTYPE", ""), torch.float32)
     tok = load_tokenizer(meta["base"], revision=meta.get("base_revision"))
-    m = DecisionModel(meta["base"], tok, dev, lora=None, revision=meta.get("base_revision"))
+    m = DecisionModel(meta["base"], tok, dev, lora=None, revision=meta.get("base_revision"), head_dim=meta.get("head_dim", 256),
+                      option_isolation=meta.get("option_isolation", False), dtype=dtype)
     from peft import PeftModel
-    m.lm = PeftModel.from_pretrained(m.lm, run).to(dev)
+    m.lm = PeftModel.from_pretrained(m.lm, run).to(dev)   # trainable token embeddings, if any, are inside the adapter
+    if dtype != torch.float32: m.lm = m.lm.to(dtype)
+    scale = float(os.environ.get("KEV_LORA_SCALE", "1"))
+    if scale != 1:   # WiSE-FT-style interpolation between the base (0) and the fine-tuned weights (1), at inference, no retraining
+        for module in m.lm.modules():
+            if hasattr(module, "scaling") and isinstance(module.scaling, dict):
+                for k in module.scaling: module.scaling[k] *= scale
+        m.lora_scale = scale
     m.head.load_state_dict(meta["head"]); m.eval()
     return tok, m
 
 
 def _probs(tok, model, req):
     rec = materialize(req)
-    return rec, model.probs(encode(tok, rec, strict=True))
+    return rec, model.probs(model.encode(tok, rec, strict=True))
 
 
 def _one(req, qid):
@@ -152,10 +164,10 @@ def test_packed_vs_separate(tok, model, reqs, rng, n=30):
     diffs, t_pack, t_sep, nq = [], 0.0, 0.0, 0
     sync = torch.mps.synchronize if model.device == "mps" else (lambda: None)
     for r in [x for x in reqs if len(x["questions"]) >= 2][:n]:
-        enc = encode(tok, materialize(r))
+        enc = model.encode(tok, materialize(r))
         sync(); t = time.time(); pp = model.probs(enc); sync(); t_pack += time.time() - t
         for qi, qid in enumerate(r["questions"]):
-            e1 = encode(tok, materialize(_one(r, qid)))
+            e1 = model.encode(tok, materialize(_one(r, qid)))
             sync(); t = time.time(); p1 = model.probs(e1)[0]; sync(); t_sep += time.time() - t
             diffs.append(float((pp[qi] - p1).abs().max())); nq += 1
     return {"n_questions": nq, "max_abs_prob_diff": float(np.max(diffs)), "mean_abs_prob_diff": float(np.mean(diffs)), "packed_s": t_pack, "separate_s": t_sep, "speedup": t_sep / t_pack}
@@ -192,7 +204,7 @@ def test_temperature(tok, model, reqs, rng):
     fit, held = [], []
     with torch.no_grad():
         for i, r in enumerate(reqs):
-            try: rec = materialize(augment(r, rng, p_none=0, p_none_distract=0, p_distract=0)); zs = model(encode(tok, rec))
+            try: rec = materialize(augment(r, rng, p_none=0, p_none_distract=0, p_distract=0)); zs = model(model.encode(tok, rec))
             except ValueError as exc: raise ValueError("Evaluation rejected an example; refusing partial metrics") from exc
             for z, q in zip(zs, rec["questions"]):
                 (fit if i % 2 == 0 else held).append((z.cpu(), q["label"]))

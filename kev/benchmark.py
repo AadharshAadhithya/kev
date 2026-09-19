@@ -183,7 +183,7 @@ class LocalPredictor:
         self.device = device
 
     def __call__(self, record):
-        enc = encode(self.tok, materialize(record), strict=True)
+        enc = self.model.encode(self.tok, materialize(record), strict=True)
         if len(enc["ids"]) > 2048:
             raise ValueError("packed request exceeds frozen 2048-token limit")
         sync(self.device)

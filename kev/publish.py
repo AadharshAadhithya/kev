@@ -41,15 +41,25 @@ def main():
         if not cfg.get("task_type"): cfg["task_type"] = "FEATURE_EXTRACTION"; json.dump(cfg, open(cfg_path, "w"), indent=2)
         for log in (f"runs/logs/train_{run_name}.log", f"runs/train_{run_name}.log", f"runs/train.log" if run_name == "kev" else ""):
             if log and os.path.exists(log): shutil.copy(log, f"{tmp}/train.log"); break
+        # research trials: runs/<study>/<trial>/checkpoint -> ship the trial's result, provenance and training log too
+        trial = os.path.dirname(a.run.rstrip("/")) if run_name == "checkpoint" else None
+        if trial:
+            run_name = os.path.relpath(trial, "runs")
+            for f in ("result.json", "provenance.json", "train.log", "training_config.json", "training_metrics.json"):
+                for src in (f"{trial}/{f}", f"{a.run}/{f}"):
+                    if os.path.exists(src): shutil.copy(src, f"{tmp}/{f}"); break
 
         card = open(a.card).read()
         card = re.sub(r"^base_model: .*$", f"base_model: {base}", card, flags=re.M)
         if "base_model_relation:" not in card: card = card.replace(f"base_model: {base}", f"base_model: {base}\nbase_model_relation: adapter")
         card = card.replace("- Code, training recipe, evaluation and demo:", f"- Hub: [{a.repo}](https://huggingface.co/{a.repo}) (this repo, run `{run_name}`)\n- Code, training recipe, evaluation and demo:")
+        card = card.replace("(this repo; trial `v4-06b-hardened/00-trial-0`, seed 0 of 3)", f"(this repo; trial `{run_name}`)")
         open(f"{tmp}/README.md", "w").write(card)
 
         ev = json.load(open(f"{tmp}/eval.json")) if os.path.exists(f"{tmp}/eval.json") else {}
         acc = ev.get("accuracy_calibration", {}).get("ALL", {})
+        if os.path.exists(f"{tmp}/result.json"):
+            r = json.load(open(f"{tmp}/result.json")); acc = {"acc": r["clean"]["acc"], "ece": r["clean"]["ece"]}
         msg = a.message or f"Upload {run_name} (base {base}; acc {acc.get('acc', float('nan')):.3f}, ECE {acc.get('ece', float('nan')):.3f})"
         url = api.upload_folder(folder_path=tmp, repo_id=a.repo, repo_type="model", commit_message=msg)
         print(url)

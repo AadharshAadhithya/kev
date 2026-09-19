@@ -42,6 +42,8 @@ def main():
     ap.add_argument("--n_per_source", type=int, default=1000)
     ap.add_argument("--epochs", type=int, default=1)
     ap.add_argument("--lr", type=float, default=2e-4)
+    ap.add_argument("--head_lr", type=float, default=0.0, help="separate learning rate for the pointer head (0 = same as --lr); the head trains from scratch")
+    ap.add_argument("--weight_decay", type=float, default=0.01, help="AdamW weight decay on LoRA and head parameters")
     ap.add_argument("--lora", type=int, default=16)
     ap.add_argument("--accum", type=int, default=8)
     ap.add_argument("--holdout", default="", help="comma-separated sources excluded from training (evaluated as out-of-source)")
@@ -54,20 +56,26 @@ def main():
     ap.add_argument("--batch", type=int, default=1, help="records per forward pass (padded batch); optimizer step every --accum micro-batches")
     ap.add_argument("--dtype", choices=["fp32", "bf16"], default="fp32", help="bf16 = autocast forward with fp32 master weights (CUDA only)")
     ap.add_argument("--checkpointing", type=int, choices=[0, 1], default=0)
+    ap.add_argument("--option_isolation", type=int, choices=[0, 1], default=0, help="option spans are isolated sub-branches with shared positions (exact permutation invariance)")
+    ap.add_argument("--special_embeddings", type=int, choices=[0, 1], default=0, help="also train the embeddings of the 5 delimiter tokens")
+    ap.add_argument("--head_dim", type=int, default=256, help="pointer head dimension")
+    ap.add_argument("--lora_targets", choices=["all", "attn", "qv"], default="all", help="LoRA module set; fewer modules = less drift from the base")
     ap.add_argument("--base_revision", default="", help="pin the base commit when the suite manifest does not pin this base")
     ap.add_argument("--p_none", type=float, default=0.1)
     ap.add_argument("--p_none_distract", type=float, default=0.12)
     ap.add_argument("--p_distract", type=float, default=0.15)
     ap.add_argument("--p_none_pair", type=float, default=0.0, help="fraction of Choice records that additionally emit a none-present/none-absent minimal pair")
+    ap.add_argument("--synthetic_repeat", type=int, default=1, help="oversample synthetic policy sources (legacy_policy, compositional, contrastive) this many times per epoch")
+    ap.add_argument("--public_frac", type=float, default=1.0, help="deterministic subsample of public-source training records (mix ablations)")
     ap.add_argument("--out", default="runs/kev")
     ap.add_argument("--seed", type=int, default=0)
     a = ap.parse_args()
 
-    if min(a.epochs, a.accum, a.n_per_source, a.lora, a.batch) < 1:
-        ap.error("epochs, accum, n_per_source, lora and batch must be positive")
+    if min(a.epochs, a.accum, a.n_per_source, a.lora, a.batch, a.synthetic_repeat) < 1 or not 0 < a.public_frac <= 1:
+        ap.error("epochs, accum, n_per_source, lora, batch and synthetic_repeat must be positive; 0 < public_frac <= 1")
     if a.dtype == "bf16" and a.device != "cuda":
         ap.error("--dtype bf16 requires --device cuda")
-    if a.lr <= 0 or min(a.ord_w, a.perm_kl) < 0 or not 0 <= a.perm_frac <= 1:
+    if a.lr <= 0 or a.head_lr < 0 or a.weight_decay < 0 or min(a.ord_w, a.perm_kl) < 0 or not 0 <= a.perm_frac <= 1:
         ap.error("invalid learning rate or loss weights")
     out_dir = Path(a.out)
     if out_dir.exists():
@@ -86,7 +94,8 @@ def main():
     if manifest and not revision:
         raise ValueError("base not pinned by the suite; pass --base_revision")
     tok = load_tokenizer(a.base, revision=revision)
-    model = DecisionModel(a.base, tok, dev, lora=a.lora, revision=revision)
+    model = DecisionModel(a.base, tok, dev, lora=a.lora, revision=revision, head_dim=a.head_dim, lora_targets=a.lora_targets,
+                          option_isolation=bool(a.option_isolation), special_embeddings=bool(a.special_embeddings))
     if a.checkpointing:
         model.lm.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
     model.lm.config.use_cache = False
@@ -108,16 +117,30 @@ def main():
     if manifest:
         from .study_v3 import validate_training
         validate_training(reqs, manifest)
+    SYNTHETIC = ("legacy_policy", "compositional", "contrastive")
+    if a.public_frac < 1:
+        mix_rng = random.Random(source_seed(a.seed, "public_frac"))
+        public = [r for r in reqs if r["_meta"]["source"] not in SYNTHETIC]; synth = [r for r in reqs if r["_meta"]["source"] in SYNTHETIC]
+        keep = sorted(mix_rng.sample(range(len(public)), int(round(a.public_frac * len(public)))))
+        reqs = [public[i] for i in keep] + synth
+        print(f"mix: public_frac {a.public_frac} -> {len(keep)} public + {len(synth)} synthetic records", flush=True)
+    if a.synthetic_repeat > 1:
+        extra = [r for r in reqs if r["_meta"]["source"] in SYNTHETIC] * (a.synthetic_repeat - 1)
+        reqs = reqs + extra
+        print(f"mix: synthetic_repeat {a.synthetic_repeat} -> +{len(extra)} records", flush=True)
     suite_hash = digest(Path(a.suite) / "manifest.json") if manifest else None
     write_json(out_dir / "training_config.json", {"args": vars(a), "suite_sha256": suite_hash, "base_revision": revision,
                                                 "ordinal_objective": "ranked_probability_score", "holdout": holdout})
     print(f"{len(reqs)} training requests (holdout={holdout}), questions by type "
           f"{dict(Counter(q['qtype'] for r in reqs for q in materialize(r)['questions']))}")
 
-    opt = torch.optim.AdamW(model.trainable_parameters(), lr=a.lr, weight_decay=0.01)
+    head_params = list(model.head.parameters()); head_ids = {id(p) for p in head_params}
+    groups = [{"params": [p for p in model.trainable_parameters() if id(p) not in head_ids], "lr": a.lr},
+              {"params": head_params, "lr": a.head_lr or a.lr}]
+    opt = torch.optim.AdamW(groups, lr=a.lr, weight_decay=a.weight_decay)
     micro_per_epoch = math.ceil(len(reqs) / a.batch)
     steps = a.epochs * math.ceil(micro_per_epoch / a.accum)
-    sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=a.lr, total_steps=max(steps, 1), pct_start=0.1)
+    sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=[a.lr, a.head_lr or a.lr], total_steps=max(steps, 1), pct_start=0.1)
     model.train(); t0 = time.time(); run = Counter(); step = 0; seen = 0
     tokens_seen = peak_mem = 0
     for ep in range(a.epochs):
@@ -132,12 +155,12 @@ def main():
                     variants += none_pair(req, item_rng)
                 for v in variants:
                     rec = materialize(v)
-                    enc = encode(tok, rec, strict=True)
+                    enc = model.encode(tok, rec, strict=True)
                     if len(enc["ids"]) > 2048:
                         raise ValueError("training request exceeds 2048 packed tokens")
                     recs.append(rec); encs.append(enc); tokens_seen += len(enc["ids"])
                 if a.perm_kl > 0 and item_rng.random() < a.perm_frac and any(q["qtype"] == "choice" and len(q["options"]) >= 3 for q in rec["questions"]):
-                    rec2, perms = permuted_copy(rec, item_rng); perm_jobs.append((len(recs) - 1, encode(tok, rec2, strict=True), perms))
+                    rec2, perms = permuted_copy(rec, item_rng); perm_jobs.append((len(recs) - 1, model.encode(tok, rec2, strict=True), perms))
             with autocast:
                 logits_b = model.forward_batch(encs)
                 logits2_b = model.forward_batch([e for _, e, _ in perm_jobs]) if perm_jobs else []
@@ -168,7 +191,8 @@ def main():
                     run = Counter()
     os.makedirs(a.out, exist_ok=True)
     model.lm.save_pretrained(a.out)
-    torch.save({"head": model.head.state_dict(), "base": a.base, "base_revision": revision, "lora": a.lora,
+    torch.save({"head": model.head.state_dict(), "base": a.base, "base_revision": revision, "lora": a.lora, "head_dim": a.head_dim,
+                "option_isolation": bool(a.option_isolation), "special_embeddings": bool(a.special_embeddings),
                 "holdout": holdout, "args": vars(a), "suite_sha256": suite_hash}, f"{a.out}/head.pt")
     tok.save_pretrained(a.out)
     write_json(out_dir / "training_metrics.json", {"wall_seconds": time.time() - t0, "records_seen": seen,

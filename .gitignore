@@ -70,3 +70,29 @@ runs/v3-*/*/*
 !runs/v3-*/*/comparison.json
 !runs/v3-*/*/provenance.json
 !runs/v3-*/*/train.log
+# every study under runs/: keep ledgers, results, provenance, comparisons, training logs, Jev reports; never weights or prediction dumps
+!runs/*/
+runs/*/*
+!runs/*/results.jsonl
+!runs/*/report.json
+!runs/*/usage.json
+!runs/*/summary.json
+!runs/*/*/
+runs/*/*/*
+!runs/*/*/result.json
+!runs/*/*/comparison.json
+!runs/*/*/provenance.json
+!runs/*/*/train.log
+!runs/*/*/summary.json
+!runs/*/*/report.json
+!runs/leaderboard.md
+!runs/leaderboard.jsonl
+!runs/autoresearch.jsonl
+# frozen-suite partitions over ~10 MB live on the Hub mirror (jaredpalmer/kev-suites, pinned in kev/suite.py); manifests,
+# development and test partitions stay in git and load_split fetches + sha256-verifies the rest on first use
+evals/v5/decision-v5/train.jsonl
+evals/v6/decision-v6/train.jsonl
+evals/v4/decision-v4/train.jsonl
+evals/public-pool-v5/train.jsonl
+evals/public-pool-v6/train.jsonl
+evals/public-pool-v4/train.jsonl

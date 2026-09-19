@@ -53,7 +53,7 @@ def local_source_hashes():
     return source_hashes()
 
 
-@app.function(image=image, gpu=GPU, cpu=2, memory=(32768, 49152), max_containers=4, retries=0, timeout=1800,
+@app.function(image=image, gpu=GPU, cpu=2, memory=(32768, 49152), max_containers=8, retries=0, timeout=7200,
               volumes={RUNS_MOUNT: runs_volume, HF_MOUNT: hf_cache}, secrets=secrets)
 def run_trial(study, index, label, config, suite, expected_sources, git_commit, existing=None, transfer=None):
     """One trial in one container. `existing` is a checkpoint path on the runs volume or a Hub id (legacy scoring)."""
@@ -76,6 +76,38 @@ def run_trial(study, index, label, config, suite, expected_sources, git_commit, 
             "wall_seconds": report["wall_seconds"], "gates": report["gates"]["checks"]}
 
 
+@app.function(image=image, gpu=GPU, cpu=2, memory=(32768, 49152), retries=0, timeout=3600,
+              volumes={RUNS_MOUNT: runs_volume, HF_MOUNT: hf_cache}, secrets=secrets)
+def run_locked_test(trial_path, name, suites, git_commit):
+    """Read the locked test partitions ONCE for a promoted trial. Writes /runs/locked/<name>/... ; refuses to rerun."""
+    import json
+    from kev.benchmark import LocalPredictor, evaluate_records
+    from kev.suite import digest, load_split, write_json
+    os.environ["KEV_GIT_COMMIT"] = git_commit
+    trial = Path(RUNS_MOUNT) / trial_path
+    out = Path(RUNS_MOUNT) / "locked" / name
+    if out.exists():
+        raise FileExistsError(f"locked test already read for {name}; a second read is not allowed")
+    out.mkdir(parents=True)
+    result = json.loads((trial / "result.json").read_text())
+    if not result["gates"]["passed"] and not name.endswith("-ungated"):
+        raise RuntimeError("trial did not pass its gates; name the read '<name>-ungated' to record an exploratory read")
+    temperature = result.get("temperature", 1.0)
+    predictor = LocalPredictor(str(trial / "checkpoint"), "cuda")
+    summary = {"trial": trial_path, "trial_result_sha256": digest(trial / "result.json"), "temperature": temperature, "git_commit": git_commit, "suites": {}}
+    try:
+        for label, suite in suites.items():
+            records = load_split(Path("/root") / suite, "test", allow_test=True)
+            report, _ = evaluate_records(records, predictor, out / label, temperature, heldout_sources=tuple(r["_meta"]["source"] for r in records))
+            summary["suites"][label] = {"suite": suite, "suite_sha256": digest(Path("/root") / suite / "manifest.json"), "clean": report["clean"], "tasks": report["tasks"],
+                                        "paired_flip": report["paired_flip"], "variants": report["variants"], "permutation": report["permutation"], "coverage": report["coverage"]}
+            print(f"[{name}] {label} test: acc {report['clean']['acc']:.3f} brier {report['clean']['brier']:.3f}", flush=True)
+    finally:
+        write_json(out / "summary.json", summary)
+        runs_volume.commit()
+    return summary
+
+
 def pull_study(study):
     """Download a study directory from the runs volume into runs/<study> and rank it."""
     target = ROOT / "runs" / study
@@ -95,8 +127,8 @@ def launch(suite, plan_path, name, gpu, existing=(), transfer=None, budget=20.0,
         raise ValueError("study name must be a simple unique identifier")
     if (ROOT / "runs" / name).exists():
         raise FileExistsError("choose a new study name; existing results are immutable")
-    if not 60 <= timeout <= 1800 or not 0 < budget <= 25:
-        raise ValueError("timeout must be 60..1800 seconds and study budget <= $25")
+    if not 60 <= timeout <= 7200 or not 0 < budget <= 250:   # overnight authorization: $500 total, tracked in PLAN.md
+        raise ValueError("timeout must be 60..7200 seconds and study budget <= $250")
     trials = load_plan(ROOT / suite, ROOT / plan_path) if plan_path else []
     rates = {"H100": 3.95, "T4": .59}
     if gpu not in rates:
@@ -110,7 +142,7 @@ def launch(suite, plan_path, name, gpu, existing=(), transfer=None, budget=20.0,
         print("warning: kev/ or evals/ has uncommitted changes; provenance records the last commit, not the working tree", flush=True)
     entries = [(None, p) for p in existing] + [(t, None) for t in trials]
     jobs = [(name, i, Path(ex).name if ex else f"trial-{i}", cfg or {}, suite, sources, commit, ex, transfer) for i, (cfg, ex) in enumerate(entries)]
-    fn = run_trial.with_options(gpu=gpu, timeout=timeout, retries=0, max_containers=4)
+    fn = run_trial.with_options(gpu=gpu, timeout=timeout, retries=0, max_containers=8)
     print(f"launching {len(jobs)} trial(s) on {gpu} for study {name}", flush=True)
     results = list(fn.starmap(jobs, return_exceptions=True))
     for job, result in zip(jobs, results):
@@ -127,6 +159,19 @@ def launch(suite, plan_path, name, gpu, existing=(), transfer=None, budget=20.0,
 @app.local_entrypoint()
 def study(suite: str, plan: str, name: str, gpu: str = GPU, existing: str = "", transfer: str = "", budget: float = 20.0, timeout: int = 1800):
     launch(suite, plan, name, gpu, [e for e in existing.split(",") if e], transfer or None, budget, timeout)
+
+
+@app.local_entrypoint()
+def locked_test(trial: str, name: str, decision: str = "evals/v4/decision-v4", transfer: str = "evals/v4/transfer-v4", gpu: str = GPU):
+    """One locked-test read for a promoted trial (path under the runs volume, e.g. v4-4b-baseline/01-trial-1)."""
+    target = ROOT / "runs/locked" / name
+    if target.exists():
+        raise FileExistsError(f"{target} exists; the locked test is read once per candidate")
+    fn = run_locked_test.with_options(gpu=gpu)
+    summary = fn.remote(trial, name, {"decision": decision, "transfer": transfer}, local_git_commit())
+    target.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run([sys.executable, "-m", "modal", "volume", "get", "kev-runs", f"/locked/{name}", str(target.parent)], check=True)
+    print(json.dumps({k: {"acc": v["clean"]["acc"], "brier": v["clean"]["brier"]} for k, v in summary["suites"].items()}, indent=1))
 
 
 @app.local_entrypoint()

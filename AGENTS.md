@@ -26,6 +26,11 @@ See README.md (deep dive) and MODEL_CARD.md (checkpoint recipe + metrics). READM
   pulled to runs/<study> then ranked by `kev.experiment --aggregate`). `KEV_GPU` picks the GPU type (H100 default). Legacy checkpoints:
   Hub id, or `modal volume put kev-runs runs/<run> /legacy/<run>` then `--existing /runs/legacy/<run>`. Eval on CUDA is fp32-exact
   (TF32 + fused SDPA off in `LocalPredictor`); training keeps TF32 and may use `--dtype bf16`. `--transfer <suite>` scores OOD per trial.
+- Frozen suites: `evals/<version>/<suite>/{manifest.json, *.jsonl}`. Manifests pin dataset/base revisions and the sha256 of every
+  partition. Partitions over ~10 MB are not in git; they are mirrored at the Hub dataset `jaredpalmer/kev-suites` (revision pinned in
+  `kev/suite.py: SUITES_REVISION`) and `load_split` fetches + verifies them on first use. After freezing a new suite:
+  `hf upload jaredpalmer/kev-suites evals . --type dataset --include "*.jsonl" --include "*.json"`, bump `SUITES_REVISION`, gitignore
+  the large partitions. Never modify a frozen file; new data = new version.
 - Plot (README figure): `uv run python -m kev.plot --logs runs/logs/train_kev.log:kev-0.5b --eval runs/kev/eval.json --out docs/training.png`
   Training logs to keep go in `runs/logs/train_*.log` (only path under runs/ besides eval.json that is committed).
 - Publish: `uv run python -m kev.publish --run runs/<run> --repo jaredpalmer/kev-<size>` (needs `hf auth login`). Repos are named by

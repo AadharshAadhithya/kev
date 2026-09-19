@@ -48,6 +48,7 @@ SPACE = {
     "perm_kl": [0.0, 0.2, 0.5], "ord_w": [0.0, 0.25, 0.5],
     "option_isolation": [0, 1], "special_embeddings": [0, 1], "head_dim": [128, 256, 512, 1024],
     "synthetic_repeat": [1, 2], "public_frac": [0.33, 0.5, 1.0], "lora_targets": ["all", "attn", "qv"],
+    "head_lr": [0.0, 5e-4, 2e-3], "weight_decay": [0.0, 0.01, 0.1],
 }
 BASE_DEFAULTS = {  # per-backbone memory-safe batch shape; effective batch stays 8 unless accum is mutated
     "Qwen/Qwen3-0.6B-Base": {"batch": 8, "accum": 1, "dtype": "bf16"},

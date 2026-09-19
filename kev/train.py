@@ -42,6 +42,8 @@ def main():
     ap.add_argument("--n_per_source", type=int, default=1000)
     ap.add_argument("--epochs", type=int, default=1)
     ap.add_argument("--lr", type=float, default=2e-4)
+    ap.add_argument("--head_lr", type=float, default=0.0, help="separate learning rate for the pointer head (0 = same as --lr); the head trains from scratch")
+    ap.add_argument("--weight_decay", type=float, default=0.01, help="AdamW weight decay on LoRA and head parameters")
     ap.add_argument("--lora", type=int, default=16)
     ap.add_argument("--accum", type=int, default=8)
     ap.add_argument("--holdout", default="", help="comma-separated sources excluded from training (evaluated as out-of-source)")
@@ -73,7 +75,7 @@ def main():
         ap.error("epochs, accum, n_per_source, lora, batch and synthetic_repeat must be positive; 0 < public_frac <= 1")
     if a.dtype == "bf16" and a.device != "cuda":
         ap.error("--dtype bf16 requires --device cuda")
-    if a.lr <= 0 or min(a.ord_w, a.perm_kl) < 0 or not 0 <= a.perm_frac <= 1:
+    if a.lr <= 0 or a.head_lr < 0 or a.weight_decay < 0 or min(a.ord_w, a.perm_kl) < 0 or not 0 <= a.perm_frac <= 1:
         ap.error("invalid learning rate or loss weights")
     out_dir = Path(a.out)
     if out_dir.exists():
@@ -132,10 +134,13 @@ def main():
     print(f"{len(reqs)} training requests (holdout={holdout}), questions by type "
           f"{dict(Counter(q['qtype'] for r in reqs for q in materialize(r)['questions']))}")
 
-    opt = torch.optim.AdamW(model.trainable_parameters(), lr=a.lr, weight_decay=0.01)
+    head_params = list(model.head.parameters()); head_ids = {id(p) for p in head_params}
+    groups = [{"params": [p for p in model.trainable_parameters() if id(p) not in head_ids], "lr": a.lr},
+              {"params": head_params, "lr": a.head_lr or a.lr}]
+    opt = torch.optim.AdamW(groups, lr=a.lr, weight_decay=a.weight_decay)
     micro_per_epoch = math.ceil(len(reqs) / a.batch)
     steps = a.epochs * math.ceil(micro_per_epoch / a.accum)
-    sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=a.lr, total_steps=max(steps, 1), pct_start=0.1)
+    sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=[a.lr, a.head_lr or a.lr], total_steps=max(steps, 1), pct_start=0.1)
     model.train(); t0 = time.time(); run = Counter(); step = 0; seen = 0
     tokens_seen = peak_mem = 0
     for ep in range(a.epochs):

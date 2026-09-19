@@ -24,6 +24,7 @@ def main():
     ap.add_argument("--message", default=None)
     ap.add_argument("--card", default="MODEL_CARD.md")
     ap.add_argument("--private", action="store_true")
+    ap.add_argument("--tag", help="create this Hub tag on the uploaded commit (versioned release, e.g. v0.2)")
     a = ap.parse_args()
 
     meta = torch.load(f"{a.run}/head.pt", map_location="cpu")
@@ -61,8 +62,11 @@ def main():
         if os.path.exists(f"{tmp}/result.json"):
             r = json.load(open(f"{tmp}/result.json")); acc = {"acc": r["clean"]["acc"], "ece": r["clean"]["ece"]}
         msg = a.message or f"Upload {run_name} (base {base}; acc {acc.get('acc', float('nan')):.3f}, ECE {acc.get('ece', float('nan')):.3f})"
-        url = api.upload_folder(folder_path=tmp, repo_id=a.repo, repo_type="model", commit_message=msg)
-        print(url)
+        info = api.upload_folder(folder_path=tmp, repo_id=a.repo, repo_type="model", commit_message=msg)
+        print(info)
+        if a.tag:
+            api.create_tag(a.repo, tag=a.tag, repo_type="model", tag_message=msg, exist_ok=False)
+            print(f"tagged {a.repo}@{a.tag}")
 
 
 if __name__ == "__main__":

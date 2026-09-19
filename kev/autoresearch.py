@@ -265,10 +265,31 @@ def compare(studies, reference, tasks=("mmlu", "paws", "qnli", "emotion", "tweet
             print(f"{study + '/' + d.name:34} {r['clean']['acc']:6.3f} {tr['clean']['acc']:6.3f} {tr['clean']['brier']:6.3f} {tr['clean']['confident_error_rate']:6.3f} {tr['paired_flip']['both_correct_rate']:6.2f} {delta:+7.3f} {str(ci):>18}  {knobs} {({k: round(tr['tasks'][k]['acc'], 2) for k in tasks if k in tr['tasks']})}")
 
 
+def release_check(study):
+    """Release screen across seeds: every trial of the same config in the study must pass its gates (including the 70%
+    held-out-pair screen) - a single seed clearing the bar is not enough. Prints the verdict per config."""
+    rows = [r for r in collect() if r["study"] == study]
+    by_cfg = defaultdict(list)
+    for r in rows: by_cfg[record_digest(strip_seed(r["config"]))].append(r)
+    verdicts = {}
+    for h, group in by_cfg.items():
+        seeds = sorted(r["seed"] for r in group)
+        passed = all(r["gates_passed"] for r in group)
+        pairs = [round(r["heldout_pairs"], 2) for r in group]
+        failing = sorted({k for r in group for k, v in r["gates"].items() if not v})
+        base = group[0]["base"].split("/")[-1]
+        verdicts[base] = {"seeds": seeds, "all_gates_passed": passed and len(seeds) >= 2, "heldout_pairs": pairs,
+                          "transfer_acc": [round(r["transfer_acc"], 3) for r in group], "failing_gates": failing,
+                          "candidate": passed and len(seeds) >= 2, "trials": [f"{r['study']}/{r['trial']}" for r in group]}
+        print(f"{base}: seeds {seeds} pairs {pairs} transfer {verdicts[base]['transfer_acc']} -> {'RELEASE CANDIDATE (gated locked read allowed)' if verdicts[base]['candidate'] else 'not a candidate: ' + ', '.join(failing or ['fewer than two seeds'])}")
+    return verdicts
+
+
 def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("leaderboard")
+    p = sub.add_parser("release-check"); p.add_argument("--study", required=True)
     p = sub.add_parser("compare"); p.add_argument("--studies", required=True); p.add_argument("--reference", default="runs/v4-4b-baseline/01-trial-1")
     p = sub.add_parser("propose"); p.add_argument("--base", required=True); p.add_argument("--n", type=int, default=8); p.add_argument("--seed", type=int, default=0); p.add_argument("--out", required=True)
     for cmd in ("round", "loop"):
@@ -278,6 +299,8 @@ def main():
         if cmd == "round": p.add_argument("--name", required=True)
         else: p.add_argument("--rounds", type=int, default=3); p.add_argument("--prefix", default="auto")
     a = ap.parse_args()
+    if a.cmd == "release-check":
+        release_check(a.study); return
     if a.cmd == "compare":
         compare(a.studies.split(","), a.reference); return
     if a.cmd == "leaderboard":

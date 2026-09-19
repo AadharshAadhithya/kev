@@ -200,7 +200,7 @@ export function ChessGame() {
       <div className="mt-10 max-w-2xl">
         <h1 className="text-2xl font-medium tracking-tight">Every move is a Choice question.</h1>
         <p className="mt-2 text-[15px] leading-6 text-muted-foreground">
-          The legal moves are the options, the board is the state. The model returns a probability for each move and a Score for who is better, in one request. It is a 0.5B model that has never seen a chess game, so expect the distributions to be more interesting than the play.
+          The legal moves are the options, the board is the state. The model returns a probability for each move and a Score for who is better, in one request. The model has never seen a chess game, so expect the distributions to be more interesting than the play.
         </p>
       </div>
 

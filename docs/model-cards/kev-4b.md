@@ -56,13 +56,13 @@ model-index:
 | | kev-0.5b | kev-0.6b preview | **kev-4b preview** | Jev |
 |---|---|---|---|---|
 | in-distribution accuracy (decision-v4 dev, 1,200 q) | 0.712 | 0.805 | **0.843** | 0.845 |
-| out-of-domain accuracy (transfer-v4 dev, 560 q) | 0.575 | 0.598 | **0.759** | 0.855 |
-| out-of-domain Brier | 0.50 | 0.521 | **0.346** | 0.221 |
-| confident errors out of domain (p ≥ 0.9 and wrong) | – | 5.2% | 5.5% | 5.5% |
-| held-out policy structures, both siblings correct | – | 0.11 | 0.62 | 0.95 |
+| out-of-domain accuracy (transfer-v4 dev, 560 q) | 0.575 | 0.598 | **0.759** | 0.857 |
+| out-of-domain Brier | 0.50 | 0.521 | **0.346** | 0.211 |
+| confident errors out of domain (p ≥ 0.9 and wrong) | – | 5.2% | 5.5% | 3.7% |
+| held-out policy structures, both siblings correct | – | 0.11 | 0.62 | 0.86 |
 | option-order flip rate | 0.21 | 0.02 | 0.00 | 0.00 |
 
-Per-source out-of-domain accuracy (kev-4b / Jev): QNLI 0.89 / 0.925, SciQ 0.99 / 0.99, TweetEval-offensive 0.71 / 0.81, PAWS 0.64 / 0.79, MMLU 0.68 / 0.90, Emotion 0.60 / 0.60, deadline (3-level date arithmetic) 0.60 / 0.95.
+Per-source out-of-domain accuracy (kev-4b / Jev): QNLI 0.89 / 0.93, SciQ 0.99 / 0.99, TweetEval-offensive 0.71 / 0.81, PAWS 0.64 / 0.79, MMLU 0.68 / 0.90, Emotion 0.60 / 0.59, deadline (3-level date arithmetic) 0.60 / 0.93.
 
 Seeds: the recipe was run at three seeds on this suite (transfer 0.759 / 0.758 / 0.759; in-distribution 0.843 / 0.853 / 0.855) and twice more on a superset suite (0.755 / 0.761); the spread is ~1 pp. The improvement over the default learning rate is +4.7 pp, 95% CI [+0.4, +9.6], record-clustered paired bootstrap.
 

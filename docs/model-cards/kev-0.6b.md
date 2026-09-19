@@ -63,7 +63,7 @@ model-index:
 | none-option present, accuracy | 0.25 (transfer-v1) | 0.78 |
 | seeds behind the number | 1 | 3 (transfer 0.595–0.605) |
 
-Jev (`typesafe-ai/jev` via Vercel AI Gateway) on the same frozen development sets: **0.845** in-distribution, **0.855** out-of-domain. Per-source transfer accuracy for this checkpoint: QNLI 0.85, SciQ 0.86, TweetEval-offensive 0.69, PAWS 0.56, Emotion 0.50, MMLU 0.46; held-out policy structures near chance.
+Jev (`typesafe-ai/jev` via Vercel AI Gateway) on the same frozen development sets: **0.845** in-distribution, **0.857** out-of-domain. Per-source transfer accuracy for this checkpoint: QNLI 0.85, SciQ 0.86, TweetEval-offensive 0.69, PAWS 0.56, Emotion 0.50, MMLU 0.46; held-out policy structures near chance.
 
 ## Known limits (why this is a preview)
 

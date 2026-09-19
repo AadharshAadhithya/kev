@@ -1,0 +1,131 @@
+{
+ "models": {
+  "kev-0.6b": {
+   "path": "runs/v4-06b-hardened/00-trial-0/result.json",
+   "transfer_acc": 0.5975609756097561,
+   "transfer_brier": 0.5206018637922263,
+   "tasks": {
+    "composition_held_and_or": 0.46875,
+    "composition_held_conditional": 0.28125,
+    "composition_held_or_not": 0.65625,
+    "contrastive_authorization": 0.5,
+    "contrastive_deadline": 0.325,
+    "emotion": 0.475,
+    "mmlu": 0.45,
+    "paws": 0.5375,
+    "qnli": 0.8625,
+    "sciq": 0.8875,
+    "tweet_offensive": 0.7125
+   }
+  },
+  "kev-4b": {
+   "path": "runs/lowdrift-4b-v4/01-trial-1/result.json",
+   "transfer_acc": 0.7591463414634146,
+   "transfer_brier": 0.3458683977940453,
+   "tasks": {
+    "composition_held_and_or": 0.90625,
+    "composition_held_conditional": 0.6875,
+    "composition_held_or_not": 0.71875,
+    "contrastive_authorization": 1.0,
+    "contrastive_deadline": 0.6,
+    "emotion": 0.6,
+    "mmlu": 0.675,
+    "paws": 0.6375,
+    "qnli": 0.8875,
+    "sciq": 0.9875,
+    "tweet_offensive": 0.7125
+   }
+  },
+  "kev-8b": {
+   "path": "runs/recipe-8b-r1/00-trial-0/result.json",
+   "transfer_acc": 0.774390243902439,
+   "transfer_brier": 0.33904160440977754,
+   "tasks": {
+    "composition_held_and_or": 0.9375,
+    "composition_held_conditional": 0.53125,
+    "composition_held_or_not": 0.625,
+    "contrastive_authorization": 1.0,
+    "contrastive_deadline": 0.7,
+    "emotion": 0.575,
+    "mmlu": 0.6875,
+    "paws": 0.7625,
+    "qnli": 0.925,
+    "sciq": 1.0,
+    "tweet_offensive": 0.7125
+   }
+  }
+ },
+ "jev": {
+  "path": "runs/jev-transfer-v4/report.json",
+  "transfer_acc": 0.8567073170731707,
+  "transfer_brier": 0.2109920731707317,
+  "tasks": {
+   "composition_held_and_or": 0.90625,
+   "composition_held_conditional": 0.78125,
+   "composition_held_or_not": 0.96875,
+   "contrastive_authorization": 1.0,
+   "contrastive_deadline": 0.925,
+   "emotion": 0.5875,
+   "mmlu": 0.9,
+   "paws": 0.7875,
+   "qnli": 0.925,
+   "sciq": 0.9875,
+   "tweet_offensive": 0.8125
+  }
+ },
+ "curve": [
+  [
+   "0.6B",
+   0.6,
+   "2e-4",
+   [
+    0.598,
+    0.595,
+    0.605
+   ],
+   "v4-06b-hardened"
+  ],
+  [
+   "4B",
+   4.0,
+   "2e-4",
+   [
+    0.704,
+    0.735
+   ],
+   "v4-4b-baseline"
+  ],
+  [
+   "4B",
+   4.0,
+   "5e-5",
+   [
+    0.759,
+    0.758,
+    0.759
+   ],
+   "lowdrift-4b-v4/01, recipe-4b-v4-s1, recipe-4b-v4-s2"
+  ],
+  [
+   "8B",
+   8.2,
+   "2e-4",
+   [
+    0.765,
+    0.741
+   ],
+   "v3-8b-s0 (transfer-v3 = same bytes)"
+  ],
+  [
+   "8B",
+   8.2,
+   "5e-5",
+   [
+    0.774,
+    0.779,
+    0.774
+   ],
+   "recipe-8b-r1/00, recipe-8b-r2/01, recipe-8b-s2"
+  ]
+ ]
+}

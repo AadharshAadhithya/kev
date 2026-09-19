@@ -59,13 +59,13 @@ model-index:
 | | kev-0.5b | kev-0.6b preview | kev-4b preview | **kev-8b preview** | Jev |
 |---|---|---|---|---|
 | in-distribution accuracy (decision-v4 dev, 1,200 q) | 0.712 | 0.805 | 0.843 | **0.869** | 0.845 |
-| out-of-domain accuracy (transfer-v4 dev, 560 q) | 0.575 | 0.598 | 0.759 | **0.774** | 0.855 |
-| out-of-domain Brier | 0.50 | 0.521 | 0.346 | **0.339** | 0.221 |
-| confident errors out of domain (p ≥ 0.9 and wrong) | – | 5.2% | 5.5% | 8.2% | 5.5% |
-| held-out policy structures, both siblings correct | – | 0.11 | 0.62 | 0.61 | 0.95 |
+| out-of-domain accuracy (transfer-v4 dev, 560 q) | 0.575 | 0.598 | 0.759 | **0.774** | 0.857 |
+| out-of-domain Brier | 0.50 | 0.521 | 0.346 | **0.339** | 0.211 |
+| confident errors out of domain (p ≥ 0.9 and wrong) | – | 5.2% | 5.5% | 8.2% | 3.7% |
+| held-out policy structures, both siblings correct | – | 0.11 | 0.62 | 0.61 | 0.86 |
 | option-order flip rate | 0.21 | 0.02 | 0.00 | 0.02 | 0.00 |
 
-Per-source out-of-domain accuracy (kev-8b / Jev): QNLI 0.93 / 0.925, SciQ 1.00 / 0.99, TweetEval-offensive 0.71 / 0.81, PAWS 0.76 / 0.79, MMLU 0.69 / 0.90, Emotion 0.57 / 0.60, deadline (3-level date arithmetic) 0.70 / 0.95.
+Per-source out-of-domain accuracy (kev-8b / Jev): QNLI 0.93 / 0.93, SciQ 1.00 / 0.99, TweetEval-offensive 0.71 / 0.81, PAWS 0.76 / 0.79, MMLU 0.69 / 0.90, Emotion 0.57 / 0.59, deadline (3-level date arithmetic) 0.70 / 0.93.
 
 Seeds: three seeds with this recipe on this suite: transfer 0.774 / 0.779 / 0.774, in-distribution 0.869 / 0.868 / 0.866, held-out pairs 0.61 / 0.67 / 0.59, MMLU 0.69 / 0.74 / 0.75. lr 2e-5 gives 0.770 (no gain). Against kev-4b (three seeds at 0.758-0.759) the 8B is +1.5-2 pp on transfer and +2.5 pp in-distribution.
 

@@ -95,7 +95,7 @@ trial through `kev.experiment.execute_trial` with provenance. New tonight:
   (train the five delimiter embeddings), `head_dim`.
 - Suites: `decision-v4` (10k public + 448/arm synthetic) and `decision-v5` (20k public + 1,792/arm), both with dev/test
   bytes identical to v3 so every number since the matched study is comparable. `transfer-v4/v5` are byte-identical to v3.
-- Reference: Jev on decision-v4 dev acc 0.845, Brier 0.237, trained-structure pairs 0.86; on transfer-v4 dev acc 0.855.
+- Reference: Jev on decision-v4 dev acc 0.845, Brier 0.237, trained-structure pairs 0.86; on transfer-v4 dev acc 0.857.
 
 Sequence: 0.6B screening rounds (cheap, one seed, replicate winners) -> promote the winning knobs to 4B on v4 -> 4B on v5
 -> 8B once with the best recipe -> one locked-test read for the best gated candidate -> research-preview cards.
@@ -106,7 +106,7 @@ $48.50, $30 credits applied, $18.50 billed). Twelve running containers were kill
 the CLI cannot. Until then: evaluations of the six salvaged arch-screen checkpoints run on the MBP GPU
 (`kev.experiment --resume`), the 0.6B research preview is prepared locally, and 4B/8B work waits.
 
-Findings so far tonight (v4 suites; Jev dev 0.845 / transfer 0.855):
+Findings so far tonight (v4 suites; Jev dev 0.845 / transfer 0.857):
 - 0.6B is saturated on transfer at 0.59-0.61 regardless of knobs (round 1: eight mutations, all within noise; lr 5e-4
   and lora 64 + ord_w hurt dev). Run-to-run noise at the same seed on GPU is ~1 pp.
 - **More public data hurts 4B transfer**: 4B on v4 (10.9k) transfer 0.704 / 0.735 vs 0.747 / 0.750 on v3 (3.4k), while
@@ -138,7 +138,7 @@ Findings so far tonight (v4 suites; Jev dev 0.845 / transfer 0.855):
   public_frac / synthetic_repeat / option isolation does not stack (0.748-0.752). Knowledge MCQ sources (v6) lift
   in-distribution accuracy to 0.86 and MMLU to 0.70 without moving transfer. 8B at lr 5e-5: dev 0.869, transfer
   0.774, Brier 0.339 (best of any size) but +0.4 pp [-3.9, +4.5] vs 4B on transfer. The 4B->8B step is flat for this
-  recipe; the remaining gap to Jev (0.855) is MMLU (0.69 vs 0.90; the 8B *base* gets 0.76 zero-shot), PAWS, emotion.
+  recipe; the remaining gap to Jev (0.857) is MMLU (0.69 vs 0.90; the 8B *base* gets 0.76 zero-shot), PAWS, emotion.
 - Mix results at 4B: public_frac 0.33 (+synthetic_repeat 2 + isolation) 0.752 at lr 2e-4; synthetic_repeat 3 hurts
   (0.686, PAWS 0.45); 1 epoch is better calibrated (Brier 0.379, confident errors 2.7%) at equal accuracy; the
   2-epoch 4B run on v5 (23.6k records, 5.9k steps at lr 2e-4) **collapsed** (dev 0.58) - long runs at lr 2e-4 are unstable.
@@ -175,9 +175,9 @@ Also tried after the synthesis: WiSE-FT-style interpolation toward the base at i
 interpolation is not a lever. Round auto-4b-r1 (head_lr, weight decay, rank 8, head_dim 1024, perm_kl, synthetic x2): all
 0.755-0.767; option isolation at low lr 0.729 (-5.8 pp, significant) - isolation costs accuracy at 4B.
 
-Where the remaining gap to Jev (0.855 transfer) lives, per task at 8B: MMLU 0.69-0.74 vs 0.90 (the 8B *base* is 0.76
+Where the remaining gap to Jev (0.857 transfer) lives, per task at 8B: MMLU 0.69-0.74 vs 0.90 (the 8B *base* is 0.76
 zero-shot - our readout still loses knowledge), PAWS 0.75 vs 0.79 (base 0.85), Emotion 0.55 vs 0.60, TweetEval 0.71 vs
-0.81, deadline 0.55-0.70 vs 0.95. Held-out policy pairs 0.61-0.67 vs the 0.70 screen.
+0.81, deadline 0.55-0.70 vs 0.925. Held-out policy pairs 0.61-0.67 vs the 0.70 screen.
 
 Next levers the evidence points at (not config knobs):
 - **Knowledge readout**: the pointer head under-uses what the base knows. Try a hybrid readout that adds the base

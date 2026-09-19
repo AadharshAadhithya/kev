@@ -159,12 +159,13 @@ def main():
     is_hub_id = re.fullmatch(r"[\w.-]+/[\w.-]+", a.run) and not os.path.isdir(a.run)
     run = a.run if is_hub_id or os.path.exists(f"{a.run}/head.pt") else a.fallback
     if run != a.run: print(f"{a.run} not found, falling back to {run}")
+    label = run                       # what /v1/models reports: the Hub id or run path as given, not the resolved cache path
     run = resolve_run(run)
-    dev = "mps" if torch.backends.mps.is_available() else "cpu"
+    dev = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
     meta = torch.load(f"{run}/head.pt", map_location="cpu")
     tok, model = load(run, dev)
-    STATE.update(run=run, tok=tok, model=model, dev=dev, base=meta["base"], lora=meta["lora"])
-    print(f"serving {run} on {dev} :{a.port}")
+    STATE.update(run=label, tok=tok, model=model, dev=dev, base=meta["base"], lora=meta["lora"])
+    print(f"serving {label} ({run}) on {dev} :{a.port}")
     import uvicorn
     uvicorn.run(app, host="127.0.0.1", port=a.port)
 

@@ -151,6 +151,39 @@ Findings so far tonight (v4 suites; Jev dev 0.845 / transfer 0.855):
   card [`docs/model-cards/kev-0.6b.md`](docs/model-cards/kev-0.6b.md)); one exploratory (ungated) locked-test read:
   decision 0.819, transfer 0.631 ([`runs/locked/kev-06b-preview-ungated/summary.json`](runs/locked/kev-06b-preview-ungated/summary.json)).
 
+### Overnight synthesis (as of 02:00; spend ~$140 of $500)
+
+What moved the needle, in order of effect size, all on the same frozen development items:
+
+1. **Backbone capacity** 0.6B -> 4B: +14-19 pp transfer (matched data). 4B -> 8B: +1.5-2 pp at the low-lr recipe
+   (4B 0.759/0.758, 8B 0.774/0.779 at two seeds each).
+2. **Learning rate 2e-4 -> 5e-5**: +4.7 pp [+0.4, +9.6] at 4B, replicated at two seeds and two suites; best Brier;
+   the mechanism is reduced drift from the base model (base zero-shot probe). 3e-5 and 2e-5 are equivalent to 5e-5.
+3. **None-of-the-above minimal pairs**: none_present accuracy 0.75 -> 0.78-0.85 (0.6B), 0.85-0.93 (4B).
+4. Compositional policy data: +4-5 pp at 4B on v3 (CI touching zero), nothing at 0.6B; teaches trained structures
+   (0.85-1.0) and transfers partially to unseen ones (0.5-0.67 at 4B/8B).
+
+What did not work: more public data (raises dev, lowers or flattens transfer; a 2-epoch 23.6k-record 4B run at lr 2e-4
+collapsed); synthetic oversampling x3 (hurts PAWS badly); LoRA rank/target ablations (within noise once lr is low);
+option isolation (exact permutation invariance at no accuracy cost, but no accuracy gain); special embeddings; head_dim;
+perm_kl; ord_w; 3 epochs; knowledge MCQ sources (dev +2 pp, MMLU +2-5 pp, transfer flat). Fourteen one-knob mutations
+around the low-lr incumbent at 4B all landed in 0.748-0.767: **the config space is exhausted for this data and
+evaluation**; run-to-run noise at a fixed seed is ~1 pp.
+
+Where the remaining gap to Jev (0.855 transfer) lives, per task at 8B: MMLU 0.69-0.74 vs 0.90 (the 8B *base* is 0.76
+zero-shot - our readout still loses knowledge), PAWS 0.75 vs 0.79 (base 0.85), Emotion 0.55 vs 0.60, TweetEval 0.71 vs
+0.81, deadline 0.55-0.70 vs 0.95. Held-out policy pairs 0.61-0.67 vs the 0.70 screen.
+
+Next levers the evidence points at (not config knobs):
+- **Knowledge readout**: the pointer head under-uses what the base knows. Try a hybrid readout that adds the base
+  model's own letter/option-token logits (frozen, zero-drift) to the pointer logits, or distill the *base* model's
+  zero-shot distribution on knowledge-shaped questions into the head (self-anchoring, no Jev).
+- **Date/ordinal reasoning**: deadline stays near the middle level; needs either scratchpad-free arithmetic data with
+  varied surface forms or a Score readout that models cumulative levels directly.
+- **Held-out structure generalization**: more *rule structures* (not more pairs per structure) and rendering styles.
+- **Evaluation**: the 70% pair screen is within reach at 8B (0.67); a third seed decides whether the recipe is a
+  release candidate for the locked test as a gated read.
+
 ## Status and deferred work
 
 - [x] Modal CUDA/batched path and backbone-v1 study completed; MBP path retained.

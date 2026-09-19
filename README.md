@@ -46,6 +46,8 @@ uv run --extra serve python -m kev.serve --run jaredpalmer/kev-0.5b --port 8009
 
 The same files are attached to the [GitHub release](https://github.com/jaredpalmer/kev/releases/tag/v0.1.0) as `kev-0.5b.tar.gz`.
 
+**Research preview:** [`jaredpalmer/kev-0.6b`](https://huggingface.co/jaredpalmer/kev-0.6b) (base Qwen3-0.6B-Base, no version tag) is the current best 0.6B checkpoint under the frozen v4 protocol: in-distribution 0.805 vs 0.712 for kev-0.5b on the same development set, out-of-domain 0.598 vs 0.575, none-of-the-above shortcut largely fixed. It does not pass the release screen (held-out policy reasoning near chance), so it is published for comparison, not for use. Card: [`docs/model-cards/kev-0.6b.md`](docs/model-cards/kev-0.6b.md).
+
 ## Quick Start
 
 Start the server:
@@ -276,6 +278,8 @@ Trials are configuration-only: `kev.experiment` refuses configs outside a bounde
 `kev.jev` scores the same frozen development suite against the real `typesafe-ai/jev` through Vercel AI Gateway (AI SDK 7 `experimental_evaluate`, cost-capped). Jev is the hosted reference product; kev was fine-tuned on these six datasets, so this is a shared-task baseline, not a controlled ablation. On 720 clean development questions the released `kev-0.5b` had 79.7% micro accuracy and Jev 81.1%; the record-clustered macro accuracy difference was −1.8 points with 95% CI [−5.5, +1.7]. Jev rounds some probabilities to zero, so log-loss depends on the clipping floor. Results and caveats: `runs/kev-vs-jev-v1.json`; regenerate the figure with `uv run python scripts/plot_eval_comparison.py`.
 
 ![kev vs Jev, preliminary per-task accuracy on the frozen development suite](docs/kev-vs-jev.png)
+
+**Controlled studies (v3/v4 suites, Modal H100s).** With the public examples and the synthetic budget held equal, backbone capacity dominates out-of-domain accuracy: Qwen3-0.6B → 4B is +14–19 pp on `transfer-v3`, 4B → 8B is +1–7 pp; programmatic compositional policy data adds +4–5 pp at 4B (CI touching zero at one seed) and nothing measurable at 0.6B; tripling the public training data at 4B *lowers* transfer by ~3 pp while raising in-distribution accuracy. Jev on the same sets: 0.845 in-distribution, 0.855 out-of-domain; best 8B trial 0.843 / 0.765. Every trial, with hashes and a paired bootstrap, is in [`runs/leaderboard.md`](runs/leaderboard.md); the research log is [PLAN.md](PLAN.md).
 
 **Outside kev's training data** (`evals/transfer-v1`: TREC, DBpedia-14, Emotion, IMDB, Amazon, QNLI, TweetEval offensive, MMLU; zero exact-match overlap with any kev training state): kev-0.5b 63.3% vs Jev 82.3% on 640 clean questions, macro difference **−19.1 pp, 95% CI [−23.1, −15.0]**. kev is the better-calibrated of the two out of domain (ECE 0.052 vs 0.075) and Jev's option-order flip rate is 0.000 (kev 0.208). The in-distribution parity above does not transfer. Details: `runs/kev-vs-jev-transfer-v1.json`; plan for closing the gap: [PLAN.md](PLAN.md).
 

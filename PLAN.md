@@ -82,6 +82,24 @@ Use at most four concurrent containers, no automatic trial retries, and an 1,800
 
 Modal documentation: [images](https://modal.com/docs/guide/images), [volumes](https://modal.com/docs/guide/volumes), [GPU](https://modal.com/docs/guide/gpu), [secrets](https://modal.com/docs/guide/secrets).
 
+## Overnight autoresearch (branch `research/overnight-1`, PR #3)
+
+Authorized: up to $500 of Modal credits; spend baseline $27.17 at 19:45. Rules unchanged: selection on development
+partitions, locked test read at most once per promoted candidate, no evaluator changes from a trial config, every
+trial through `kev.experiment.execute_trial` with provenance. New tonight:
+
+- `kev/autoresearch.py`: bounded hill-climb over the allowlisted config space; leaderboard across all studies
+  ([`runs/leaderboard.md`](runs/leaderboard.md)); spend ledger from `modal billing`; auto-maintained log below.
+- Architecture switches (flags, default off): `option_isolation` (option spans are isolated sub-branches with shared
+  positions; permutation invariance exact by construction, 1.2e-7 measured on the real model), `special_embeddings`
+  (train the five delimiter embeddings), `head_dim`.
+- Suites: `decision-v4` (10k public + 448/arm synthetic) and `decision-v5` (20k public + 1,792/arm), both with dev/test
+  bytes identical to v3 so every number since the matched study is comparable. `transfer-v4/v5` are byte-identical to v3.
+- Reference: Jev on decision-v4 dev acc 0.845, Brier 0.237, trained-structure pairs 0.86; on transfer-v4 dev acc 0.855.
+
+Sequence: 0.6B screening rounds (cheap, one seed, replicate winners) -> promote the winning knobs to 4B on v4 -> 4B on v5
+-> 8B once with the best recipe -> one locked-test read for the best gated candidate -> research-preview cards.
+
 ## Status and deferred work
 
 - [x] Modal CUDA/batched path and backbone-v1 study completed; MBP path retained.
@@ -108,9 +126,10 @@ Relevant code: [suite builder](kev/study_v3.py), [rule generator](kev/compositio
 
 Maintained by `kev.autoresearch`; full table in [`runs/leaderboard.md`](runs/leaderboard.md). Selection uses development partitions only.
 
-- **Qwen3-0.6B-Base** incumbent (v4 suites): transfer 0.605, dev 0.800, seeds [2], knobs `{"epochs": 2, "p_none_pair": 0.25}`
+- **Qwen3-0.6B-Base** incumbent (v4 suites): transfer 0.592, dev 0.812, seeds [0, 0], knobs `{"epochs": 2, "p_none_pair": 0.25}`
 - **Qwen3-4B-Base**: no eligible trial yet
 - **Qwen3-8B-Base**: no eligible trial yet
 
 | round | base | trials | best transfer | best knobs | incumbent after | spend |
 |---|---|---|---|---|---|---|
+| auto-06b-r1 | Qwen3-0.6B-Base | 8/8 | 0.596 | `{"epochs": 2, "accum": 1, "perm_kl": 0.5, "p_none_pair": 0.25}` | 0.592 | $9.82 |

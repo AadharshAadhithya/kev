@@ -122,7 +122,8 @@ def propose(rows, base, n, seed, suite_manifest, incumbent_cfg=None, rng_seed=0)
         k = rng.sample(knobs, rng.choice([1, 1, 1, 2]))
         cfg = dict(parent)
         for knob in k:
-            choices = [v for v in SPACE[knob] if v != parent.get(knob, DEFAULTS.get(knob))]
+            current = parent.get(knob, DEFAULTS.get(knob, 0 if knob in ("option_isolation", "special_embeddings") else 256 if knob == "head_dim" else None))
+            choices = [v for v in SPACE[knob] if v != current]
             if not choices: continue
             cfg[knob] = rng.choice(choices)
         if cfg.get("accum", 1) > 1 and base == "Qwen/Qwen3-0.6B-Base": cfg["batch"] = 8      # effective batch 16 via accum

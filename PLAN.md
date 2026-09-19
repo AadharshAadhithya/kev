@@ -186,8 +186,12 @@ Next levers the evidence points at (not config knobs):
 - **Date/ordinal reasoning**: deadline stays near the middle level; needs either scratchpad-free arithmetic data with
   varied surface forms or a Score readout that models cumulative levels directly.
 - **Held-out structure generalization**: more *rule structures* (not more pairs per structure) and rendering styles.
-- **Evaluation**: the 70% pair screen is within reach at 8B (0.67); a third seed decides whether the recipe is a
-  release candidate for the locked test as a gated read.
+- **Evaluation**: the 70% pair screen is within reach at 8B (0.59 / 0.67 / 0.61 across three seeds) but not met by
+  any seed, so no gated locked-test read happened tonight; the published previews carry ungated reads.
+
+Final replication (03:30): 4B lr 5e-5 at three seeds transfer 0.759 / 0.758 / 0.759; 8B lr 5e-5 at three seeds
+0.774 / 0.779 / 0.774. Both recipes are stable to ~0.5 pp. Spend for the night: ~$180 of the $500 authorized
+(89 trials indexed; `runs/leaderboard.md`).
 
 ## Status and deferred work
 
@@ -203,7 +207,8 @@ Next levers the evidence points at (not config knobs):
       Held-out compositional structures, both siblings correct: 0.6B 3%/6%; 4B 45%/52%. Held-out authorization: 4B 100% both arms (0.6B 50%).
       Held-out deadline (3-level score) stays near chance for all cells. No cell passes the 70% held-out-pair screen; none is a locked-test candidate.
       Cost: 4 H100 trials, 0.6B ~4.5 min and 4B ~13.5 min wall each, admission bound $8.86.
-- [ ] Second seed for the four cells (budget permitting); then decide whether any candidate warrants a locked test.
+- [x] Second seed for the four v3 cells; overnight: v4/v5/v6 suites, ~60 further trials, three research previews
+      (0.6B / 4B / 8B) with one ungated locked read each. See "Overnight autoresearch" and the log below.
 - [ ] Deferred: option-order architecture experiments. Do not infer Jev's architecture from zero argmax flips.
 - [ ] Deferred: LLM-authored product scenarios, with a separate verification model and retained provenance; needs explicit API/budget decisions.
 - [ ] Deferred: 8B runs after the data-versus-capacity result, not as an automatic escalation.

@@ -67,7 +67,7 @@ model-index:
 
 Per-source out-of-domain accuracy (kev-8b / Jev): QNLI 0.93 / 0.925, SciQ 1.00 / 0.99, TweetEval-offensive 0.71 / 0.81, PAWS 0.76 / 0.79, MMLU 0.69 / 0.90, Emotion 0.57 / 0.60, deadline (3-level date arithmetic) 0.70 / 0.95.
 
-Seeds: one seed at this size with this recipe (a second seed and lr 2e-5 are running); the 4B recipe it inherits was replicated at two seeds on two suites (spread ~1 pp).
+Seeds: three seeds with this recipe on this suite: transfer 0.774 / 0.779 / 0.774, in-distribution 0.869 / 0.868 / 0.866, held-out pairs 0.61 / 0.67 / 0.59, MMLU 0.69 / 0.74 / 0.75. lr 2e-5 gives 0.770 (no gain). Against kev-4b (three seeds at 0.758-0.759) the 8B is +1.5-2 pp on transfer and +2.5 pp in-distribution.
 
 **Locked test, one exploratory read** (`runs/locked/kev-8b-preview-ungated/`, labelled ungated because the checkpoint fails the held-out-pair screen): in-distribution **0.869** (Brier 0.191), out-of-domain **0.799** (Brier 0.296, confident errors 4.9%). This partition will not be read again for this checkpoint.
 

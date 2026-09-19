@@ -1,16 +1,18 @@
 # Leaderboard
 
-Generated 2026-09-19T07:32+00:00 from runs/*/result.json. Selection on development partitions only; the locked test is never read here.
+Generated 2026-09-19T23:36+00:00 from runs/*/result.json. Selection on development partitions only; the locked test is never read here.
 
 - **Qwen/Qwen3-0.6B-Base** incumbent: transfer 0.610, dev 0.799, seeds [0] (arch-06b/06-trial-6)
-- **Qwen/Qwen3-4B-Base** incumbent: transfer 0.767, dev 0.843, seeds [0] (auto-4b-r1/04-trial-4)
+- **Qwen/Qwen3-4B-Base** incumbent: transfer 0.790, dev 0.854, seeds [1] (v7-rc3/01-trial-1)
 - **Qwen/Qwen3-8B-Base** incumbent: transfer 0.779, dev 0.868, seeds [1] (recipe-8b-r2/01-trial-1)
 
 | study/trial | base | seed | dev acc | transfer acc | Brier | conf-err | held-out pairs | none_present | perm flip | gates | $ | knobs |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
+| v7-rc3/01-trial-1 | Qwen3-4B-Base | 1 | 0.854 | 0.790 | 0.328 | 0.082 | 0.73 | 0.87 | 0.02 | pass | 2.84 | epochs=2, lr=5e-05, p_none_pair=0.25 |
 | recipe-8b-r2/01-trial-1 | Qwen3-8B-Base | 1 | 0.868 | 0.779 | 0.336 | 0.081 | 0.67 | 0.87 | 0.05 | fail | 6.49 | accum=4, epochs=2, lr=5e-05, p_none_pair=0.25 |
 | recipe-8b-r1/00-trial-0 | Qwen3-8B-Base | 0 | 0.869 | 0.774 | 0.339 | 0.082 | 0.61 | 0.88 | 0.02 | fail | 4.96 | accum=4, epochs=2, lr=5e-05, p_none_pair=0.25 |
 | recipe-8b-s2/00-trial-0 | Qwen3-8B-Base | 2 | 0.866 | 0.774 | 0.348 | 0.085 | 0.59 | 0.88 | 0.02 | fail | 6.26 | accum=4, epochs=2, lr=5e-05, p_none_pair=0.25 |
+| v7-rc3/00-trial-0 | Qwen3-4B-Base | 0 | 0.858 | 0.773 | 0.359 | 0.098 | 0.62 | 0.87 | 0.05 | fail | 3.01 | epochs=2, lr=5e-05, p_none_pair=0.25 |
 | recipe-8b-r2/00-trial-0 | Qwen3-8B-Base | 0 | 0.855 | 0.770 | 0.348 | 0.075 | 0.62 | 0.87 | 0.05 | fail | 5.92 | accum=4, epochs=2, lr=2e-05, p_none_pair=0.25 |
 | auto-4b-r0-91266/01-trial-1 | Qwen3-4B-Base | 0 | 0.840 | 0.767 | 0.355 | 0.062 | 0.61 | 0.87 | 0.07 | fail | 2.76 | epochs=2, lora_targets=all, lr=3e-05, p_none_pair=0.25 |
 | auto-4b-r1/04-trial-4 | Qwen3-4B-Base | 0 | 0.843 | 0.767 | 0.350 | 0.059 | 0.59 | 0.88 | 0.05 | fail | 4.94 | epochs=2, lora_targets=all, lr=3e-05, p_none_pair=0.25, perm_kl=0.2 |
@@ -95,6 +97,7 @@ Generated 2026-09-19T07:32+00:00 from runs/*/result.json. Selection on developme
 | research-smoke-runner-v2/00-trial-0 | Qwen2.5-0.5B | 0 | 0.389 |  |  |  |  | 0.33 | 1.00 | pass |  | ord_w=0.1, perm_frac=1, perm_kl=0.1 |
 | research-smoke-runner-verified/00-trial-0 | Qwen2.5-0.5B | 0 | 0.389 |  |  |  |  | 0.33 | 1.00 | pass |  | accum=3, ord_w=0.1, perm_frac=1, perm_kl=0.1 |
 | smoke/00-trial-0 | Qwen2.5-0.5B | 0 | 0.389 |  |  |  |  | 0.33 | 1.00 | pass | 0.04 | ord_w=0.1, perm_frac=1, perm_kl=0.1 |
+| smoke-anchor/00-trial-0 | Qwen2.5-0.5B | 0 | 0.389 |  |  |  |  | 0.33 | 0.83 | pass |  | anchor=/tmp/anchors-smoke.json, anchor_w=0.5 |
 | smoke-arch/00-trial-0 | Qwen2.5-0.5B | 0 | 0.222 |  |  |  |  | 0.17 | 0.00 | pass |  | head_dim=512, option_isolation=1, p_none_pair=0.5, special_embeddings=1 |
 | smoke-hl/00-trial-0 | Qwen2.5-0.5B | 0 | 0.389 |  |  |  |  | 0.33 | 0.83 | pass |  | head_lr=0.002, weight_decay=0.1 |
 | smoke-mix/00-trial-0 | Qwen2.5-0.5B | 0 | 0.389 |  |  |  |  | 0.33 | 0.83 | pass |  | public_frac=0.5, synthetic_repeat=2 |

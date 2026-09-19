@@ -219,6 +219,37 @@ pushing ([`kev/composition.py`](kev/composition.py) `canonical`, `push_negation`
 Release rule tightened: the screen must pass on **every seed** of a config (`kev.autoresearch release-check`), not one
 seed of 64 pairs. Study `v7-release-candidates`: 4B and 8B at lr 5e-5, two seeds each.
 
+### Results so far (v7 and the untrained baselines)
+
+**Untrained baselines on the same frozen items** (`scripts/base_mmlu_probe.py`, zero-shot letter logits, Modal):
+
+| transfer-v4 dev | 8B base, untrained | 30B-A3B base, untrained | kev-8b | Jev |
+|---|---|---|---|---|
+| accuracy | 0.726 | 0.707 | **0.774** | 0.857 |
+| Brier | 0.366 | 0.365 | **0.339** | 0.211 |
+| MMLU | 0.75 | **0.79** | 0.69 | 0.90 |
+| PAWS | 0.84 | 0.82 | 0.76 | 0.79 |
+| Emotion | 0.30 | 0.31 | **0.57** | 0.59 |
+| held-out rule pairs | 0.55 | 0.44 | **0.61** | 0.86 |
+
+kev-8b vs its own untrained base: +5.8 pp [+1.8, +10.0]; vs the untrained 30B-A3B: +9.7 pp [+4.7, +14.4]. The
+recipe does real work (rule composition, classification-shaped tasks) and *loses* on knowledge/paraphrase, where both
+untrained models beat it (MMLU 0.75-0.79 vs 0.69; PAWS 0.82-0.84 vs 0.76). "A bigger untrained MoE gets Jev-class
+results for free" is false on this suite; "the fine-tune erodes base capability" is confirmed a third way.
+
+**decision-v7 at 4B** (`v7-rc3`): transfer **0.773 / 0.790** (v4 recipe: 0.759 x3), dev 0.858 / 0.854, held-out pairs
+0.62 / **0.73**. The random-structure data moves the two failing rule families: (A and B) or not C 0.66 -> 0.75 / 0.97,
+if-then-not 0.62 -> 0.75 / 0.88. The ordinal Score families did **not** move deadline (0.60 / 0.53). Seed 1 clears
+the 70% screen; seed 0 does not, so under the two-seed rule this is not yet a release candidate. 8B on v7 and a third
+4B seed are running; the deadline family needs a different idea (the model still hedges to the middle level).
+
+**Anchoring** (`kev.anchors` + `--anchor_w`, KL toward the frozen base's zero-shot distribution, targets keyed by option
+key): study `anchor-4b-v6` running (anchor on the knowledge MCQ sources at w=0.5 and 1.0; on everything at w=0.3).
+
+Ops: two studies were lost to the local client disconnecting (Modal cancels `.starmap` inputs when the caller dies; `--detach`
+keeps only the last-triggered function). Studies now fan out server-side from the **deployed** app (`modal deploy modal_app.py`;
+`run_study` spawned, `pull --name` afterwards). ~$35 of GPU time was lost to this.
+
 ## Status and deferred work
 
 - [x] Modal CUDA/batched path and backbone-v1 study completed; MBP path retained.
@@ -247,7 +278,7 @@ Relevant code: [suite builder](kev/study_v3.py), [rule generator](kev/compositio
 Maintained by `kev.autoresearch`; full table in [`runs/leaderboard.md`](runs/leaderboard.md). Selection uses development partitions only.
 
 - **Qwen3-0.6B-Base** incumbent (v4 suites): transfer 0.610, dev 0.799, seeds [0], knobs `{"epochs": 2, "lr": 0.0001, "p_none_pair": 0.25}`
-- **Qwen3-4B-Base** incumbent (v4 suites): transfer 0.767, dev 0.843, seeds [0], knobs `{"epochs": 2, "lr": 3e-05, "perm_kl": 0.2, "p_none_pair": 0.25, "lora_targets": "all"}`
+- **Qwen3-4B-Base** incumbent (v4 suites): transfer 0.790, dev 0.854, seeds [1], knobs `{"epochs": 2, "lr": 5e-05, "p_none_pair": 0.25}`
 - **Qwen3-8B-Base** incumbent (v4 suites): transfer 0.779, dev 0.868, seeds [1], knobs `{"epochs": 2, "lr": 5e-05, "p_none_pair": 0.25}`
 
 | round | base | trials | best transfer | best knobs | incumbent after | spend |

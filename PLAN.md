@@ -170,6 +170,11 @@ perm_kl; ord_w; 3 epochs; knowledge MCQ sources (dev +2 pp, MMLU +2-5 pp, transf
 around the low-lr incumbent at 4B all landed in 0.748-0.767: **the config space is exhausted for this data and
 evaluation**; run-to-run noise at a fixed seed is ~1 pp.
 
+Also tried after the synthesis: WiSE-FT-style interpolation toward the base at inference (`KEV_LORA_SCALE`): alpha 0.75
+0.765 (noise), alpha 0.5 0.736 (-4.4 pp, CI excludes zero) - the head depends on the fine-tuned features, so weight-space
+interpolation is not a lever. Round auto-4b-r1 (head_lr, weight decay, rank 8, head_dim 1024, perm_kl, synthetic x2): all
+0.755-0.767; option isolation at low lr 0.729 (-5.8 pp, significant) - isolation costs accuracy at 4B.
+
 Where the remaining gap to Jev (0.855 transfer) lives, per task at 8B: MMLU 0.69-0.74 vs 0.90 (the 8B *base* is 0.76
 zero-shot - our readout still loses knowledge), PAWS 0.75 vs 0.79 (base 0.85), Emotion 0.55 vs 0.60, TweetEval 0.71 vs
 0.81, deadline 0.55-0.70 vs 0.95. Held-out policy pairs 0.61-0.67 vs the 0.70 screen.

@@ -1,6 +1,6 @@
 # Leaderboard
 
-Generated 2026-09-19T06:36+00:00 from runs/*/result.json. Selection on development partitions only; the locked test is never read here.
+Generated 2026-09-19T06:41+00:00 from runs/*/result.json. Selection on development partitions only; the locked test is never read here.
 
 - **Qwen/Qwen3-0.6B-Base** incumbent: transfer 0.610, dev 0.799, seeds [0] (arch-06b/06-trial-6)
 - **Qwen/Qwen3-4B-Base** incumbent: transfer 0.767, dev 0.843, seeds [0] (auto-4b-r1/04-trial-4)
@@ -21,6 +21,7 @@ Generated 2026-09-19T06:36+00:00 from runs/*/result.json. Selection on developme
 | auto-4b-r0-91266/06-trial-6 | Qwen3-4B-Base | 0 | 0.831 | 0.759 | 0.354 | 0.059 | 0.55 | 0.83 | 0.07 | fail | 2.6 | epochs=2, lr=2e-05, p_none=0.2, p_none_pair=0.25 |
 | knowledge-4b-v6/01-trial-1 | Qwen3-4B-Base | 0 | 0.854 | 0.759 | 0.351 | 0.046 | 0.55 | 0.85 | 0.05 | fail | 1.93 | lr=0.0001, p_none_pair=0.25 |
 | lowdrift-4b-v4/01-trial-1 | Qwen3-4B-Base | 0 | 0.843 | 0.759 | 0.346 | 0.055 | 0.62 | 0.85 | 0.00 | fail | 2.56 | epochs=2, lr=5e-05, p_none_pair=0.25 |
+| recipe-4b-v4-s2/00-trial-0 | Qwen3-4B-Base | 2 | 0.855 | 0.759 | 0.362 | 0.072 | 0.55 | 0.90 | 0.05 | fail | 2.83 | epochs=2, lr=5e-05, p_none_pair=0.25 |
 | recipe-4b-v4-s1/00-trial-0 | Qwen3-4B-Base | 1 | 0.853 | 0.758 | 0.371 | 0.062 | 0.58 | 0.88 | 0.05 | fail | 2.9 | epochs=2, lr=5e-05, p_none_pair=0.25 |
 | recipe-8b-r1/01-trial-1 | Qwen3-8B-Base | 0 | 0.861 | 0.758 | 0.370 | 0.090 | 0.56 | 0.85 | 0.00 | fail | 2.69 | accum=4, epochs=2, lr=5e-05, option_isolation=1, p_none_pair=0.25, public_frac=0.33, synthetic_repeat=2 |
 | auto-4b-r0-91266/05-trial-5 | Qwen3-4B-Base | 0 | 0.828 | 0.756 | 0.370 | 0.064 | 0.56 | 0.83 | 0.08 | fail | 1.7 | epochs=2, lr=3e-05, p_none_pair=0.25, public_frac=0.5 |

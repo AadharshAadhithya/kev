@@ -113,12 +113,13 @@ class PointerHead(nn.Module):
 
 
 class DecisionModel(nn.Module):
-    def __init__(self, name, tok, device, lora=None, revision=None, attn=None, head_dim=256, option_isolation=False, special_embeddings=False, lora_targets="all"):
+    def __init__(self, name, tok, device, lora=None, revision=None, attn=None, head_dim=256, option_isolation=False, special_embeddings=False, lora_targets="all", dtype=torch.float32):
         super().__init__()
         # backbone only (no vocab head): we never generate text.
         # eager on MPS/CPU (known-good with our float 4D mask); SDPA on CUDA (accepts arbitrary additive masks).
         attn = attn or ("sdpa" if str(device).startswith("cuda") else "eager")
-        self.lm = AutoModelForCausalLM.from_pretrained(name, revision=revision, dtype=torch.float32, attn_implementation=attn).model
+        # dtype: fp32 for training and exact evaluation; bf16 is a serving option for large backbones (8B on a 32 GB Mac)
+        self.lm = AutoModelForCausalLM.from_pretrained(name, revision=revision, dtype=dtype, attn_implementation=attn).model
         self.pad_id = tok.pad_token_id if tok.pad_token_id is not None else 0
         self.option_isolation = option_isolation
         if lora:
@@ -150,8 +151,9 @@ class DecisionModel(nn.Module):
         isolate = any(e.get("option_isolation") for e in encs)
         if isolate and not all(e.get("option_isolation") for e in encs):
             raise ValueError("cannot mix option-isolated and plain encodings in one batch")
-        mask = branch_mask_batch([e["seg"] for e in encs], self.device, opts=[e["opt"] for e in encs] if isolate else None)
-        return self.lm(input_ids=ids, position_ids=pos, attention_mask=mask).last_hidden_state
+        lm_dtype = next(self.lm.parameters()).dtype
+        mask = branch_mask_batch([e["seg"] for e in encs], self.device, dtype=lm_dtype, opts=[e["opt"] for e in encs] if isolate else None)
+        return self.lm(input_ids=ids, position_ids=pos, attention_mask=mask).last_hidden_state.float()   # head stays fp32
 
     def _readout(self, h, enc):
         return [self.head(h[d], h[torch.tensor(oi, device=self.device)]) for d, oi in zip(enc["decide_idx"], enc["opt_idx"])]

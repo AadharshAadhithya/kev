@@ -32,14 +32,19 @@ def resolve_run(run):
     return snapshot_download(run, allow_patterns=["*.json", "*.safetensors", "*.pt", "*.txt", "*.jinja"])
 
 
-def load(run, dev):
+def load(run, dev, dtype=None):
+    """dtype: None = fp32 (exact; what every reported number uses). KEV_DTYPE=bf16 or dtype=torch.bfloat16 halves memory
+    for serving large backbones; probabilities then differ from the fp32 numbers in the third decimal."""
+    import os
     run = resolve_run(run)
     meta = torch.load(f"{run}/head.pt", map_location="cpu")
+    dtype = dtype or {"bf16": torch.bfloat16, "fp16": torch.float16}.get(os.environ.get("KEV_DTYPE", ""), torch.float32)
     tok = load_tokenizer(meta["base"], revision=meta.get("base_revision"))
     m = DecisionModel(meta["base"], tok, dev, lora=None, revision=meta.get("base_revision"), head_dim=meta.get("head_dim", 256),
-                      option_isolation=meta.get("option_isolation", False))
+                      option_isolation=meta.get("option_isolation", False), dtype=dtype)
     from peft import PeftModel
     m.lm = PeftModel.from_pretrained(m.lm, run).to(dev)   # trainable token embeddings, if any, are inside the adapter
+    if dtype != torch.float32: m.lm = m.lm.to(dtype)
     m.head.load_state_dict(meta["head"]); m.eval()
     return tok, m
 

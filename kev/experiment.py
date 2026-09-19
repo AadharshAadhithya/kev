@@ -17,6 +17,7 @@ import json
 import os
 import platform
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -64,6 +65,10 @@ def validated_trial(value, manifest):
     if sum(result[k] for k in ("p_none", "p_none_distract", "p_distract")) > 1:
         raise ValueError("augmentation probabilities sum to more than one")
     return result
+
+
+# files whose change would alter what a score means; trainer/runner files may differ when resuming an interrupted evaluation
+EVALUATOR_FILES = {f"kev/{n}" for n in ("model.py", "benchmark.py", "data.py", "api.py", "suite.py", "evaluate.py", "contrastive.py", "composition.py", "study_v3.py")}
 
 
 def source_hashes():
@@ -143,23 +148,41 @@ def gate_report(report, checks, baseline=None):
     return {"passed": all(gates.values()), "checks": gates, "policy": "Research screening only: 1e-3 isolation; 5pp task regression; 70% heldout pair correctness; <=10% confident errors; no automatic release."}
 
 
-def execute_trial(config, suite, output, expected_sources, device, existing=None, transfer_suite=None):
+def execute_trial(config, suite, output, expected_sources, device, existing=None, transfer_suite=None, resume=False):
     """Train (unless `existing` points at a checkpoint), calibrate, score development, run mechanism checks.
-    Writes result.json (without cross-trial comparisons) and returns (report, rows). Safe to run in isolation."""
+    Writes result.json (without cross-trial comparisons) and returns (report, rows). Safe to run in isolation.
+
+    resume=True: the trial directory already holds a finished checkpoint from an interrupted run (training provenance
+    is kept as written by the trainer); only the evaluation stages run here, on `device`, and partial evaluation
+    outputs are regenerated. Never touches the checkpoint."""
     output = Path(output)
-    output.mkdir(parents=True, exist_ok=False)
     started = time.perf_counter()
     suite_hash = digest(Path(suite) / "manifest.json")
-    provenance = {"config": config, "config_sha256": record_digest(config), "suite_sha256": suite_hash,
-                  "source_hashes": expected_sources, "git_commit": git_commit(),
-                  "platform": platform.platform(), "torch": torch.__version__, "device": device,
-                  "gpu": torch.cuda.get_device_name(0) if device == "cuda" else None,
-                  "legacy_checkpoint": existing is not None}
-    write_json(output / "provenance.json", provenance)
+    if resume:
+        if not (output / "checkpoint" / "head.pt").exists() or (output / "result.json").exists():
+            raise ValueError("resume needs a finished checkpoint and no result.json")
+        provenance = json.loads((output / "provenance.json").read_text())
+        changed = {k for k in set(provenance["source_hashes"]) | set(expected_sources) if provenance["source_hashes"].get(k) != expected_sources.get(k)}
+        if provenance["suite_sha256"] != suite_hash or changed & EVALUATOR_FILES:
+            raise ValueError(f"resume refused: suite or evaluator code differs from the interrupted trial: {sorted(changed & EVALUATOR_FILES)}")
+        provenance.update(eval_device=device, resumed_evaluation=True, resumed_source_hashes=expected_sources,
+                          resumed_with_changed_non_evaluator_files=sorted(changed), resumed_git_commit=git_commit())
+        expected_sources = expected_sources   # the post-trial drift check below compares against the current tree
+        for part in ("calibration", "development", "transfer"):
+            if (output / part).exists(): shutil.rmtree(output / part)   # partial evaluation output only
+        write_json(output / "provenance.json", provenance)
+    else:
+        output.mkdir(parents=True, exist_ok=False)
+        provenance = {"config": config, "config_sha256": record_digest(config), "suite_sha256": suite_hash,
+                      "source_hashes": expected_sources, "git_commit": git_commit(),
+                      "platform": platform.platform(), "torch": torch.__version__, "device": device,
+                      "gpu": torch.cuda.get_device_name(0) if device == "cuda" else None,
+                      "legacy_checkpoint": existing is not None}
+        write_json(output / "provenance.json", provenance)
     if source_hashes() != expected_sources:
         raise ValueError("source code changed during the study")
     run = str(existing) if existing else str(output / "checkpoint")
-    if not existing:
+    if not existing and not resume:
         args = [sys.executable, "-m", "kev.train", "--suite", str(suite), "--out", run, "--device", device]
         for key, value in config.items():
             args += ["--" + key, str(value)]
@@ -270,8 +293,18 @@ def main():
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--aggregate", action="store_true", help="rank an existing study directory (e.g. after Modal trials)")
     ap.add_argument("--transfer", help="eval-only suite whose development partition is scored for every trial (out-of-domain check)")
+    ap.add_argument("--resume", action="store_true", help="finish evaluation for trials in --out that have a checkpoint but no result.json (interrupted studies)")
     a = ap.parse_args()
     if a.aggregate:
+        aggregate(a.out); return
+    if a.resume:
+        if not a.suite: ap.error("--suite is required with --resume")
+        suite = Path(a.suite).resolve(); expected = None
+        for directory in sorted(Path(a.out).iterdir()):
+            if (directory / "checkpoint" / "head.pt").exists() and not (directory / "result.json").exists():
+                print(f"Resuming evaluation for {directory.name}", flush=True)
+                execute_trial(None, suite, directory, source_hashes(), a.device, None, Path(a.transfer).resolve() if a.transfer else None, resume=True)
+        if (Path(a.out) / "results.jsonl").exists(): (Path(a.out) / "results.jsonl").unlink()
         aggregate(a.out); return
     if not a.plan or not a.suite:
         ap.error("--suite and --plan are required unless --aggregate")

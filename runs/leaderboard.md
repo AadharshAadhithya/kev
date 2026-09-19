@@ -2,8 +2,9 @@
 
 Generated 2026-09-19T02:56+00:00 from runs/*/result.json. Selection on development partitions only; the locked test is never read here.
 
-- **Qwen/Qwen3-0.6B-Base** incumbent: transfer 0.592, dev 0.812, seeds [0, 0] (auto-06b-r1/00-trial-0, v4-06b-hardened/00-trial-0)
+- **Qwen/Qwen3-0.6B-Base** incumbent: transfer 0.610, dev 0.799, seeds [0] (arch-06b/06-trial-6)
 - **Qwen/Qwen3-4B-Base** incumbent: transfer 0.759, dev 0.843, seeds [0] (lowdrift-4b-v4/01-trial-1)
+- **Qwen/Qwen3-8B-Base** incumbent: transfer 0.765, dev 0.843, seeds [0] (v3-8b-s0/00-trial-0)
 
 | study/trial | base | seed | dev acc | transfer acc | Brier | conf-err | held-out pairs | none_present | perm flip | gates | $ | knobs |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|

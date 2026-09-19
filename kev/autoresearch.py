@@ -78,12 +78,26 @@ def collect():
     return rows
 
 
+def dev_partition_hashes():
+    """manifest sha -> development.jsonl sha, for every frozen suite. Suites that differ only in training data (v4/v5/v6)
+    share development bytes and are comparable."""
+    from kev.suite import digest
+    out = {}
+    for m in ROOT.glob("evals/**/manifest.json"):
+        try: out[digest(m)] = json.loads(m.read_text())["files"]["development.jsonl"]["sha256"]
+        except (KeyError, ValueError): pass
+    return out
+
+
+DEV_HASHES = dev_partition_hashes()
+
+
 def eligible(row, suite_hash=None, transfer_hash=None):
-    """Comparable and correct: same frozen suites, complete coverage, isolation, transfer scored."""
+    """Comparable and correct: same development bytes, same transfer suite, complete coverage, isolation, transfer scored."""
     g = row["gates"]
     ok = g.get("complete_coverage") and g.get("isolation_and_packing") and g.get("transfer_complete", True) and row["transfer_acc"] is not None
-    if suite_hash and row["suite_sha256"] != suite_hash: return False
-    if transfer_hash and row["transfer_suite_sha256"] != transfer_hash: return False
+    if suite_hash and DEV_HASHES.get(row["suite_sha256"]) != DEV_HASHES.get(suite_hash): return False
+    if transfer_hash and DEV_HASHES.get(row["transfer_suite_sha256"]) != DEV_HASHES.get(transfer_hash): return False
     return bool(ok) and not row["legacy"]
 
 
@@ -99,9 +113,9 @@ def incumbent(rows, base, suite_hash, transfer_hash):
     if not by_cfg: return None
     def agg(group):
         n = len(group)
-        return (n >= 2, sum(r["transfer_acc"] for r in group) / n, -sum(r["transfer_brier"] for r in group) / n)
+        return (len({r["seed"] for r in group}) >= 2, sum(r["transfer_acc"] for r in group) / n, -sum(r["transfer_brier"] for r in group) / n)
     best = max(by_cfg.values(), key=agg)
-    return {"config": best[0]["config"], "config_sha256": best[0]["config_sha256"], "seeds": sorted(r["seed"] for r in best),
+    return {"config": best[0]["config"], "config_sha256": best[0]["config_sha256"], "seeds": sorted({r["seed"] for r in best}), "suite": best[0]["study"],
             "transfer_acc": sum(r["transfer_acc"] for r in best) / len(best), "dev_acc": sum(r["dev_acc"] for r in best) / len(best),
             "trials": [f"{r['study']}/{r['trial']}" for r in best]}
 

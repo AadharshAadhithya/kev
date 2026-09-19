@@ -45,6 +45,12 @@ def load(run, dev, dtype=None):
     from peft import PeftModel
     m.lm = PeftModel.from_pretrained(m.lm, run).to(dev)   # trainable token embeddings, if any, are inside the adapter
     if dtype != torch.float32: m.lm = m.lm.to(dtype)
+    scale = float(os.environ.get("KEV_LORA_SCALE", "1"))
+    if scale != 1:   # WiSE-FT-style interpolation between the base (0) and the fine-tuned weights (1), at inference, no retraining
+        for module in m.lm.modules():
+            if hasattr(module, "scaling") and isinstance(module.scaling, dict):
+                for k in module.scaling: module.scaling[k] *= scale
+        m.lora_scale = scale
     m.head.load_state_dict(meta["head"]); m.eval()
     return tok, m
 

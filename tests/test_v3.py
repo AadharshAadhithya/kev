@@ -382,3 +382,19 @@ def test_hybrid_rows_isolation_and_prefix():
         again = m.probs_with_prefix(enc, prefix); again2 = m.probs_with_prefix(enc, prefix)
     for a, b, c, d, e in zip(together, alone, cached, again, again2):
         assert (a - b).abs().max() < 1e-4 and (a - c).abs().max() < 1e-4 and (a - d).abs().max() < 1e-4 and (a - e).abs().max() < 1e-4
+
+
+def test_init_from_warm_start_and_compatibility_checks(tmp_path):
+    """PR #9: --init_from loads an existing adapter + pointer head before training and refuses incompatible sources.
+    Two tiny runs on Qwen2.5-0.5B: the second warm-starts from the first and must start with identical head weights."""
+    import subprocess, sys, json, torch
+    env = {**__import__("os").environ, "OMP_NUM_THREADS": "2"}
+    base = [sys.executable, "-m", "kev.train", "--n_per_source", "3", "--epochs", "1", "--accum", "1", "--batch", "1", "--device", "cpu", "--lr", "1e-12", "--base", "Qwen/Qwen2.5-0.5B"]
+    subprocess.run(base + ["--out", str(tmp_path / "a")], check=True, capture_output=True, env=env)
+    r = subprocess.run(base + ["--out", str(tmp_path / "b"), "--init_from", str(tmp_path / "a")], check=True, capture_output=True, text=True, env=env)
+    assert "delta: warm start" in r.stdout
+    ha, hb = torch.load(tmp_path / "a/head.pt", map_location="cpu"), torch.load(tmp_path / "b/head.pt", map_location="cpu")
+    assert all((ha["head"][k] - hb["head"][k]).abs().max() < 1e-6 for k in ha["head"]), "a warm start at a negligible lr must keep the source head"
+    assert hb["init_source"]["adapter_sha256"] and json.load(open(tmp_path / "b/training_config.json"))["init_source"]["resolved"] == str(tmp_path / "a")
+    bad = subprocess.run(base + ["--out", str(tmp_path / "c"), "--init_from", str(tmp_path / "a"), "--lora", "8"], capture_output=True, text=True, env=env)
+    assert bad.returncode != 0 and "lora is 16 there and 8 here" in bad.stderr

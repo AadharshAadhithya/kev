@@ -87,6 +87,9 @@ def main():
     ap.add_argument("--anchor_w", type=float, default=0.0, help="weight of KL(base || model) toward the frozen base model's zero-shot distribution, per anchored question")
     ap.add_argument("--anchor_sources", default="", help="comma-separated sources to anchor (default: every record with a target)")
     ap.add_argument("--out", default="runs/kev")
+    ap.add_argument("--init_from", default="", help="delta mode: warm-start LoRA and the pointer head from an existing run "
+                                                   "(local directory or hub id) instead of starting from the base model; keeps the "
+                                                   "released model's in-domain skill while adapting to a new domain")
     ap.add_argument("--seed", type=int, default=0)
     a = ap.parse_args()
 
@@ -123,6 +126,33 @@ def main():
     if a.checkpointing:
         model.lm.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
     model.lm.config.use_cache = False
+    init_source = None
+    if a.init_from:
+        # delta mode (PR #9, Radexito): start from an already trained adapter + pointer head instead of the base model, so a
+        # fine-tune on new data keeps what the released checkpoint knows. Compatibility is checked field by field BEFORE
+        # loading, because peft loads matching keys silently and a half-loaded adapter still trains and still reports a loss.
+        from peft import get_peft_model_state_dict, load_peft_weights, set_peft_model_state_dict
+        from .evaluate import resolve_run
+        from .suite import digest
+        src = resolve_run(a.init_from)
+        meta = torch.load(f"{src}/head.pt", map_location="cpu")
+        checks = [("base", meta.get("base"), a.base), ("base_revision", meta.get("base_revision"), revision), ("lora", int(meta.get("lora", 0)), a.lora),
+                  ("head_dim", int(meta.get("head_dim", 256)), a.head_dim), ("option_isolation", bool(meta.get("option_isolation", False)), bool(a.option_isolation)),
+                  ("special_embeddings", bool(meta.get("special_embeddings", False)), bool(a.special_embeddings))]
+        for field, theirs, ours in checks:
+            if theirs != ours and not (field == "base_revision" and (theirs is None or ours is None)):
+                raise ValueError(f"--init_from {src}: {field} is {theirs!r} there and {ours!r} here")
+        weights = load_peft_weights(src, device="cpu")
+        mine = set(get_peft_model_state_dict(model.lm))
+        unexpected, missing = sorted(set(weights) - mine), sorted(mine - set(weights))
+        if unexpected:
+            raise ValueError(f"--init_from {src} carries {len(unexpected)} adapter tensors this model does not have (e.g. {unexpected[:2]}); check --lora_targets / --lora against its adapter_config.json")
+        if missing:
+            raise ValueError(f"--init_from {src} does not cover {len(missing)} of this model's adapter tensors (e.g. {missing[:2]}); check --lora_targets")
+        set_peft_model_state_dict(model.lm, weights)
+        model.head.load_state_dict(meta["head"])
+        init_source = {"init_from": a.init_from, "resolved": str(src), "adapter_sha256": digest(Path(src) / "adapter_model.safetensors"), "head_sha256": digest(Path(src) / "head.pt")}
+        print(f"delta: warm start from {src}: {len(weights)} adapter tensors and the pointer head loaded", flush=True)
     print(f"device={dev} trainable params={sum(p.numel() for p in model.trainable_parameters())/1e6:.1f}M", flush=True)
 
     holdout = manifest["holdout_sources"] if manifest else [s for s in a.holdout.split(",") if s]
@@ -161,7 +191,7 @@ def main():
         reqs = reqs + extra
         print(f"mix: synthetic_repeat {a.synthetic_repeat} -> +{len(extra)} records", flush=True)
     suite_hash = digest(Path(a.suite) / "manifest.json") if manifest else None
-    write_json(out_dir / "training_config.json", {"args": vars(a), "suite_sha256": suite_hash, "base_revision": revision,
+    write_json(out_dir / "training_config.json", {"args": vars(a), "suite_sha256": suite_hash, "base_revision": revision, "init_source": init_source,
                                                 "ordinal_objective": "ranked_probability_score", "holdout": holdout})
     print(f"{len(reqs)} training requests (holdout={holdout}), questions by type "
           f"{dict(Counter(q['qtype'] for r in reqs for q in materialize(r)['questions']))}")
@@ -230,7 +260,7 @@ def main():
     model.lm.save_pretrained(a.out)
     torch.save({"head": model.head.state_dict(), "base": a.base, "base_revision": revision, "lora": a.lora, "head_dim": a.head_dim,
                 "option_isolation": bool(a.option_isolation), "special_embeddings": bool(a.special_embeddings),
-                "holdout": holdout, "args": vars(a), "suite_sha256": suite_hash}, f"{a.out}/head.pt")
+                "holdout": holdout, "args": vars(a), "suite_sha256": suite_hash, "init_source": init_source}, f"{a.out}/head.pt")
     tok.save_pretrained(a.out)
     write_json(out_dir / "training_metrics.json", {"wall_seconds": time.time() - t0, "records_seen": seen,
                "requested_records": a.epochs * len(reqs), "truncated_records": 0, "rejected_records": 0,

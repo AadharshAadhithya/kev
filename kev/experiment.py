@@ -41,9 +41,11 @@ CHOICES = {"dtype": ("fp32", "bf16"), "checkpointing": (0, 1), "option_isolation
 
 
 def validated_trial(value, manifest):
-    if not isinstance(value, dict) or set(value) - (DEFAULTS.keys() | CHOICES.keys() | {"base", "train_sources", "base_revision", "anchor", "anchor_sources"}):
+    if not isinstance(value, dict) or set(value) - (DEFAULTS.keys() | CHOICES.keys() | {"base", "train_sources", "base_revision", "anchor", "anchor_sources", "init_from"}):
         raise ValueError("trial may change only the allowlisted training parameters and base")
     result = {**DEFAULTS, **value}
+    if "init_from" in result and not re.fullmatch(r"(/runs/[\w./-]+|[\w-]+/[\w.-]+(@[\w.-]+)?)", str(result["init_from"])):
+        raise ValueError("init_from must be a checkpoint path on the runs volume or a Hub id (optionally @revision); the trainer records its adapter and head hashes in provenance")
     if result.get("base") not in manifest["base_revisions"]:
         # a base the frozen suite did not pin may still be used if the trial pins its own full commit sha (recorded in provenance)
         if not re.fullmatch(r"[0-9a-f]{40}", str(result.get("base_revision", ""))):

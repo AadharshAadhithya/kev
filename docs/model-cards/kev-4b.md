@@ -78,7 +78,7 @@ Seeds: three seeds on decision-v7: transfer 0.773 / **0.790** / 0.770, held-out 
 ## Known limits
 
 - Held-out policy reasoning (unseen rule compositions, date arithmetic with grace periods) is far from Jev.
-- Product-shaped questions with no training analogue are not guaranteed: on the TypeSafe docs example ("two charges on my card" → *Is there a billing problem?*) this checkpoint answers 0.22 while kev-0.6b answers 0.97 and picks the return reason (wrong size, 0.54) correctly. Lower drift from the base means fewer task-specific priors; measure on your own inputs.
+- Product-shaped questions with no training analogue are not guaranteed: on the TypeSafe docs example ("two charges on my card" → *Is there a billing problem?*) this checkpoint answers 0.48 (kev-8b 0.95, kev-0.6b 0.97) while picking the return reason correctly (wrong size 0.53; kev-8b 0.84; kev-0.6b prefers "none of the above" 0.58). Measure on your own inputs.
 - Out-of-domain probabilities are usable but not calibrated (raw ECE 0.096); temperature fitted in-domain does not transfer.
 - 4B fp32 needs ~16 GB; on a 32 GB Mac use `KEV_DTYPE=bf16`. Latency on an H100 is ~45 ms per packed request; on an M5 several hundred ms.
 

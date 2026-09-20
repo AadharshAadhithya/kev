@@ -10,7 +10,7 @@ Evidence: [ablation-v2 ledger](runs/ablation-v2/results.jsonl), [Qwen3 seed 0](r
 
 ## Evidence and corrections
 
-- Original Kev versus Jev on familiar sources: 79.7% versus 81.1% micro accuracy; macro difference −1.8 points, 95% CI [−5.5, +1.7]. An interval including zero is not evidence of equivalence. [Comparison](runs/kev-vs-jev-v1.json), [figure](docs/kev-vs-jev.png).
+- Original Kev versus Jev on familiar sources: 79.7% versus 81.1% micro accuracy; macro difference −1.8 points, 95% CI [−5.5, +1.7]. An interval including zero is not evidence of equivalence. [Comparison](runs/kev-vs-jev-v1.json), [figure](docs/kev-benchmark.png).
 - Original Kev versus Jev on transfer-v1: 63.3% versus 82.3%, macro difference −19.1 points, CI [−23.1, −15.0]. The overlap check covered 1,360 decision-v1 training/calibration states, **not every example used to train the released checkpoint**. Public pretraining overlap is unknown for both models. [Comparison](runs/kev-vs-jev-transfer-v1.json), [manifest](evals/transfer-v1/manifest.json).
 - Lower aggregate ECE on transfer-v1 did not establish generally better calibration. Qwen3 trial 6 gets 50% authorization accuracy with 99.6% mean confidence on transfer-v2. Its familiar-source ECE falls from .073 to .026 after fitting temperature on calibration; this does not establish transfer calibration. [Result](runs/ablation-v2/06-trial-6/result.json).
 - Jev's zero observed argmax flips do **not** prove architectural invariance. Its probabilities move under permutation. [Jev transfer-v1 report](runs/transfer-jev-v1/report.json).

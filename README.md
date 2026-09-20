@@ -247,6 +247,17 @@ uv run python -m kev.train --suite evals/v7/decision-v7 --base Qwen/Qwen3.5-4B-B
     --epochs 2 --lr 5e-5 --batch 4 --accum 2 --dtype bf16 --checkpointing 1 --p_none_pair 0.25 --device cuda --out runs/kev-4b
 ```
 
+### Fine-tuning on your own data
+
+Start from a released checkpoint instead of the base model, or the fine-tune will erase what Kev already knows. With `--init_from`, the LoRA and pointer head are loaded before training and checked for compatibility (base, revision, rank, head size, adapter coverage):
+
+```bash
+uv run python -m kev.train --suite path/to/your-suite --base Qwen/Qwen3.5-4B-Base --init_from jaredpalmer/kev-4b \
+    --epochs 2 --lr 2e-5 --batch 1 --accum 8 --dtype bf16 --checkpointing 1 --device cuda --out runs/mine
+```
+
+Measured by the contributor who added this ([#9](https://github.com/jaredpalmer/kev/pull/9), 836 records of tool-call decisions in Polish and English, Kev-0.6B): training from the base scored 0.331 on Kev's own evaluation suite against 0.835 for the released model; warm-starting kept 0.825 there and reached 0.875 on the new domain (0.630 from the base). Use a lower learning rate than the from-scratch recipe. `--batch 1 --accum 8` in bf16 fits a 4 GB GPU for the 0.8B model. The source checkpoint's hashes are recorded in `training_config.json` and `head.pt`.
+
 Use `uv run python -m kev.train --help` for all training options. The released models don't use the optional `--perm_kl` or `--ord_w` losses. The [model cards](docs/model-cards/) have the training settings and dataset lists; [PLAN.md](PLAN.md) records what was tried and what helped.
 
 On a Mac, run one training job at a time. Two jobs on the same Apple GPU are much slower. Use Modal for longer runs.
@@ -321,7 +332,7 @@ The API tests run TypeSafe's example requests and the official SDK against your 
 
 - Jared Palmer ([@jaredpalmer](https://github.com/jaredpalmer))
 
-Built with [Devin](https://devin.ai). Thanks to [Archer Hume](https://archerhume.com/posts/jevs-architecture-unmasked) for the architecture write-up, [TypeSafe](https://docs.typesafe.ai/api) for the API design, [Qwen](https://huggingface.co/Qwen/Qwen3.5-9B-Base) for the base models, and [3x3xX3N0N](https://github.com/jaredpalmer/kev/issues/8) for showing where the date-arithmetic failure really is.
+Built with [Devin](https://devin.ai). Thanks to [Archer Hume](https://archerhume.com/posts/jevs-architecture-unmasked) for the architecture write-up, [TypeSafe](https://docs.typesafe.ai/api) for the API design, [Qwen](https://huggingface.co/Qwen/Qwen3.5-9B-Base) for the base models, [3x3xX3N0N](https://github.com/jaredpalmer/kev/issues/8) for showing where the date-arithmetic failure really is, and [Radexito](https://github.com/jaredpalmer/kev/pull/9) for `--init_from`.
 
 Related work: [Hydragen](https://arxiv.org/abs/2402.05099), [DeFT](https://arxiv.org/abs/2404.00242), [FIRST](https://arxiv.org/abs/2406.15657).
 

@@ -128,6 +128,18 @@ Open [localhost:3001](http://localhost:3001). Load a preset, edit the state and 
 
 ![kev chess: every move is a Choice question](docs/chess.png)
 
+### Serving performance
+
+`kev.serve` folds the LoRA into the base weights in fp32 before any cast (exact; in bf16 it is *closer* to the fp32 numbers than running the adapter unmerged), uses SDPA on Apple GPUs, pads to 64-token buckets on MPS (per-shape kernel warm-up), and keeps a small LRU of **state-prefix KV caches** so a repeated state only pays for its question branches — exact, because under the block-causal mask the state's activations do not depend on the questions. kev-4b, bf16, M5, five 3-way questions, median model time:
+
+| | before | now |
+|---|---|---|
+| short state (232 tokens), new text every call | 442 ms | **296 ms** |
+| long state (772 tokens), new text every call | 1290 ms | **861 ms** |
+| long state, repeated (agent loops, permute/separate probes) | 1214 ms | **242 ms** |
+
+Every change is parity-tested against the exact fp32 path (`tests/test_v3.py`); on 24 out-of-domain records the served bf16 probabilities are within 0.017 of fp32 with zero argmax flips. Knobs: `KEV_MERGE=0`, `KEV_ATTN=eager`, `KEV_SHAPE_BUCKET=1`, `KEV_PREFIX_CACHE=0` restore the old behaviour. On an H100 the same request is ~40 ms.
+
 ## API
 
 ### `POST /v1/systemone`
@@ -343,7 +355,7 @@ The mechanism tests below are from `kev.evaluate` on `kev-0.5b`; the 4B/8B check
 - **Calibration is in-distribution.** Temperature fitted in-domain does not transfer; out-of-domain probabilities are usable but not calibrated (ECE ~0.1).
 - **Product-shaped questions** with no training analogue are not guaranteed; the low-drift 4B/8B recipes carry fewer task priors than the 0.6B and can answer differently on the same input. Measure on your own data.
 - **Context.** Trained at 384 state / 1,024 branch tokens; serving caps at 8,192. Jev allows ~32k per branch.
-- **Serving.** One request at a time, no cross-request KV cache, dense per-sample mask. 8B needs bf16 (`KEV_DTYPE=bf16`) on a 32 GB Mac.
+- **Serving.** One request at a time; the state prefix is cached across requests (`KEV_PREFIX_CACHE`, states ≥ 384 tokens) but there is no cross-request batching. 8B needs bf16 (`KEV_DTYPE=bf16`) on a 32 GB Mac.
 - **Score confidence** uses a stand-in formula. TypeSafe has not published theirs.
 
 ## Development

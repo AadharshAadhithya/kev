@@ -140,7 +140,7 @@ class DecisionModel(nn.Module):
     def hidden(self, enc):
         return self.hidden_batch([enc])[0, : len(enc["ids"])]
 
-    SHAPE_BUCKET = 64   # on MPS every new sequence length pays a per-shape kernel warm-up (~150 ms measured); pad to buckets
+    SHAPE_BUCKET = int(__import__("os").environ.get("KEV_SHAPE_BUCKET", "64"))   # MPS: pad the sequence to a multiple of this (per-shape kernel warm-up); 1 disables
 
     def hidden_batch(self, encs):
         """[B, L_max, d] hidden states for a right-padded batch of encoded records. Pads are masked keys and sit after every

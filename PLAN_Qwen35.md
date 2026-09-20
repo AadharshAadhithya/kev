@@ -68,7 +68,7 @@ Kev's forward pass today packs the state and every question into one sequence an
 Replace "one row, masked" with "state once, branches as separate rows continuing from the state":
 
 1. **State pass.** Run the state tokens (`<state> …`, positions `0..Ls-1`) once with `use_cache=True`. The cache holds the KV of the 8 attention layers and, for the 24 DeltaNet layers, the recurrent state and the conv state (`cache_params.layers[i].recurrent_states`, `conv_states` in the transformers implementation).
-2. **Branch pass.** Build a batch of `Q` rows, one per question: `<q> instr <opt> o </opt> … <decide>`, right-padded, positions continuing from `Ls` exactly as [`encode`](kev/model.py#L30) already assigns them. Expand the cache along the batch dimension (`DynamicCache.batch_repeat_interleave(Q)` exists in transformers 5's `cache_utils`; the DeltaNet states are per-layer tensors with a batch dimension and expand the same way) and run the rows. The chunked prefill path takes `initial_state=recurrent_state` when a cache with previous state is present (`torch_chunk_gated_delta_rule(..., initial_state=...)`), so a multi-token continuation from a cached state is supported by the library, not something we would hack in.
+2. **Branch pass.** Build a batch of `Q` rows, one per question: `<q> instr <opt> o </opt> … <decide>`, right-padded, positions continuing from `Ls` exactly as [`encode`](kev/model.py#L30) already assigns them. Replicate the cache along the batch dimension and run the rows. The chunked prefill path takes `initial_state=recurrent_state` when a cache with previous state is present (`torch_chunk_gated_delta_rule(..., initial_state=...)`), so a multi-token continuation from a cached state is supported by the library, not something we would hack in. **This exact pattern is already running on Qwen3.5-4B in the wild:** SemIf's [`shared.py`](https://github.com/TheoLeeCJ/SemIf/blob/master/src/semif_phase1/shared.py) prefills the state once, replicates the cache with `cache.reorder_cache(torch.zeros(Q))`, and scores right-padded suffixes in one batch (positions continuing from the prefix length, `logits_to_keep` at each row's last real token); its [MLX backend](https://github.com/TheoLeeCJ/SemIf/blob/master/src/semif_phase1/mlx_backend.py) does the same with MLX-LM's prompt cache (`entry.merge([entry] * Q)`, `prepare(lengths, right_padding)`). We adopt the `reorder_cache` idiom rather than `batch_repeat_interleave`, since it is what has been exercised on this architecture. They also quantified the cost: bf16 reuse changed 5–6 of 777 argmaxes versus fresh scoring ([results](https://github.com/TheoLeeCJ/SemIf/blob/master/docs/RESULTS.md)), the same magnitude as the bf16 noise we measured on our own prefix cache, so the fp32 parity tests stay.
 3. **Readout.** Gather `</opt>` and `<decide>` hidden states per row and apply the unchanged [`PointerHead`](kev/model.py) — [`_readout`](kev/model.py#L162) already takes per-question index lists.
 
 Properties: isolation is exact **by construction** (rows are independent tensors; no mask to get wrong), on any architecture; the state is computed once, as today; FLOPs equal the packed form (the packed sequence also processes every branch token once); the serving prefix cache we shipped ([`prefix`](kev/model.py#L183), [`probs_with_prefix`](kev/model.py#L206)) is literally step 1 + step 2 and becomes the *only* path rather than an optimization. What we lose: the single-row form and the `option_isolation` flag (which cost −5.8 pp at 4B anyway, [PLAN.md](PLAN.md#overnight-autoresearch-branch-researchovernight-1-pr-3)).
@@ -93,10 +93,13 @@ Properties: isolation is exact **by construction** (rows are independent tensors
 
 Each phase has a stop condition. Costs are Modal H100 at the rates we have been paying (Kev-4B trial ≈ $3.50, Kev-8B ≈ $6; [PLAN.md, "Compute and spending"](PLAN.md#5-compute-and-spending)).
 
-### Phase 0 — MMLU-Pro as an eval-only source (independent of the port; ~2 h, ~$1)
+### Phase 0 — MMLU-Pro, a buried-state variant, and cross-benchmarks with SemIf (independent of the port; ~4 h, ~$3)
 - Add `mmlu_pro` to [`kev/data.py`](kev/data.py) as an **eval-only** source ([TIGER-Lab/MMLU-Pro](https://huggingface.co/datasets/TIGER-Lab/MMLU-Pro), [Wang et al., 2024](https://arxiv.org/abs/2406.01574); 10 options, `answer_index`), rendered as a Choice with neutral keys like the other MCQ converters. Pin the dataset revision (`b189ec765a…`).
 - Freeze `transfer-v5` = transfer-v4 items + 200 MMLU-Pro items (new version; v4 numbers stay valid, and v5 minus the new source equals v4 byte-for-byte for comparability).
 - Score Jev, the untrained bases, and Kev-4B/8B on it. Expectation, from openjev's report on the same benchmark: Jev ~0.83, untrained one-token readouts ~0.6, Kev well below Jev — the honest number for a one-pass model on a benchmark designed for chain-of-thought. It replaces the saturated 4-way MMLU in the knowledge column of the README.
+- Add an eval-only **buried-state variant** to `transfer-v5`: the same record with the state embedded in unrelated background text (SemIf's "irrelevant context" perturbation and localjev's 2,048-word distraction condition both found this is where small models fall over; we train at ≤ 384 state tokens and have never measured it).
+- **SemIf-style untrained baseline on our suite**: Qwen3.5-4B *instruct* (their pinned revision `851bf6e806efd8d0a36b00ddf55e13ccb7b8cd0a`) with their exact prompt ([`core.direct_messages`](https://github.com/TheoLeeCJ/SemIf/blob/master/src/semif_phase1/core.py): system instruction + JSON `{evidence, criterion, options}` through the chat template, letter logits) on `transfer-v4`, alongside our base-model probe row. Our probe uses the *base* model and a plain prompt; theirs may be the stronger untrained readout and is the one people will compare against.
+- **Kev on SemIf's fixtures**: convert their committed [`authored144.jsonl`](https://github.com/TheoLeeCJ/SemIf/blob/master/benchmarks/data/authored144.jsonl) and [`perturbations108.jsonl`](https://github.com/TheoLeeCJ/SemIf/blob/master/benchmarks/data/perturbations108.jsonl) (three families: evidence interpretation, rule application, candidate selection; 2–3 options with ids and descriptions) into System One requests and score Kev-4B/8B with the labels they ship. Their reported direct-logit numbers are 0.813 balanced accuracy on the 144 and 0.723 on the 36 perturbation bases. Also run **live Jev** on the 144 rows (cents) — their Jev column is agreement with published outputs on a different subset, not a live read.
 
 ### Phase 1 — transformers 5 branch and row-batched forward (½–1 day, ~$2)
 - Branch `qwen35`. Upgrade the lock to transformers 5.x / peft ≥ 0.18; run the full test suite and the bf16 re-score of Kev-4B; fix what 5.x moved.
@@ -114,23 +117,33 @@ Same data, same recipe, new base. Nothing else changes, so any difference is the
 ### Phase 3 — promotion (only if Phase 2 passes; ~½ day, ~$5)
 - One locked-test read for each winning size ([`modal_app.py::locked_test`](modal_app.py)), gated if the pair screen passes on both seeds.
 - Cards for `kev-4b`/`kev-9b` on Qwen3.5 (naming: the Hub repo is by size, so `jaredpalmer/kev-9b`; `kev-8b` stays as is), README table and figures regenerated from result files ([`scripts/plot_family.py`](scripts/plot_family.py), [`scripts/plot_tweet.py`](scripts/plot_tweet.py)), the "untrained base" rows switched to Qwen3.5.
-- Serving: the row-batched path is the prefix-cache path; re-run the serving benchmark in the README's "Serving performance" section on CUDA, and on MPS with the fallback kernel so the card states the real Mac latency.
+- Serving: the row-batched path is the prefix-cache path; re-run the serving benchmark in the README's "Serving performance" section on CUDA.
+- **Mac serving through MLX-LM**, promoted from "deferred" on SemIf's evidence that MLX-LM runs Qwen3.5 with prompt-cache replication today ([docs/MLX.md](https://github.com/TheoLeeCJ/SemIf/blob/master/docs/MLX.md): MLX 0.32.2, MLX-LM pinned past the Qwen recurrent q/k-norm fix, vision weights stripped by the sanitizer, 4/8-bit in memory). Kev's additions are small: load the fp32-merged LoRA weights (we already merge at load) into the MLX-LM Qwen3.5 text model, take hidden states from the inner model instead of `lm_head` logits, and apply the pointer head in MLX. Gate with the same parity tests against the PyTorch fp32 path. Measure the torch fallback first (Phase 1); if it is within ~2× of today's MPS latency, MLX waits.
 
 ### Deferred, deliberately
 - Qwen3.5-35B-A3B-Base: 70 GB in bf16, MoE, serving footprint out of the laptop story; only after the 9B result.
-- MLX serving backend for the fallback problem on Mac (see the PR #6 discussion): separate project.
+- A browser/WebGPU path (SemIf's distribution advantage, via wllama/GGUF). Kev's pointer head and per-token positions do not fit llama.cpp as-is; with the row-batched design a GGUF export of the merged model plus a small JS head is conceivable, but it is its own project.
 - Post-trained Qwen3.6/3.8 as bases: changes the recipe and removes the untrained-base comparison; revisit when Base weights exist.
 
-## 6. Decision criteria, stated in advance
+## 6. Competitive context: SemIf
+
+[SemIf](https://github.com/TheoLeeCJ/SemIf) (formerly OpenJev; 2.3k stars) is an **untrained** readout: frozen Qwen3.5-4B instruct, chat-template JSON prompt, probabilities from letter logits, with prefix-reuse and parallel-suffix modes and a WebGPU browser demo. Its own results page states the probabilities are "uncalibrated as decision confidence" and that "the next justified phase is targeted training for decision semantics and calibration" — i.e. Kev. What it means for us:
+
+- **It validates the port design** (section 3) and hands us the MLX path (Phase 3). Its author solved the hybrid-cache replication problem on exactly our target base.
+- **It sharpens the claim Kev has to make.** Their headline is "3.8 pp behind Jev" on *agreement with Jev's published answers* over 102 curated public cases. On labelled frozen items, untrained Qwen3.5-4B scores 0.692 on our suite and Kev-4B 0.790: training the readout is worth about +10 pp at 4B, and it is what buys calibration (Brier, confident-error rate), which they do not measure. Once a Qwen3.5-based Kev-4B exists the comparison is apples to apples on the same base, which is the cleanest possible demonstration of what training adds.
+- **Their evaluation is thinner than ours** (144 authored rows, agreement rather than ground truth, no live Jev, no paired uncertainty). Phase 0 scores both ways on frozen items and runs live Jev on their rows; the neutral-ground position is worth more than winning any single cell.
+- **Their distribution is stronger than ours** (browser demo, "no waitlist"). Not something this plan addresses; noted in deferred work.
+
+## 7. Decision criteria, stated in advance
 
 Ship a Qwen3.5-based Kev-9B as the new top of the family **only if**, on the same 764 items: transfer accuracy ≥ Kev-8B's 0.796 with the paired CI excluding zero, `deadline` ≥ 0.75, MMLU and PAWS not below Kev-8B by more than seed noise (~1 pp), and Brier ≤ 0.34. Ship a Qwen3.5-based Kev-4B if it beats Kev-4B (0.790) by the same test. Otherwise the outcome is a documented negative result and the Qwen3 family remains the release. Locked test read once per candidate, as always.
 
-## 7. Budget and time
+## 8. Budget and time
 
 | phase | wall time | Modal |
 |---|---|---|
-| 0 MMLU-Pro | 2 h | ~$1 |
+| 0 MMLU-Pro, buried-state variant, SemIf cross-benchmarks | 4 h | ~$3 |
 | 1 transformers 5 + row forward + hybrid smoke | ½–1 day | ~$2 |
 | 2 controlled experiment | ~1 day | ~$25 |
-| 3 promotion | ½ day | ~$5 |
-| total | ~3 days | **~$35** of the remaining ~$240 |
+| 3 promotion (+ MLX serving if the torch fallback is slow) | ½–1 day | ~$5 |
+| total | ~3–4 days | **~$37** of the remaining ~$240 |

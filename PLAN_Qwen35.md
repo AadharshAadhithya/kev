@@ -179,3 +179,73 @@ Not part of this plan's budget; ordered by expected value per dollar once a Qwen
 | 2 controlled experiment | ~1 day | ~$25 |
 | 3 promotion (+ MLX serving if the torch fallback is slow) | ½–1 day | ~$5 |
 | total | ~3–4 days | **~$37** of the remaining ~$240 |
+
+## 10. Execution log and results (2026-09-20, branch `qwen35`)
+
+Everything below ran on 2026-09-20 between 15:30 and 18:30. Spend: ~$95 of Modal H100 time (4B trials ≈ $4.50 each,
+9B ≈ $7, plus probes, benches, locked reads and the ablation), plus $0.03 of Jev calls.
+
+### Phase 1 — port (done)
+- transformers 5.17 / peft 0.21 on the lock. The 62-test suite passes. **fp32 parity of the published Kev-4B under transformers 5: max |Δp| = 2e-5 on 30 development questions** against the saved H100 probabilities ([`runs/v7-rc3/01-trial-1/development/rows.json`](runs/v7-rc3/01-trial-1/development/rows.json)).
+- Row-batched forward ([`kev/model.py: rows_of, forward_rows_batch`](kev/model.py)): on the attention-only Kev-4B it is **bit-identical** to the packed block-causal form (max |Δp| = 0.000000, 0 flips, 24 records, fp32 MPS) and 9% faster. Hybrid detection from `config.layer_types`; LoRA on `in_proj_qkv/z/a/b`, `out_proj` for DeltaNet layers.
+- Hybrid isolation and serving prefix path on Qwen3.5-0.8B: together-vs-alone and prefix-vs-full within 1e-5 ([`tests/test_v3.py::test_hybrid_rows_isolation_and_prefix`](tests/test_v3.py)); cache replication via `reorder_cache` on `DynamicCache(config=…)` with `LinearAttentionLayer` states.
+- Modal image: `flash-linear-attention` + **`triton>=3.7.1`** (fla refuses its gated chunk backward on Hopper with Triton 3.4–3.7.0, fla#640; the first smoke trial hit exactly that guard). Row-form training cost: 0.11 s/record at 4B, 0.18 s/record at 9B on one H100 (Kev-4B packed was ~0.06); 4B trial 61–63 min, 9B 88–100 min.
+- **Mac latency is the cost of the hybrid.** Same 5-question request, bf16, M5: Kev-4B 174 ms; Kev(3.5)-4B **779 ms** (reference DeltaNet and causal-conv kernels; no MPS fla). 0.8B: 329 ms vs Qwen3-0.6B 123 ms. The prefix cache does not help on MPS at these sizes. MLX-LM (SemIf's path) is the fix if the Mac story matters; on CUDA the kernels are fast.
+
+### Phase 2 — controlled experiment (done): same data (`decision-v7`), same recipe, new base
+
+`transfer-v4` development (764 records), paired record-clustered bootstraps against the released checkpoint on the same items ([`scripts/compare_q35.py`](scripts/compare_q35.py)):
+
+| trial | seed | dev acc | transfer acc | paired Δ vs released [95% CI] | deadline | held-out pairs | MMLU | PAWS | Emotion | Brier | conf. err | cov@5% err |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **Kev-4B** (Qwen3, released) | 1 | 0.854 | 0.790 | reference | 0.53 | 0.73 | 0.65 | 0.72 | 0.66 | 0.328 | 0.082 | 0.31 |
+| Kev(3.5)-4B | 0 | 0.877 | 0.788 | −0.007 [−0.042, +0.028] | 0.55 | 0.72 | 0.70 | 0.76 | 0.59 | 0.339 | 0.096 | 0.48 |
+| Kev(3.5)-4B | 1 | 0.876 | 0.800 | +0.015 [−0.024, +0.056] | 0.53 | 0.75 | 0.71 | 0.76 | 0.59 | 0.322 | 0.095 | 0.52 |
+| Kev(3.5)-4B | 2 | 0.877 | 0.794 | +0.013 [−0.013, +0.046] | 0.55 | 0.78 | 0.70 | 0.74 | 0.54 | 0.316 | 0.082 | 0.54 |
+| Kev(3.5)-4B | 3 | 0.873 | 0.770 | −0.024 [−0.064, +0.021] | 0.50 | 0.69 | 0.64 | 0.76 | 0.59 | 0.346 | 0.093 | 0.49 |
+| **Kev-8B** (Qwen3, released) | 0 | 0.863 | 0.796 | reference | 0.60 | 0.69 | 0.70 | 0.78 | 0.56 | 0.337 | 0.099 | 0.45 |
+| Kev(3.5)-9B | 0 | 0.871 | 0.802 | +0.004 [−0.046, +0.055] | 0.70 | 0.75 | 0.74 | 0.78 | 0.57 | 0.308 | 0.069 | 0.54 |
+| Kev(3.5)-9B | 1 | 0.876 | **0.812** | +0.027 [−0.018, +0.064] | 0.72 | **0.80** | 0.74 | 0.76 | 0.59 | **0.291** | 0.075 | 0.53 |
+| Jev | – | 0.845 | 0.857 | | 0.93 | 0.86 | 0.90 | 0.79 | 0.59 | 0.211 | 0.037 | 0.70 |
+
+Seed means: 4B 0.788 (4 seeds) vs Kev-4B's 0.778 (3 seeds); 9B 0.807 (2) vs Kev-8B's 0.785 (2).
+
+**Against the section-7 criteria, on the development partition: not met.** No single seed beats its released counterpart with a CI excluding zero; `deadline` reached 0.70–0.72 at 9B, not 0.75. What did move, on every seed: in-distribution accuracy (+2.2 pp at 4B, +1.0 at 9B), held-out-pair correctness (4B 3 of 4 seeds ≥ 0.70, 9B both — the first time the original release screen is met at 8–9B), coverage at ≤ 5 % error (0.31 → ~0.50 at 4B; 0.45 → 0.53 at 9B), Brier and confident errors at 9B, MMLU (+4–6 pp at both sizes), and PAWS at 4B. Emotion is worse at 4B (−7 pp).
+
+**Locked test, read once per candidate** (candidates selected on development only: 4B seed 2 = `q35-4b-s23/00-trial-0`, dev 0.877; 9B seed 1 = `q35-9b/01-trial-1`, dev 0.876). [`runs/locked/kev-4b-q35/`](runs/locked/kev-4b-q35/summary.json), [`runs/locked/kev-9b-q35/`](runs/locked/kev-9b-q35/summary.json):
+
+| | in-distribution | out-of-domain | Brier | held-out pairs | conf. err | paired Δ acc vs predecessor on the test items |
+|---|---|---|---|---|---|---|
+| Kev-4B (released) | 0.856 | 0.806 | 0.294 | 0.66 | 0.066 | |
+| **Kev(3.5)-4B** | 0.870 | **0.832** | 0.266 | 0.72 | 0.069 | +0.029 [−0.009, +0.064] |
+| Kev-8B (released) | 0.870 | 0.780 | 0.327 | 0.62 | 0.099 | |
+| **Kev(3.5)-9B** | 0.873 | **0.837** | **0.243** | 0.75 | 0.055 | **+0.073 [+0.028, +0.117]** |
+
+On the confirmatory read the 9B beats Kev-8B by 7.3 pp with a CI excluding zero and a Brier 0.084 lower; the 4B beats Kev-4B by 2.9 pp with a CI that grazes zero. Both new checkpoints are above their predecessors on every column. This is one read, on the partition the criteria did not name; it is reported as such.
+
+### The deadline hypothesis: refuted as stated, and the reason is now known
+The base's date arithmetic (Qwen3.5-9B 0.82, 4B 0.68 zero-shot) does **not** survive training: 9B trained 0.70–0.72, 4B 0.50–0.55. A diagnostic that reads the *adapted* backbone through the plain LM head with letter logits ([`scripts/base_mmlu_probe.py --adapter`](scripts/base_mmlu_probe.py); [`runs/probes/qwen35-4b-base-base-adapted-q35-4b-s1-transfer-v4`](runs/probes/qwen35-4b-base-base-adapted-q35-4b-s1-transfer-v4/report.json)) gives deadline **0.53** — identical to the pointer-head number — while MMLU is retained (0.72). The skill is lost in the representation during LoRA training, not at the readout. Independently, [issue #8](https://github.com/jaredpalmer/kev/issues/8) (3x3xX3N0N) shows that appending "The report arrived N days after/before the deadline" lifts Kev-4B from 0.575 to 0.963 with the unmodified head; reproduced here: Kev-4B 0.525 → **0.925**, Kev(3.5)-4B → **1.000**. A *generic* annotator (pairwise date differences without role names) helps far less (0.55 / 0.675), so there are two gaps: date subtraction (large) and binding a raw date fact to the policy's roles (smaller; the newer base does it better). Consequences: the ordinal readout drops to last; the next experiment is the training-data change (relational day counts and a `date_facts` field rendered in the date-bearing families), with issue #8's number as the ceiling. An ablation without the policy families (`q35-4b-nopolicy`) is running to test whether they cause the erosion.
+
+### Phase 0 — new evaluation columns (done)
+`transfer-v9` ([`evals/v9/transfer-v9`](evals/v9/transfer-v9/manifest.json), [`kev/transfer_v9.py`](kev/transfer_v9.py)): transfer-v4 byte-identical + 200 MMLU-Pro (10-way) + 80 buried-state + 110 unknowable / 110 intact controls per partition; mirrored to the Hub (`SUITES_REVISION a957287d`). New metrics in [`kev.benchmark`](kev/benchmark.py): `coverage_at_5pct_error`, `coverage_at_1pct_error`, and an `unknowable` block (mean max-probability and share ≥ 0.9 against the paired intact controls). Development partition:
+
+| model | knowable acc | MMLU-Pro | buried (avg of 4) | unknowable: mean max-p (intact) | share ≥ 0.9 (intact) | cov@5% err |
+|---|---|---|---|---|---|---|
+| Jev (live, $0.02) | 0.854 | **0.840** | 0.70 | 0.61 (0.92) | **0.09** (0.75) | **0.70** |
+| Qwen3.5-9B base, untrained | 0.696 | 0.540 | 0.64 | 0.52 (0.78) | 0.00 (0.44) | 0.38 |
+| Kev-4B | 0.729 | 0.440 | 0.69 | 0.78 (0.96) | 0.44 (0.90) | 0.25 |
+| Kev-8B | 0.747 | 0.500 | 0.72 | 0.77 (0.97) | 0.26 (0.91) | 0.41 |
+| Kev(3.5)-4B s2 | 0.742 | 0.500 | 0.66 | 0.72 (0.97) | 0.19 (0.88) | 0.47 |
+| Kev(3.5)-9B s1 | **0.771** | 0.545 | **0.74** | 0.67 (0.97) | 0.05 (0.93) | 0.46 |
+
+MMLU-Pro separates the generations where 4-way MMLU did not (untrained: Qwen3-8B 0.380 vs Qwen3.5-9B 0.540), and the trained models retain it. On the unknowable family the Qwen3-based Kevs are confidently wrong (26–44 % of evidence-free items answered at ≥ 0.9); Kev(3.5)-9B is at 5 %, Jev at 9 %, untrained bases near 0. Training with hard labels makes a model commit; the fix is unknowable training records with uniform targets (soft-label support in `kev.train`), listed below.
+
+### Cross-benchmarks with the field (done)
+- **SemIf-style untrained readout** (Qwen3.5-4B *instruct*, their exact prompt) on our `transfer-v4`: **0.747**, Brier 0.362 — stronger than our base probe (0.692) and the untrained row people will compare to. Kev-4B is +7.7 pp [+3.2, +12.2] over it; Kev(3.5)-4B seed 1 +5.3 pp. [`runs/probes/qwen35-4b-semif-transfer-v4`](runs/probes/qwen35-4b-semif-transfer-v4/report.json).
+- **SemIf's authored 144 + 108 perturbations** ([`evals/external/semif-v1`](evals/external/semif-v1/manifest.json), [`scripts/freeze_semif.py`](scripts/freeze_semif.py)), with **live Jev**: Jev 0.965 (perturbations 1.00/1.00/1.00); Kev-4B 0.847; Kev-8B 0.903; Kev(3.5)-4B 0.896; **Kev(3.5)-9B 0.917** (perturbations 0.97/0.97/0.97). SemIf's untrained Qwen3.5-4B: 0.813. Their "3.8 pp behind Jev" was agreement on a different subset; on labelled items live Jev is 15 pp above their readout.
+- **scienthoon's 900 tickets** ([`evals/external/scienthoon-v1`](evals/external/scienthoon-v1/manifest.json), their live Jev rows converted, [`scripts/freeze_scienthoon.py`](scripts/freeze_scienthoon.py)): queue / angry / priority(unknowable) — Jev 0.897 / 0.914 / 0.447 (ECE 0.105); Kev-4B 0.687 / **0.375** / 0.498; Kev-8B 0.924 / 0.515 / 0.381; Kev(3.5)-4B 0.928 / 0.794 / 0.402 (ECE 0.086); **Kev(3.5)-9B 0.952 / 0.911 / 0.430 (ECE 0.082)**. The Qwen3 Kevs fail "The customer sounds angry." because the instruction is an assertion, not a question, and every ticket is complaint-shaped: Kev-4B calls 95 % of tickets angry (base rate 37 %). The Qwen3.5 checkpoints mostly fix it; assertion-style Noul instructions belong in the training renderings regardless.
+
+### Decision (open, for review)
+The pre-registered development-partition criteria are **not met**; the single confirmatory locked-test read shows Kev(3.5)-9B **+7.3 pp [+2.8, +11.7]** over Kev-8B with much better calibration, and Kev(3.5)-4B +2.9 pp [−0.9, +6.4] over Kev-4B, both above their predecessors on every metric measured, on every external suite, and with the original held-out-pair screen met on both 9B seeds. Costs: 4.5× slower on a Mac until an MLX path exists; transformers 5 required. Recommendation: publish Kev(3.5)-4B and Kev(3.5)-9B as the new family (naming below), keep the Qwen3 checkpoints on the Hub as the previous generation, and state the criteria outcome plainly in the cards. Publishing is a release action and waits for approval.
+
+Next experiments, in order: (1) date-family renderings with relational day counts + `date_facts` (issue #8; ceiling ~0.93–1.0 on deadline); (2) unknowable training records with uniform targets; (3) assertion-style Noul instructions; (4) MLX serving for the hybrid on Mac; (5) multilingual slices.

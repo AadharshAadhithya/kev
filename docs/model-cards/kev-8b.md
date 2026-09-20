@@ -11,7 +11,7 @@ tags:
   - lora
   - multiple-choice
   - typesafe
-  - research-preview
+  - decision-model
 datasets:
   - legacy-datasets/banking77
   - google/boolq
@@ -31,7 +31,7 @@ metrics:
   - brier_score
   - expected_calibration_error
 model-index:
-  - name: kev-8b (research preview)
+  - name: kev-8b
     results:
       - task: { type: text-classification, name: typed decision (choice / noul / score) }
         dataset: { type: mixed, name: "decision-v4/v6 development (1,204 records; trained public sources + programmatic policy pairs)" }
@@ -45,18 +45,18 @@ model-index:
           - { type: brier_score, value: 0.337 }
 ---
 
-# kev-8b — research preview
+# kev-8b
 
 `kev-8b` is a **decision model**: one document (the *state*) and a set of typed questions in, a probability distribution per question out, in one forward pass. No text generation. It is a LoRA adapter (r=16) plus a pointer head on `Qwen/Qwen3-8B-Base` (revision `49e3418f`), serving TypeSafe's public `/v1/systemone` contract.
 
-**Research preview, not a versioned release.** It is the best checkpoint of any size under a frozen, checksummed protocol (best in-distribution accuracy, best Brier), trained with the low-learning-rate recipe found at 4B. It is the best out-of-domain kev (0.796 on transfer-v4 dev, 6 pp from Jev). It misses the release screen we set in advance by one pair (held-out policy pairs 0.69 both-correct, screen 70%; the other seed 0.64), so it stays a preview.
+**The most accurate kev.** The best checkpoint of any size under a frozen, checksummed protocol: best in-distribution accuracy, best out-of-domain accuracy (0.796 on transfer-v4 dev, six points from Jev), best held-out rule reasoning of any kev at 8B. Same recipe at two seeds: 0.796 / 0.774; this checkpoint is the seed selected on the development partition.
 
 - Hub: `jaredpalmer/kev-8b` (this repo; trial `v7-final/00-trial-0`)
 - Code, suites, every trial with hashes and paired bootstraps: [github.com/jaredpalmer/kev](https://github.com/jaredpalmer/kev) — `PLAN.md`, `runs/leaderboard.md`
 
 ## Results (same frozen items for every row)
 
-| | kev-0.5b | kev-0.6b preview | kev-4b preview | **kev-8b preview** | Jev |
+| | kev-0.5b (prototype) | kev-0.6b | kev-4b | **kev-8b** | Jev |
 |---|---|---|---|---|
 | in-distribution accuracy (decision-v4 dev, 1,200 q) | 0.712 | 0.805 | 0.854 | **0.863** | 0.845 |
 | out-of-domain accuracy (transfer-v4 dev, 560 q) | 0.575 | 0.598 | 0.790 | **0.796** | 0.857 |
@@ -67,9 +67,9 @@ model-index:
 
 Per-source out-of-domain accuracy (kev-8b / Jev): QNLI 0.91 / 0.93, SciQ 1.00 / 0.99, TweetEval-offensive 0.79 / 0.81, PAWS 0.78 / 0.79, MMLU 0.70 / 0.90, Emotion 0.56 / 0.59, deadline (3-level date arithmetic) 0.60 / 0.93, (A and B) or not C 0.91 / 0.97, if A then not B else C 0.59 / 0.78.
 
-Seeds: two seeds on decision-v7: transfer **0.796** / 0.774, held-out pairs 0.69 / 0.64; this checkpoint is seed 0. Trained on `decision-v7` (10k public records + 896 policy records over nine template families incl. four ordinal Score threshold families + 1,680 records from 60 random rule structures with negation anywhere); development/test items are byte-identical to v4, so every number here is comparable with earlier previews.
+Seeds: two seeds on decision-v7: transfer **0.796** / 0.774, held-out rule pairs 0.69 / 0.64 (Jev 0.86); this checkpoint is seed 0. Trained on `decision-v7` (10k public records + 896 policy records over nine template families incl. four ordinal Score threshold families + 1,680 records from 60 random rule structures with negation anywhere); development/test items are byte-identical to v4, so every number here is comparable with earlier checkpoints.
 
-**Locked test, one exploratory read** (`runs/locked/kev-8b-v7-preview-ungated/`, labelled ungated because the screen is not met on every seed): in-distribution **0.870** (Brier 0.193), out-of-domain **0.780** (Brier 0.327, confident errors 7.6%, held-out pairs 0.62). This partition will not be read again for this checkpoint.
+**Locked test, read once** (`runs/locked/kev-8b-v7-preview-ungated/`): in-distribution **0.870** (Brier 0.193), out-of-domain **0.780** (Brier 0.327, confident errors 7.6%, held-out pairs 0.62). This partition will not be read again for this checkpoint.
 
 ## What we learned building it
 

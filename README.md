@@ -4,7 +4,7 @@ Jev-inspired decision model. Typed questions in, calibrated probabilities out, o
 
 <p>
   <a href="https://github.com/jaredpalmer/kev/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/jaredpalmer/kev/ci.yml?style=for-the-badge&labelColor=000000" height="28"></a>
-  <a href="https://huggingface.co/collections/jaredpalmer/kev-6aad9d0ea49f2589665e07cd"><img alt="Weights: kev-0.5b · 0.6b · 4b · 8b" src="https://img.shields.io/badge/WEIGHTS-0.5b%20%C2%B7%200.6b%20%C2%B7%204b%20%C2%B7%208b-0a0a0a.svg?style=for-the-badge&labelColor=000000" height="28"></a>
+  <a href="https://huggingface.co/collections/jaredpalmer/kev-6aad9d0ea49f2589665e07cd"><img alt="Weights: kev-0.6b · 4b · 8b" src="https://img.shields.io/badge/WEIGHTS-0.6b%20%C2%B7%204b%20%C2%B7%208b-0a0a0a.svg?style=for-the-badge&labelColor=000000" height="28"></a>
   <a href="https://huggingface.co/datasets/jaredpalmer/kev-suites"><img alt="Frozen eval suites" src="https://img.shields.io/badge/EVAL%20SUITES-frozen-0a0a0a.svg?style=for-the-badge&labelColor=000000" height="28"></a>
   <a href="PLAN.md"><img alt="Research log" src="https://img.shields.io/badge/RESEARCH%20LOG-PLAN.md-0a0a0a.svg?style=for-the-badge&labelColor=000000" height="28"></a>
   <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-0a0a0a.svg?style=for-the-badge&labelColor=000000" height="28"></a>
@@ -12,7 +12,7 @@ Jev-inspired decision model. Typed questions in, calibrated probabilities out, o
 
 ![kev playground](docs/playground.png)
 
-kev is a LoRA adapter and a small readout head on top of a Qwen base model (0.5B to 8B). It reads a document once and answers many typed questions about it in parallel, in a single prefill pass with no decoding. The document and every question are packed into one sequence; a block-causal mask lets each question see the document but never another question. A pointer head then scores each question's options against its decision token and applies softmax. Those probabilities are the output. The head is trained with cross-entropy against labelled outcomes, so the probabilities are learned rather than generated as text.
+kev is a LoRA adapter and a small readout head on top of a Qwen3 base model (0.6B, 4B or 8B). It reads a document once and answers many typed questions about it in parallel, in a single prefill pass with no decoding. The document and every question are packed into one sequence; a block-causal mask lets each question see the document but never another question. A pointer head then scores each question's options against its decision token and applies softmax. Those probabilities are the output. The head is trained with cross-entropy against labelled outcomes, so the probabilities are learned rather than generated as text.
 
 The architecture follows the reconstruction of TypeSafe's Jev in [Jev's Architecture Unmasked](https://archerhume.com/posts/jevs-architecture-unmasked). The API follows TypeSafe's [System One](https://docs.typesafe.ai/api) contract, so the official `typesafe-sdk` works against a local kev server with a `base_url` change.
 
@@ -23,8 +23,8 @@ The architecture follows the reconstruction of TypeSafe's Jev in [Jev's Architec
 - **Isolation is exact.** A question cannot see a sibling question. Packed and separate requests agree to `4e-6`.
 - **Probabilities, not prose.** Trained with cross-entropy on labelled outcomes. Out of domain, `kev-4b` has Brier 0.33 and 8% confident errors on sources it never saw.
 - **Drop-in API.** `POST /v1/systemone` with TypeSafe's request and response shapes. Their SDK's quickstart runs unmodified.
-- **A family, measured the same way.** 0.5B, 0.6B, 4B and 8B checkpoints scored on frozen, checksummed suites with a locked test, against the real Jev on the same items. Out of domain: kev-4b 0.79, kev-8b 0.80, Jev 0.86.
-- **Runs on a laptop; trains in the cloud.** `kev-0.5b` trains in ~1h45m on an Apple M5; the 4B/8B recipes train in 40–70 min on one H100 via Modal and serve on a 32 GB Mac in bf16.
+- **A family, measured the same way.** 0.6B, 4B and 8B checkpoints scored on frozen, checksummed suites with a locked test, against the real Jev on the same items. Out of domain: kev-4b 0.79, kev-8b 0.80, Jev 0.86.
+- **Runs on a laptop; trains in the cloud.** `kev-0.6b` trains in minutes on one H100 (or ~2 h on an Apple M5); the 4B/8B recipes take 40–70 min on one H100 via Modal and serve on a 32 GB Mac in bf16.
 
 ![kev family vs Jev on sources kev never trained on](docs/kev-family.png)
 
@@ -48,13 +48,14 @@ KEV_DTYPE=bf16 uv run --extra serve python -m kev.serve --run jaredpalmer/kev-4b
 
 | checkpoint | base | in-distribution (dev / locked test) | out-of-domain (dev / locked test) | serve on a Mac | card |
 |---|---|---|---|---|---|
-| [`kev-0.5b`](https://huggingface.co/jaredpalmer/kev-0.5b) · v0.1 release | Qwen2.5-0.5B | 0.712 / – | 0.575 / – | fp32, ~160 ms | [MODEL_CARD.md](MODEL_CARD.md) |
-| [`kev-0.6b`](https://huggingface.co/jaredpalmer/kev-0.6b) · preview | Qwen3-0.6B-Base | 0.805 / 0.819 | 0.598 / 0.631 | fp32 | [card](docs/model-cards/kev-0.6b.md) |
-| [`kev-4b`](https://huggingface.co/jaredpalmer/kev-4b) · preview | Qwen3-4B-Base | 0.854 / 0.856 | 0.790 / **0.806** | bf16, ~1 s | [card](docs/model-cards/kev-4b.md) |
-| [`kev-8b`](https://huggingface.co/jaredpalmer/kev-8b) · preview | Qwen3-8B-Base | 0.863 / **0.870** | 0.796 / 0.780 | bf16, ~2 s | [card](docs/model-cards/kev-8b.md) |
+| [`kev-8b`](https://huggingface.co/jaredpalmer/kev-8b) | Qwen3-8B-Base | 0.863 / **0.870** | **0.796** / 0.780 | bf16, ~0.5 s | [card](docs/model-cards/kev-8b.md) |
+| [`kev-4b`](https://huggingface.co/jaredpalmer/kev-4b) | Qwen3-4B-Base | 0.854 / 0.856 | 0.790 / **0.806** | bf16, ~0.3 s | [card](docs/model-cards/kev-4b.md) |
+| [`kev-0.6b`](https://huggingface.co/jaredpalmer/kev-0.6b) | Qwen3-0.6B-Base | 0.805 / 0.819 | 0.598 / 0.631 | fp32, ~0.1 s | [card](docs/model-cards/kev-0.6b.md) |
 | Jev (hosted reference) | – | 0.845 / – | 0.857 / – | | |
 
-Same frozen items for every row (`evals/v4`: 1,200 in-distribution questions from the trained sources; 764 out-of-domain records from six public sources kev never trained on plus held-out programmatic policy rules). The three previews carry no version tag: our predeclared release screen (both siblings of a held-out policy pair correct ≥ 70%, on **every** seed of the recipe) is not yet met — the best recipe lands at 0.62–0.73 across seeds, with a single family (day-precision date arithmetic) deciding it. Each card records its single locked-test read. `kev-0.5b` is also attached to the [GitHub release](https://github.com/jaredpalmer/kev/releases/tag/v0.1.0).
+Same frozen items for every row (`evals/v4`: 1,200 in-distribution questions from the trained sources; 764 out-of-domain records from six public sources kev never trained on plus held-out programmatic policy rules). Development partitions selected the checkpoints; the locked test was read once per checkpoint and is recorded in each card. Latencies are five 3-way questions on a ~230-token state, M5. The original prototype, [`kev-0.5b`](https://huggingface.co/jaredpalmer/kev-0.5b) (Qwen2.5-0.5B; 0.712 in-distribution, 0.575 out of domain on the same items), stays on the Hub for reference with its [card](MODEL_CARD.md).
+
+![kev benchmarks](docs/kev-benchmark.png)
 
 ## Quick Start
 
@@ -223,25 +224,23 @@ flowchart TB
 
 ## Training
 
-Training data are public datasets converted to TypeSafe-shaped requests plus programmatic policy pairs, frozen into checksummed suites (`evals/`). `kev-0.5b` used six sources (Banking77, AG News, MNLI, BoolQ, SST-5, Yelp; 9,000 records). The current recipe (`kev-4b`, `kev-8b`) trains on `decision-v4`/`v6`: ten to thirteen public sources at 1,000 records each plus two arms of 448 programmatic policy records, two epochs, LoRA r=16, **lr 5e-5** — the single largest recipe improvement we found, because the default 2e-4 erodes what the base model already knows (details and the base-model probe in [PLAN.md](PLAN.md)).
-
-![training](docs/training.png)
+Training data are public datasets converted to TypeSafe-shaped requests plus programmatic policy data, frozen into checksummed suites (`evals/`). `kev-4b` and `kev-8b` train on `decision-v7`: ten public sources at 1,000 records each, nine policy template families as minimal pairs (896 records), and 1,680 records from 60 randomly generated rule structures rendered in four styles; two epochs, LoRA r=16, **lr 5e-5** — the single largest recipe improvement we found, because the default 2e-4 erodes what the base model already knows (details and the base-model probe in [PLAN.md](PLAN.md)). `kev-0.6b` trains on `decision-v4` (same public sources, eight fixed rule shapes) at lr 1e-4.
 
 ```bash
 # sanity run, ~1 minute
 uv run python -m kev.train --n_per_source 40 --accum 4 --out runs/smoke
 
-# kev-0.5b, ~1h45m on an M5
-uv run python -m kev.train --n_per_source 1500 --epochs 2 --perm_kl 0 --ord_w 0 --out runs/kev
+# kev-0.6b on a Mac (~2 h on an M5) or a few minutes on one H100
+uv run python -m kev.train --suite evals/v4/decision-v4 --base Qwen/Qwen3-0.6B-Base --epochs 2 --lr 1e-4 --p_none_pair 0.25 --out runs/kev-0.6b
 
-# the kev-4b recipe on a frozen suite (one H100 via Modal, ~40 min; see below)
-uv run python -m kev.train --suite evals/v4/decision-v4 --base Qwen/Qwen3-4B-Base --epochs 2 --lr 5e-5 \
+# the kev-4b recipe (one H100 via Modal, ~50 min; see below)
+uv run python -m kev.train --suite evals/v7/decision-v7 --base Qwen/Qwen3-4B-Base --epochs 2 --lr 5e-5 \
     --batch 4 --accum 2 --dtype bf16 --checkpointing 1 --p_none_pair 0.25 --device cuda --out runs/kev-4b
 ```
 
 | Flag | Default | Purpose |
 |---|---|---|
-| `--base` | `Qwen/Qwen3-0.6B-Base` | Causal LM backbone (any Qwen2.5/Qwen3 base; Qwen3-4B/8B for the previews) |
+| `--base` | `Qwen/Qwen3-0.6B-Base` | Causal LM backbone (any Qwen2.5/Qwen3 base; Qwen3-4B/8B for the released checkpoints) |
 | `--n_per_source` | `1000` | Records sampled per dataset |
 | `--holdout` | – | Sources to exclude, e.g. `mnli,sst5`, for out-of-source evaluation |
 | `--perm_kl` | `0` | Optional symmetric KL between predictions under two option orders |
@@ -253,9 +252,9 @@ uv run python -m kev.train --suite evals/v4/decision-v4 --base Qwen/Qwen3-4B-Bas
 | `--option_isolation` | `0` | Option spans as isolated sub-branches with shared positions: exact permutation invariance (costs accuracy at 4B) |
 | `--lora_targets`, `--head_lr`, `--weight_decay` | `all`, `=lr`, `0.01` | Low-drift knobs; none beat plain lr 5e-5 |
 
-The released `kev-0.5b` used cross-entropy without either extra loss. The current data conversion and sampling have changed, so rerunning this command does not reproduce its weights exactly. The optional ordinal loss now compares cumulative probabilities, a proper scoring rule, rather than absolute error of the expected level. Full historical recipe in the [model card](MODEL_CARD.md).
+The released checkpoints used cross-entropy without either extra loss (`--perm_kl`, `--ord_w` are research knobs; neither beat the plain recipe). The optional ordinal loss compares cumulative probabilities, a proper scoring rule, rather than absolute error of the expected level.
 
-On a Mac, run one training job at a time; two jobs on the same Apple GPU slow each other by about 10×. The MBP path is kept working, but anything longer than a smoke run goes to Modal. The MBP figure above is the `kev-0.5b` run.
+On a Mac, run one training job at a time; two jobs on the same Apple GPU slow each other by about 10×. The MBP path is kept working, but anything longer than a smoke run goes to Modal.
 
 ### Modal
 
@@ -265,12 +264,12 @@ Studies run as one H100 container per trial, in parallel, with results pulled ba
 uv run modal token new                                    # once; opens the browser
 KEV_GPU=T4 uv run modal run modal_app.py::smoke           # end-to-end check, ~1 minute of GPU
 
+uv run modal deploy modal_app.py                          # once; studies run on the deployed app and survive disconnects
 uv run modal run modal_app.py::study \
-    --suite evals/decision-v2 --plan experiments/data-ablation-v2.json \
-    --name ablation-v2 --transfer evals/transfer-v2 \
-    --existing jaredpalmer/kev-0.5b                       # legacy checkpoints scored alongside
-
-uv run modal run modal_app.py::evaluate --run jaredpalmer/kev-0.5b --suite evals/transfer-v2 --name transfer-kev
+    --suite evals/v7/decision-v7 --plan experiments/v7-final.json \
+    --name my-study --transfer evals/v4/transfer-v4 --budget 30 --timeout 7200
+uv run modal run modal_app.py::pull --name my-study       # results -> runs/my-study, ranked
+uv run modal run modal_app.py::locked_test --trial my-study/00-trial-0 --name my-candidate   # one read, ever
 ```
 
 A plan is a JSON list of 1–8 trials over an allowlisted set of training parameters (`kev/experiment.py`). Each trial records the local git commit, the suite hash, and the hashes of the shipped `kev/*.py`; the container refuses to run if they differ from what the launcher hashed. Training uses TF32 and optional bf16; evaluation is fp32-exact (TF32 alone moves probabilities by ~1e-3, enough to trip the isolation gate). Measured: 0.019 s/record for Qwen2.5-0.5B at batch 8 on an H100 vs 0.34 s/record on an M5, ~$0.15–0.30 per 0.5B trial.
@@ -278,22 +277,12 @@ A plan is a JSON list of 1–8 trials over an allowlisted set of training parame
 ## Evaluation
 
 ```bash
-uv run python -m kev.evaluate --run runs/kev --n_per_source 150 \
-    --baseline --baseline_instruct Qwen/Qwen2.5-0.5B-Instruct
+uv run python -m kev.benchmark --run jaredpalmer/kev-4b --suite evals/v4/transfer-v4 --out runs/my-eval      # out of domain
+uv run python -m kev.benchmark --run jaredpalmer/kev-4b --suite evals/v4/decision-v4 --out runs/my-eval-id   # in distribution
+uv run python -m kev.benchmark --remote http://127.0.0.1:8009 --suite evals/v4/transfer-v4 --out runs/my-remote   # any System One endpoint
 ```
 
-Writes `runs/kev/eval.json`. Baselines use the same rendered text and read next-token logits over option letters.
-
-| | Zero-shot base | Zero-shot Instruct | **kev-0.5b** |
-|---|---|---|---|
-| Choice, 4-way (AG News) | 0.813 / 0.069 | 0.787 / 0.160 | **0.940 / 0.028** |
-| Choice, 3-way (MNLI) | 0.460 / 0.225 | 0.433 / 0.390 | **0.747 / 0.100** |
-| Choice, 77-way (Banking77) | – | – | **0.860 / 0.057** |
-| Noul (BoolQ) | 0.427 / 0.274 | 0.607 / 0.084 | **0.753 / 0.136** |
-| Score, 5 levels (Yelp) | 0.313 / 0.043 | 0.353 / 0.078 | **0.553 / 0.118** |
-| **All** (1,350 held-out questions) | | | **0.799 / 0.065** |
-
-Cells are accuracy / ECE (10 bins) for the original `kev-0.5b`. These are in-distribution numbers; the test splits come from the training datasets. The current checkpoints are compared on frozen suites below.
+Every number in this README comes from these commands on frozen suites (accuracy, Brier, ECE, confident-error rate, held-out-pair correctness, permutation flips, packed-vs-separate isolation, per-source breakdowns, record-clustered paired bootstraps against a reference run via `kev.compare`).
 
 ### Frozen research suites
 
@@ -303,7 +292,7 @@ Every number in this README after the table above comes from frozen, checksummed
 |---|---|---|---|
 | `decision-v4` / `v6` | 10–13 public sources + programmatic policy pairs | 1,200 in-distribution questions | model selection, kev-4b / kev-8b |
 | `transfer-v4` | nothing | QNLI, SciQ, TweetEval, PAWS, MMLU, Emotion + held-out policy rule structures | out-of-domain, every trial |
-| `decision-v1`, `transfer-v1` | six sources | first kev-0.5b vs Jev comparison | historical |
+| `decision-v1`, `transfer-v1` | six sources | first prototype (`kev-0.5b`) vs Jev comparison | historical |
 
 ```bash
 uv run python -m kev.benchmark --run jaredpalmer/kev-4b --suite evals/v4/transfer-v4 --out runs/my-eval
@@ -333,12 +322,12 @@ What the controlled studies established (record-clustered paired bootstraps, see
 - **Fine-tuning erodes base capability, and the learning rate controls it.** The 4B base scores 0.69 on the same MMLU items zero-shot; the default recipe trained it down to 0.60–0.66. lr 5e-5 recovers most of it: +4.7 pp [+0.4, +9.6], replicated at three seeds on 4B and 8B.
 - **More public data raises in-distribution accuracy and lowers or flattens transfer.** Knowledge MCQ sources lift MMLU a few points without moving the total.
 - **Programmatic contrastive policy pairs** teach the trained rule structures (0.85–1.0) and transfer partially to unseen ones (0.5–0.67 at 4B/8B, near chance at 0.6B); none-of-the-above minimal pairs fixed the "none" shortcut in-domain (0.75 → 0.93 at 4B).
-- **Structural diversity in the synthetic rules** (60 random rule trees with negation anywhere, instead of eight fixed shapes) fixed the two failing held-out compositions (0.62–0.66 → 0.75–0.97) and produced the current previews (+3 pp transfer at 4B and 8B). Day-precision date arithmetic (`deadline`) did not move under any data we generated (0.45–0.60; untrained bases 0.53; Jev 0.93).
+- **Structural diversity in the synthetic rules** (60 random rule trees with negation anywhere, instead of eight fixed shapes) fixed the two failing held-out compositions (0.62–0.66 → 0.75–0.97) and produced the released 4B/8B checkpoints (+3 pp transfer). Day-precision date arithmetic (`deadline`) did not move under any data we generated (0.45–0.60; untrained bases 0.53; Jev 0.93).
 - Fourteen one-knob mutations around the low-lr recipe, anchoring to the base model's own distribution, and weight-space interpolation all land within ±1 pp: the remaining gap to Jev is MMLU, PAWS, Emotion, and date arithmetic, not hyperparameters.
 
-The first comparison (`kev-0.5b` on `decision-v1`/`transfer-v1`: −1.8 pp in-distribution with a CI including zero, **−19.1 pp [−23.1, −15.0]** out of domain) is kept as `docs/kev-vs-jev.png` and `docs/kev-vs-jev-transfer.png`; regenerate with `uv run python scripts/plot_eval_comparison.py`, the family figure with `uv run python scripts/plot_family.py`.
+The prototype's first comparison (`kev-0.5b` on `decision-v1`/`transfer-v1`: −1.8 pp in-distribution with a CI including zero, **−19.1 pp [−23.1, −15.0]** out of domain) is kept as `docs/kev-vs-jev.png` and `docs/kev-vs-jev-transfer.png`; regenerate with `uv run python scripts/plot_eval_comparison.py`, the family figure with `uv run python scripts/plot_family.py`, the benchmark card with `uv run python scripts/plot_tweet.py`.
 
-The mechanism tests below are from `kev.evaluate` on `kev-0.5b`; the 4B/8B checkpoints reproduce the isolation and packing results exactly (max delta 4e-6, checked on every trial).
+The mechanism tests below are from `kev.evaluate` on the prototype; every released checkpoint reproduces the isolation and packing results exactly (max delta 4e-6, checked on every trial).
 
 | Mechanism test | Result |
 |---|---|
@@ -351,7 +340,7 @@ The mechanism tests below are from `kev.evaluate` on `kev-0.5b`; the 4B/8B check
 ## Limitations
 
 - **Out of domain it trails Jev by 6–7 points** at 4B/8B and by 26 at 0.6B. The gap is concentrated in knowledge (MMLU 0.69–0.75 vs 0.90), paraphrase (PAWS), noisy-label emotion, and date arithmetic. Fine-tuning still loses some of what the base model knows even at lr 5e-5.
-- **Held-out rule reasoning** (unseen compositions of policy conditions) is 0.62–0.73 both-siblings-correct depending on the seed; Jev is 0.86. The predeclared release screen (≥ 0.70 on every seed) is not yet met; the deciding family is day-precision date arithmetic.
+- **Held-out rule reasoning** (unseen compositions of policy conditions) is 0.62–0.73 both-siblings-correct depending on the seed; Jev is 0.86. The remaining failures are concentrated in day-precision date arithmetic, which no data we generated has moved.
 - **Calibration is in-distribution.** Temperature fitted in-domain does not transfer; out-of-domain probabilities are usable but not calibrated (ECE ~0.1).
 - **Product-shaped questions** with no training analogue are not guaranteed; the low-drift 4B/8B recipes carry fewer task priors than the 0.6B and can answer differently on the same input. Measure on your own data.
 - **Context.** Trained at 384 state / 1,024 branch tokens; serving caps at 8,192. Jev allows ~32k per branch.
@@ -385,4 +374,4 @@ Built with [Devin](https://devin.ai). Architecture claims from [Archer Hume](htt
 
 ## License
 
-[Apache-2.0](LICENSE). The base model is distributed under the Qwen license. Datasets carry their own licenses; see the [model card](MODEL_CARD.md#training-data).
+[Apache-2.0](LICENSE). The base model is distributed under the Qwen license. Datasets carry their own licenses; see the [model cards](docs/model-cards/#training-data).

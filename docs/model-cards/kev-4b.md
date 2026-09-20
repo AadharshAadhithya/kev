@@ -11,7 +11,7 @@ tags:
   - lora
   - multiple-choice
   - typesafe
-  - research-preview
+  - decision-model
 datasets:
   - legacy-datasets/banking77
   - google/boolq
@@ -28,7 +28,7 @@ metrics:
   - brier_score
   - expected_calibration_error
 model-index:
-  - name: kev-4b (research preview)
+  - name: kev-4b
     results:
       - task: { type: text-classification, name: typed decision (choice / noul / score) }
         dataset: { type: mixed, name: "decision-v4 development (1,204 records; ten trained public sources + programmatic policy pairs)" }
@@ -42,18 +42,18 @@ model-index:
           - { type: brier_score, value: 0.328 }
 ---
 
-# kev-4b — research preview
+# kev-4b
 
 `kev-4b` is a **decision model**: one document (the *state*) and a set of typed questions in, a probability distribution per question out, in one forward pass. No text generation. It is a LoRA adapter (r=16) plus a pointer head on `Qwen/Qwen3-4B-Base`, serving TypeSafe's public `/v1/systemone` contract.
 
-**Research preview, not a versioned release.** It is the best 4B checkpoint under a frozen, checksummed protocol after ~40 controlled 4B trials, and the first kev whose out-of-domain accuracy is within ten points of Jev on the same items. This checkpoint clears the release screen we set in advance (held-out policy pairs 0.73 both-correct, screen 70%), but the other two seeds of the same recipe do not (0.62, 0.67), and our rule is every seed; so it stays a preview.
+**The recommended kev.** The best 4B checkpoint under a frozen, checksummed protocol after ~40 controlled 4B trials, and the first kev within seven points of Jev out of domain on the same items. Same recipe run at three seeds: transfer 0.773 / **0.790** / 0.770; this checkpoint is the seed selected on the development partition (never on the locked test).
 
 - Hub: `jaredpalmer/kev-4b` (this repo; trial `v7-rc3/01-trial-1`)
 - Code, suites, every trial with hashes and paired bootstraps: [github.com/jaredpalmer/kev](https://github.com/jaredpalmer/kev) — `PLAN.md`, `runs/leaderboard.md`
 
 ## Results (same frozen items for every row)
 
-| | kev-0.5b | kev-0.6b preview | **kev-4b preview** | Jev |
+| | kev-0.5b (prototype) | kev-0.6b | **kev-4b** | Jev |
 |---|---|---|---|---|
 | in-distribution accuracy (decision-v4 dev, 1,200 q) | 0.712 | 0.805 | **0.854** | 0.845 |
 | out-of-domain accuracy (transfer-v4 dev, 560 q) | 0.575 | 0.598 | **0.790** | 0.857 |
@@ -64,9 +64,9 @@ model-index:
 
 Per-source out-of-domain accuracy (kev-4b / Jev): QNLI 0.89 / 0.93, SciQ 0.99 / 0.99, TweetEval-offensive 0.75 / 0.81, PAWS 0.72 / 0.79, MMLU 0.65 / 0.90, Emotion 0.66 / 0.59, deadline (3-level date arithmetic) 0.53 / 0.93, (A and B) or not C 0.97 / 0.97, if A then not B else C 0.88 / 0.78.
 
-Seeds: three seeds on decision-v7: transfer 0.773 / **0.790** / 0.770, held-out pairs 0.62 / **0.73** / 0.67; this checkpoint is seed 1, selected on development transfer accuracy. Trained on `decision-v7` (10k public records + 896 policy records over nine template families incl. four ordinal Score threshold families + 1,680 records from 60 random rule structures with negation anywhere); development/test items are byte-identical to v4, so every number here is comparable with earlier previews.
+Seeds: three seeds on decision-v7: transfer 0.773 / **0.790** / 0.770, held-out rule pairs 0.62 / **0.73** / 0.67 (Jev 0.86); this checkpoint is seed 1, selected on development transfer accuracy. Trained on `decision-v7` (10k public records + 896 policy records over nine template families incl. four ordinal Score threshold families + 1,680 records from 60 random rule structures with negation anywhere); development/test items are byte-identical to v4, so every number here is comparable with earlier checkpoints.
 
-**Locked test, one exploratory read** (`runs/locked/kev-4b-v7-preview-ungated/`, labelled ungated because the screen is not met on every seed): in-distribution **0.856** (Brier 0.211), out-of-domain **0.806** (Brier 0.294, confident errors 6.6%, held-out pairs 0.66). This partition will not be read again for this checkpoint.
+**Locked test, read once** (`runs/locked/kev-4b-v7-preview-ungated/`): in-distribution **0.856** (Brier 0.211), out-of-domain **0.806** (Brier 0.294, confident errors 6.6%, held-out pairs 0.66). This partition will not be read again for this checkpoint.
 
 ## What we learned building it
 

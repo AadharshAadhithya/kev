@@ -10,7 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import matplotlib.pyplot as plt
-from chartstyle import JEV, KEV, NEUTRAL, TEXT, TEXT2, body, display, heading, hbars, rule, stat, use_style
+from chartstyle import HOLLOW, JEV, KEV, NEUTRAL, TEXT, TEXT2, body, display, heading, hbars, rule, stat, use_style
 
 ROOT = Path(__file__).resolve().parents[1]
 MODELS = [("kev-8b", "Qwen3-8B", "runs/v7-final/00-trial-0/result.json"),
@@ -45,6 +45,8 @@ def main():
     heading(fig, .05, .77, "Accuracy on data Kev never trained on", size=17)
     hbars(ax, [display(r[0]) for r in rows], [r[2] for r in rows], [r[3] for r in rows], xlim=(0, 100), fmt="{:.1f}%",
           emphasize=[i for i, r in enumerate(rows) if r[0].startswith("kev")], sublabels=[r[1] for r in rows], ticks=range(0, 101, 25), label_size=13, value_size=14)
+    for bar, r in zip(ax.patches, rows):                                   # the prototype: outlined bar in the family hue
+        if r[0] in HOLLOW: bar.set_facecolor("white"); bar.set_edgecolor(KEV["kev-4b"]); bar.set_linewidth(1.6); bar.set_hatch("////"); bar._hatch_color = __import__("matplotlib").colors.to_rgba(KEV["kev-0.5b"])
     body(fig, .05, .115, "764 frozen out-of-domain records: QNLI, SciQ, PAWS, MMLU, Emotion, TweetEval and held-out policy rules; the same items for every row.\n"
          "Untrained bases are read zero-shot from next-token letter logits. Development partition; each model card records one locked-test read.", size=11)
 

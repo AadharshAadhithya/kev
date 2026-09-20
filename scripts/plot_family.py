@@ -11,7 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import matplotlib.pyplot as plt
 import numpy as np
-from chartstyle import GRID, JEV, KEV, RULE, TEXT, TEXT2, body, display, heading, rule, strip, use_style
+from chartstyle import GRID, HOLLOW, JEV, KEV, RULE, TEXT, TEXT2, body, display, heading, rule, strip, use_style
 
 ROOT = Path(__file__).resolve().parents[1]
 TASKS = [("sciq", "SciQ"), ("qnli", "QNLI"), ("contrastive_authorization", "Policy: authorization"), ("composition_held_and_or", "Rule: (A or B) and C"),
@@ -53,7 +53,8 @@ def main():
         lo, hi = min(vals.values()), max(vals.values())
         ax.plot([lo, hi], [yi, yi], color=GRID, lw=2.5, zorder=1, solid_capstyle="round")
         for n, v in vals.items():
-            ax.scatter([v], [yi], s=95, color=JEV if n == "Jev" else KEV[n], zorder=3, edgecolor="white", linewidth=1.2)
+            if n in HOLLOW: ax.scatter([v], [yi], s=95, facecolor="white", edgecolor=KEV["kev-4b"], linewidth=1.8, zorder=3)
+            else: ax.scatter([v], [yi], s=95, color=JEV if n == "Jev" else KEV[n], zorder=3, edgecolor="white", linewidth=1.2)
         # direct labels: the best Kev and Jev, offset vertically so they never overlap
         best = max((n for n, _ in MODELS if n != "kev-0.5b"), key=lambda n: vals[n])
         ax.annotate(f"{vals[best]:.0f}", (vals[best], yi), xytext=(0, 9), textcoords="offset points", ha="center", fontsize=9.5, color=KEV[best], weight="medium")
@@ -63,8 +64,9 @@ def main():
     ax.grid(axis="x", color=GRID, lw=.8, zorder=0); ax.tick_params(length=0); strip(ax)
     # key as direct text, once
     kx = .27
-    for i, (n, c) in enumerate([("Jev", JEV), ("kev-8b", KEV["kev-8b"]), ("kev-4b", KEV["kev-4b"]), ("kev-0.6b", KEV["kev-0.6b"]), ("kev-0.5b prototype", KEV["kev-0.5b"])]):
-        fig.text(kx + .082 * i, .835, "●", fontsize=13, color=c, ha="left", va="baseline"); fig.text(kx + .082 * i + .014, .835, display(n), fontsize=11.5, color=TEXT, ha="left", va="baseline")
+    for i, (n, c) in enumerate([("Jev", JEV), ("kev-8b", KEV["kev-8b"]), ("kev-4b", KEV["kev-4b"]), ("kev-0.6b", KEV["kev-0.6b"]), ("kev-0.5b prototype", KEV["kev-4b"])]):
+        fig.text(kx + .082 * i, .835, "○" if "0.5b" in n else "●", fontsize=13, color=c, ha="left", va="baseline", weight="bold" if "0.5b" in n else "regular")
+        fig.text(kx + .082 * i + .014, .835, display(n), fontsize=11.5, color=TEXT, ha="left", va="baseline")
     body(fig, .05, .125, "Notice: on classification-shaped sources and trained rule families the 4B and 8B are within a few points of Jev or above it.\n"
          "The gap is concentrated in knowledge (MMLU), day-precision date arithmetic (deadline) and noisy-label emotion.\n"
          "Sources: QNLI, SciQ, TweetEval, PAWS, MMLU, Emotion; the policy families and rule structures shown were never trained.", size=11, va="top")

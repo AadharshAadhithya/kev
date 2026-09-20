@@ -40,7 +40,8 @@ RED = {900: oklch_to_hex(0.5499, 0.232, 25.29), 700: oklch_to_hex(0.6256, 0.2524
 
 TEXT, TEXT2, RULE, GRID = GRAY[1000], GRAY[900], GRAY[500], GRAY[400]
 # series roles: the Kev family is one hue stepped by size; the hosted reference is a second hue; untrained bases neutral
-KEV = {"kev-8b": BLUE[1000], "kev-4b": BLUE[900], "kev-0.6b": oklch_to_hex(0.72, 0.13, 256), "kev-0.5b": oklch_to_hex(0.85, 0.06, 250)}
+KEV = {"kev-8b": BLUE[1000], "kev-4b": BLUE[900], "kev-0.6b": oklch_to_hex(0.72, 0.13, 256), "kev-0.5b": oklch_to_hex(0.80, 0.09, 252)}
+HOLLOW = {"kev-0.5b"}   # the superseded prototype is drawn as an outlined marker / hatched bar so it reads as "older", not as a fourth size
 JEV = AMBER[700]
 NEUTRAL = GRAY[500]
 

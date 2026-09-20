@@ -21,9 +21,9 @@ The architecture follows the reconstruction of TypeSafe's Jev in [Jev's Architec
 - **Three question types.** `noul` (yes/no), `choice` (2–255 options), `score` (ordered levels). One shared readout.
 - **One pass, many answers.** The state is encoded once. Questions run as isolated branches under a block-causal mask.
 - **Isolation is exact.** A question cannot see a sibling question. Packed and separate requests agree to `4e-6`.
-- **Probabilities, not prose.** Trained with cross-entropy on labelled outcomes. Out of domain, `kev-8b` has Brier 0.34 and 8% confident errors on sources it never saw.
+- **Probabilities, not prose.** Trained with cross-entropy on labelled outcomes. Out of domain, `kev-4b` has Brier 0.33 and 8% confident errors on sources it never saw.
 - **Drop-in API.** `POST /v1/systemone` with TypeSafe's request and response shapes. Their SDK's quickstart runs unmodified.
-- **A family, measured the same way.** 0.5B, 0.6B, 4B and 8B checkpoints scored on frozen, checksummed suites with a locked test, against the real Jev on the same items. Out of domain: kev-4b 0.76, kev-8b 0.77, Jev 0.86.
+- **A family, measured the same way.** 0.5B, 0.6B, 4B and 8B checkpoints scored on frozen, checksummed suites with a locked test, against the real Jev on the same items. Out of domain: kev-4b 0.79, kev-8b 0.80, Jev 0.86.
 - **Runs on a laptop; trains in the cloud.** `kev-0.5b` trains in ~1h45m on an Apple M5; the 4B/8B recipes train in 40–70 min on one H100 via Modal and serve on a 32 GB Mac in bf16.
 
 ![kev family vs Jev on sources kev never trained on](docs/kev-family.png)
@@ -50,11 +50,11 @@ KEV_DTYPE=bf16 uv run --extra serve python -m kev.serve --run jaredpalmer/kev-4b
 |---|---|---|---|---|---|
 | [`kev-0.5b`](https://huggingface.co/jaredpalmer/kev-0.5b) · v0.1 release | Qwen2.5-0.5B | 0.712 / – | 0.575 / – | fp32, ~160 ms | [MODEL_CARD.md](MODEL_CARD.md) |
 | [`kev-0.6b`](https://huggingface.co/jaredpalmer/kev-0.6b) · preview | Qwen3-0.6B-Base | 0.805 / 0.819 | 0.598 / 0.631 | fp32 | [card](docs/model-cards/kev-0.6b.md) |
-| [`kev-4b`](https://huggingface.co/jaredpalmer/kev-4b) · preview | Qwen3-4B-Base | 0.843 / 0.852 | 0.759 / 0.794 | bf16, ~1 s | [card](docs/model-cards/kev-4b.md) |
-| [`kev-8b`](https://huggingface.co/jaredpalmer/kev-8b) · preview | Qwen3-8B-Base | 0.869 / 0.869 | 0.774 / 0.799 | bf16, ~2 s | [card](docs/model-cards/kev-8b.md) |
+| [`kev-4b`](https://huggingface.co/jaredpalmer/kev-4b) · preview | Qwen3-4B-Base | 0.854 / 0.856 | 0.790 / **0.806** | bf16, ~1 s | [card](docs/model-cards/kev-4b.md) |
+| [`kev-8b`](https://huggingface.co/jaredpalmer/kev-8b) · preview | Qwen3-8B-Base | 0.863 / **0.870** | 0.796 / 0.780 | bf16, ~2 s | [card](docs/model-cards/kev-8b.md) |
 | Jev (hosted reference) | – | 0.845 / – | 0.857 / – | | |
 
-Same frozen items for every row (`evals/v4`: 1,200 in-distribution questions from the trained sources; 764 out-of-domain records from six public sources kev never trained on plus held-out programmatic policy rules). The three previews carry no version tag: each fails our predeclared release screen on held-out rule reasoning (both siblings of a policy pair correct ≥ 70%; best is 0.67), and each card records its single locked-test read. `kev-0.5b` is also attached to the [GitHub release](https://github.com/jaredpalmer/kev/releases/tag/v0.1.0).
+Same frozen items for every row (`evals/v4`: 1,200 in-distribution questions from the trained sources; 764 out-of-domain records from six public sources kev never trained on plus held-out programmatic policy rules). The three previews carry no version tag: our predeclared release screen (both siblings of a held-out policy pair correct ≥ 70%, on **every** seed of the recipe) is not yet met — the best recipe lands at 0.62–0.73 across seeds, with a single family (day-precision date arithmetic) deciding it. Each card records its single locked-test read. `kev-0.5b` is also attached to the [GitHub release](https://github.com/jaredpalmer/kev/releases/tag/v0.1.0).
 
 ## Quick Start
 
@@ -305,13 +305,15 @@ Trials are configuration-only: `kev.experiment` refuses configs outside a bounde
 
 `kev.jev` scores the same frozen partitions against the real `typesafe-ai/jev` through Vercel AI Gateway (AI SDK 7 `experimental_evaluate`, cost-capped; about two cents per suite). Jev is the hosted reference product; its training exposure to these public datasets is unknown, so this is a shared-item comparison, not a controlled ablation.
 
-| out-of-domain, `transfer-v4` dev (764 records) | kev-0.6b | kev-4b | kev-8b | Jev |
-|---|---|---|---|---|
-| accuracy | 0.598 | 0.759 | 0.774 | **0.857** |
-| Brier (lower is better) | 0.521 | 0.346 | 0.339 | **0.211** |
-| confident errors (p ≥ 0.9 and wrong) | 5.2% | 5.5% | 8.2% | 3.7% |
-| held-out policy rules, both siblings correct | 0.11 | 0.62 | 0.61 | **0.86** |
-| option-order argmax flips (out of domain) | 0.08 | 0.08 | 0.03 | 0.00 |
+| out-of-domain, `transfer-v4` dev (764 records) | Qwen3-8B base, untrained | Qwen3-30B-A3B base, untrained | kev-0.6b | kev-4b | kev-8b | Jev |
+|---|---|---|---|---|---|---|
+| accuracy | 0.726 | 0.707 | 0.598 | 0.790 | 0.796 | **0.857** |
+| Brier (lower is better) | 0.366 | 0.365 | 0.521 | 0.328 | 0.337 | **0.211** |
+| confident errors (p ≥ 0.9 and wrong) | 0.6% | 0.5% | 5.2% | 8.2% | 9.9% | 3.7% |
+| held-out policy rules, both siblings correct | 0.55 | 0.44 | 0.11 | 0.73 | 0.69 | **0.86** |
+| MMLU / PAWS | 0.75 / 0.84 | 0.79 / 0.82 | 0.46 / 0.56 | 0.65 / 0.72 | 0.70 / 0.78 | 0.90 / 0.79 |
+
+The two untrained columns are the base models read zero-shot from next-token letter logits (`scripts/base_mmlu_probe.py`): kev-8b beats its own base by +5.8 pp [+1.8, +10.0] and the untrained 30B-A3B by +9.7 pp [+4.7, +14.4], while both untrained models beat every kev on knowledge (MMLU) and paraphrase (PAWS) — the fine-tune still gives back some of what the base knows.
 
 What the controlled studies established (record-clustered paired bootstraps, seeds replicated; full log in [PLAN.md](PLAN.md)):
 
@@ -319,7 +321,8 @@ What the controlled studies established (record-clustered paired bootstraps, see
 - **Fine-tuning erodes base capability, and the learning rate controls it.** The 4B base scores 0.69 on the same MMLU items zero-shot; the default recipe trained it down to 0.60–0.66. lr 5e-5 recovers most of it: +4.7 pp [+0.4, +9.6], replicated at three seeds on 4B and 8B.
 - **More public data raises in-distribution accuracy and lowers or flattens transfer.** Knowledge MCQ sources lift MMLU a few points without moving the total.
 - **Programmatic contrastive policy pairs** teach the trained rule structures (0.85–1.0) and transfer partially to unseen ones (0.5–0.67 at 4B/8B, near chance at 0.6B); none-of-the-above minimal pairs fixed the "none" shortcut in-domain (0.75 → 0.93 at 4B).
-- Fourteen one-knob mutations around the low-lr recipe all land within ±1 pp: the remaining gap to Jev is MMLU, PAWS, Emotion, and date arithmetic, not hyperparameters.
+- **Structural diversity in the synthetic rules** (60 random rule trees with negation anywhere, instead of eight fixed shapes) fixed the two failing held-out compositions (0.62–0.66 → 0.75–0.97) and produced the current previews (+3 pp transfer at 4B and 8B). Day-precision date arithmetic (`deadline`) did not move under any data we generated (0.45–0.60; untrained bases 0.53; Jev 0.93).
+- Fourteen one-knob mutations around the low-lr recipe, anchoring to the base model's own distribution, and weight-space interpolation all land within ±1 pp: the remaining gap to Jev is MMLU, PAWS, Emotion, and date arithmetic, not hyperparameters.
 
 The first comparison (`kev-0.5b` on `decision-v1`/`transfer-v1`: −1.8 pp in-distribution with a CI including zero, **−19.1 pp [−23.1, −15.0]** out of domain) is kept as `docs/kev-vs-jev.png` and `docs/kev-vs-jev-transfer.png`; regenerate with `uv run python scripts/plot_eval_comparison.py`, the family figure with `uv run python scripts/plot_family.py`.
 
@@ -335,8 +338,8 @@ The mechanism tests below are from `kev.evaluate` on `kev-0.5b`; the 4B/8B check
 
 ## Limitations
 
-- **Out of domain it trails Jev by 8–10 points** at 4B/8B and by 26 at 0.6B. The gap is concentrated in knowledge (MMLU 0.69–0.75 vs 0.90), paraphrase (PAWS), noisy-label emotion, and date arithmetic. Fine-tuning still loses some of what the base model knows even at lr 5e-5.
-- **Held-out rule reasoning** (unseen compositions of policy conditions) is 0.6 both-siblings-correct at best; Jev is 0.86. This is the predeclared release screen the previews fail.
+- **Out of domain it trails Jev by 6–7 points** at 4B/8B and by 26 at 0.6B. The gap is concentrated in knowledge (MMLU 0.69–0.75 vs 0.90), paraphrase (PAWS), noisy-label emotion, and date arithmetic. Fine-tuning still loses some of what the base model knows even at lr 5e-5.
+- **Held-out rule reasoning** (unseen compositions of policy conditions) is 0.62–0.73 both-siblings-correct depending on the seed; Jev is 0.86. The predeclared release screen (≥ 0.70 on every seed) is not yet met; the deciding family is day-precision date arithmetic.
 - **Calibration is in-distribution.** Temperature fitted in-domain does not transfer; out-of-domain probabilities are usable but not calibrated (ECE ~0.1).
 - **Product-shaped questions** with no training analogue are not guaranteed; the low-drift 4B/8B recipes carry fewer task priors than the 0.6B and can answer differently on the same input. Measure on your own data.
 - **Context.** Trained at 384 state / 1,024 branch tokens; serving caps at 8,192. Jev allows ~32k per branch.

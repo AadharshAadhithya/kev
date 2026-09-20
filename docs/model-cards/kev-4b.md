@@ -33,40 +33,40 @@ model-index:
       - task: { type: text-classification, name: typed decision (choice / noul / score) }
         dataset: { type: mixed, name: "decision-v4 development (1,204 records; ten trained public sources + programmatic policy pairs)" }
         metrics:
-          - { type: accuracy, value: 0.843 }
-          - { type: expected_calibration_error, value: 0.066, name: "ECE, raw probabilities" }
+          - { type: accuracy, value: 0.854 }
+          - { type: expected_calibration_error, value: 0.065, name: "ECE, raw probabilities" }
       - task: { type: text-classification, name: typed decision, out-of-domain }
         dataset: { type: mixed, name: "transfer-v4 development (764 records; six never-trained sources + held-out policy structures)" }
         metrics:
-          - { type: accuracy, value: 0.759 }
-          - { type: brier_score, value: 0.346 }
+          - { type: accuracy, value: 0.790 }
+          - { type: brier_score, value: 0.328 }
 ---
 
 # kev-4b — research preview
 
 `kev-4b` is a **decision model**: one document (the *state*) and a set of typed questions in, a probability distribution per question out, in one forward pass. No text generation. It is a LoRA adapter (r=16) plus a pointer head on `Qwen/Qwen3-4B-Base`, serving TypeSafe's public `/v1/systemone` contract.
 
-**Research preview, not a versioned release.** It is the best 4B checkpoint under a frozen, checksummed protocol after ~30 controlled 4B trials, and the first kev whose out-of-domain accuracy is within ten points of Jev on the same items. It does not pass the release screen we set in advance (held-out policy pairs: 0.62 both-correct, screen 70%).
+**Research preview, not a versioned release.** It is the best 4B checkpoint under a frozen, checksummed protocol after ~40 controlled 4B trials, and the first kev whose out-of-domain accuracy is within ten points of Jev on the same items. This checkpoint clears the release screen we set in advance (held-out policy pairs 0.73 both-correct, screen 70%), but the other two seeds of the same recipe do not (0.62, 0.67), and our rule is every seed; so it stays a preview.
 
-- Hub: `jaredpalmer/kev-4b` (this repo; trial `lowdrift-4b-v4/01-trial-1`)
+- Hub: `jaredpalmer/kev-4b` (this repo; trial `v7-rc3/01-trial-1`)
 - Code, suites, every trial with hashes and paired bootstraps: [github.com/jaredpalmer/kev](https://github.com/jaredpalmer/kev) — `PLAN.md`, `runs/leaderboard.md`
 
 ## Results (same frozen items for every row)
 
 | | kev-0.5b | kev-0.6b preview | **kev-4b preview** | Jev |
 |---|---|---|---|---|
-| in-distribution accuracy (decision-v4 dev, 1,200 q) | 0.712 | 0.805 | **0.843** | 0.845 |
-| out-of-domain accuracy (transfer-v4 dev, 560 q) | 0.575 | 0.598 | **0.759** | 0.857 |
-| out-of-domain Brier | 0.50 | 0.521 | **0.346** | 0.211 |
-| confident errors out of domain (p ≥ 0.9 and wrong) | – | 5.2% | 5.5% | 3.7% |
-| held-out policy structures, both siblings correct | – | 0.11 | 0.62 | 0.86 |
-| option-order flip rate | 0.21 | 0.02 | 0.00 | 0.00 |
+| in-distribution accuracy (decision-v4 dev, 1,200 q) | 0.712 | 0.805 | **0.854** | 0.845 |
+| out-of-domain accuracy (transfer-v4 dev, 560 q) | 0.575 | 0.598 | **0.790** | 0.857 |
+| out-of-domain Brier | 0.50 | 0.521 | **0.328** | 0.211 |
+| confident errors out of domain (p ≥ 0.9 and wrong) | – | 5.2% | 8.2% | 3.7% |
+| held-out policy structures, both siblings correct | – | 0.11 | 0.73 | 0.86 |
+| option-order flip rate | 0.21 | 0.02 | 0.06 | 0.00 |
 
-Per-source out-of-domain accuracy (kev-4b / Jev): QNLI 0.89 / 0.93, SciQ 0.99 / 0.99, TweetEval-offensive 0.71 / 0.81, PAWS 0.64 / 0.79, MMLU 0.68 / 0.90, Emotion 0.60 / 0.59, deadline (3-level date arithmetic) 0.60 / 0.93.
+Per-source out-of-domain accuracy (kev-4b / Jev): QNLI 0.89 / 0.93, SciQ 0.99 / 0.99, TweetEval-offensive 0.75 / 0.81, PAWS 0.72 / 0.79, MMLU 0.65 / 0.90, Emotion 0.66 / 0.59, deadline (3-level date arithmetic) 0.53 / 0.93, (A and B) or not C 0.97 / 0.97, if A then not B else C 0.88 / 0.78.
 
-Seeds: the recipe was run at three seeds on this suite (transfer 0.759 / 0.758 / 0.759; in-distribution 0.843 / 0.853 / 0.855) and twice more on a superset suite (0.755 / 0.761); the spread is ~1 pp. The improvement over the default learning rate is +4.7 pp, 95% CI [+0.4, +9.6], record-clustered paired bootstrap.
+Seeds: three seeds on decision-v7: transfer 0.773 / **0.790** / 0.770, held-out pairs 0.62 / **0.73** / 0.67; this checkpoint is seed 1, selected on development transfer accuracy. Trained on `decision-v7` (10k public records + 896 policy records over nine template families incl. four ordinal Score threshold families + 1,680 records from 60 random rule structures with negation anywhere); development/test items are byte-identical to v4, so every number here is comparable with earlier previews.
 
-**Locked test, one exploratory read** (`runs/locked/kev-4b-preview-ungated/`, labelled ungated because the checkpoint fails the held-out-pair screen): in-distribution **0.852** (Brier 0.221), out-of-domain **0.794** (Brier 0.296, confident errors 3.7%). Both above the development numbers, as for kev-0.6b, so development-set selection did not overfit. This partition will not be read again for this checkpoint.
+**Locked test, one exploratory read** (`runs/locked/kev-4b-v7-preview-ungated/`, labelled ungated because the screen is not met on every seed): in-distribution **0.856** (Brier 0.211), out-of-domain **0.806** (Brier 0.294, confident errors 6.6%, held-out pairs 0.66). This partition will not be read again for this checkpoint.
 
 ## What we learned building it
 

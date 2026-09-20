@@ -250,6 +250,24 @@ MMLU stays 0.66-0.69 and PAWS 0.68-0.70 under every setting. **Not a lever**: at
 on MMLU (0.69 vs 0.688); the remaining PAWS gap (0.70 vs base 0.79) is not closed by anchoring the output distribution,
 which points at the readout/format rather than at drift (the third outcome in the anchoring experiment's table).
 
+**Final v7/v8 read (21:20).** 4B on v7, three seeds: transfer 0.773 / 0.790 / 0.770, held-out pairs 0.62 / 0.73 / 0.67.
+8B on v7, two seeds: transfer **0.796** / 0.774, pairs 0.69 / 0.64. 4B on v8 (v7 + `shipping_delay`, a day-precision
+date-threshold Score family built for the deadline skill): 0.777 / 0.759, pairs 0.69 / 0.56, deadline 0.53 / 0.45 -
+the extra family did nothing. **No config passes the screen on every seed**; 8B seed 0 misses by one pair (44/64).
+The deciding family is `deadline` (0.45-0.60 for every kev; untrained 8B/30B bases 0.53-0.55; Jev 0.93): day-precision
+date arithmetic to a 3-level ordinal in one forward pass looks like a capability limit at <= 8B for this readout, not a
+data gap - two purpose-built training families did not move it.
+
+Published as **updated research previews** (no version tag; each card records one locked read):
+[`kev-4b`](https://huggingface.co/jaredpalmer/kev-4b) = `v7-rc3/01-trial-1` (dev 0.854 / 0.790; locked 0.856 / **0.806**),
+[`kev-8b`](https://huggingface.co/jaredpalmer/kev-8b) = `v7-final/00-trial-0` (dev 0.863 / 0.796; locked **0.870** / 0.780).
+The 8B locked read was interrupted once before any aggregate existed and redone (recorded in its summary).
+
+What would cross the bar, in order of my confidence: (1) an ordinal readout that models cumulative thresholds for Score
+questions (the models hedge to the middle level on deadline); (2) explicit day-count rendering in training states
+(teaching the arithmetic is not the point of a decision model; giving it the number is); (3) capacity beyond 8B.
+Spend to date ~$250 of $500.
+
 Ops: two studies were lost to the local client disconnecting (Modal cancels `.starmap` inputs when the caller dies; `--detach`
 keeps only the last-triggered function). Studies now fan out server-side from the **deployed** app (`modal deploy modal_app.py`;
 `run_study` spawned, `pull --name` afterwards). ~$35 of GPU time was lost to this.
@@ -282,8 +300,8 @@ Relevant code: [suite builder](kev/study_v3.py), [rule generator](kev/compositio
 Maintained by `kev.autoresearch`; full table in [`runs/leaderboard.md`](runs/leaderboard.md). Selection uses development partitions only.
 
 - **Qwen3-0.6B-Base** incumbent (v4 suites): transfer 0.610, dev 0.799, seeds [0], knobs `{"epochs": 2, "lr": 0.0001, "p_none_pair": 0.25}`
-- **Qwen3-4B-Base** incumbent (v4 suites): transfer 0.790, dev 0.854, seeds [1], knobs `{"epochs": 2, "lr": 5e-05, "p_none_pair": 0.25}`
-- **Qwen3-8B-Base** incumbent (v4 suites): transfer 0.779, dev 0.868, seeds [1], knobs `{"epochs": 2, "lr": 5e-05, "p_none_pair": 0.25}`
+- **Qwen3-4B-Base** incumbent (v4 suites): transfer 0.775, dev 0.858, seeds [0], knobs `{"epochs": 2, "lr": 5e-05, "p_none_pair": 0.25}`
+- **Qwen3-8B-Base** incumbent (v4 suites): transfer 0.796, dev 0.863, seeds [0], knobs `{"epochs": 2, "lr": 5e-05, "p_none_pair": 0.25}`
 
 | round | base | trials | best transfer | best knobs | incumbent after | spend |
 |---|---|---|---|---|---|---|

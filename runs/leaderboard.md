@@ -1,20 +1,24 @@
 # Leaderboard
 
-Generated 2026-09-19T23:56+00:00 from runs/*/result.json. Selection on development partitions only; the locked test is never read here.
+Generated 2026-09-20T02:35+00:00 from runs/*/result.json. Selection on development partitions only; the locked test is never read here.
 
 - **Qwen/Qwen3-0.6B-Base** incumbent: transfer 0.610, dev 0.799, seeds [0] (arch-06b/06-trial-6)
-- **Qwen/Qwen3-4B-Base** incumbent: transfer 0.790, dev 0.854, seeds [1] (v7-rc3/01-trial-1)
-- **Qwen/Qwen3-8B-Base** incumbent: transfer 0.779, dev 0.868, seeds [1] (recipe-8b-r2/01-trial-1)
+- **Qwen/Qwen3-4B-Base** incumbent: transfer 0.775, dev 0.858, seeds [0] (v7-rc3/00-trial-0, v8-4b/00-trial-0)
+- **Qwen/Qwen3-8B-Base** incumbent: transfer 0.796, dev 0.863, seeds [0] (v7-final/00-trial-0)
 
 | study/trial | base | seed | dev acc | transfer acc | Brier | conf-err | held-out pairs | none_present | perm flip | gates | $ | knobs |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
+| v7-final/00-trial-0 | Qwen3-8B-Base | 0 | 0.863 | 0.796 | 0.337 | 0.099 | 0.69 | 0.87 | 0.02 | fail | 5.78 | accum=4, epochs=2, lr=5e-05, p_none_pair=0.25 |
 | v7-rc3/01-trial-1 | Qwen3-4B-Base | 1 | 0.854 | 0.790 | 0.328 | 0.082 | 0.73 | 0.87 | 0.02 | pass | 2.84 | epochs=2, lr=5e-05, p_none_pair=0.25 |
 | recipe-8b-r2/01-trial-1 | Qwen3-8B-Base | 1 | 0.868 | 0.779 | 0.336 | 0.081 | 0.67 | 0.87 | 0.05 | fail | 6.49 | accum=4, epochs=2, lr=5e-05, p_none_pair=0.25 |
+| v8-4b/00-trial-0 | Qwen3-4B-Base | 0 | 0.858 | 0.777 | 0.338 | 0.076 | 0.69 | 0.85 | 0.03 | fail | 3.06 | epochs=2, lr=5e-05, p_none_pair=0.25 |
 | recipe-8b-r1/00-trial-0 | Qwen3-8B-Base | 0 | 0.869 | 0.774 | 0.339 | 0.082 | 0.61 | 0.88 | 0.02 | fail | 4.96 | accum=4, epochs=2, lr=5e-05, p_none_pair=0.25 |
 | recipe-8b-s2/00-trial-0 | Qwen3-8B-Base | 2 | 0.866 | 0.774 | 0.348 | 0.085 | 0.59 | 0.88 | 0.02 | fail | 6.26 | accum=4, epochs=2, lr=5e-05, p_none_pair=0.25 |
+| v7-final/01-trial-1 | Qwen3-8B-Base | 1 | 0.864 | 0.774 | 0.358 | 0.099 | 0.64 | 0.90 | 0.03 | fail | 5.98 | accum=4, epochs=2, lr=5e-05, p_none_pair=0.25 |
 | anchor-4b-v6/00-trial-0 | Qwen3-4B-Base | 0 | 0.861 | 0.773 | 0.358 | 0.085 | 0.61 | 0.88 | 0.02 | fail | 3.4 | anchor=/runs/anchors/v6-qwen3-4b.json, anchor_sources=arc,openbookqa,csqa, anchor_w=0.5, epochs=2, lr=5e-05, p_none_pair=0.25 |
 | v7-rc3/00-trial-0 | Qwen3-4B-Base | 0 | 0.858 | 0.773 | 0.359 | 0.098 | 0.62 | 0.87 | 0.05 | fail | 3.01 | epochs=2, lr=5e-05, p_none_pair=0.25 |
 | recipe-8b-r2/00-trial-0 | Qwen3-8B-Base | 0 | 0.855 | 0.770 | 0.348 | 0.075 | 0.62 | 0.87 | 0.05 | fail | 5.92 | accum=4, epochs=2, lr=2e-05, p_none_pair=0.25 |
+| v7-final/02-trial-2 | Qwen3-4B-Base | 2 | 0.849 | 0.770 | 0.371 | 0.105 | 0.67 | 0.87 | 0.02 | fail | 3.07 | epochs=2, lr=5e-05, p_none_pair=0.25 |
 | auto-4b-r0-91266/01-trial-1 | Qwen3-4B-Base | 0 | 0.840 | 0.767 | 0.355 | 0.062 | 0.61 | 0.87 | 0.07 | fail | 2.76 | epochs=2, lora_targets=all, lr=3e-05, p_none_pair=0.25 |
 | auto-4b-r1/04-trial-4 | Qwen3-4B-Base | 0 | 0.843 | 0.767 | 0.350 | 0.059 | 0.59 | 0.88 | 0.05 | fail | 4.94 | epochs=2, lora_targets=all, lr=3e-05, p_none_pair=0.25, perm_kl=0.2 |
 | auto-4b-r1/01-trial-1 | Qwen3-4B-Base | 0 | 0.849 | 0.765 | 0.369 | 0.078 | 0.61 | 0.83 | 0.05 | fail | 2.85 | epochs=2, lora_targets=all, lr=3e-05, p_none_pair=0.25, synthetic_repeat=2 |
@@ -27,6 +31,7 @@ Generated 2026-09-19T23:56+00:00 from runs/*/result.json. Selection on developme
 | knowledge-4b-v6/01-trial-1 | Qwen3-4B-Base | 0 | 0.854 | 0.759 | 0.351 | 0.046 | 0.55 | 0.85 | 0.05 | fail | 1.93 | lr=0.0001, p_none_pair=0.25 |
 | lowdrift-4b-v4/01-trial-1 | Qwen3-4B-Base | 0 | 0.843 | 0.759 | 0.346 | 0.055 | 0.62 | 0.85 | 0.00 | fail | 2.56 | epochs=2, lr=5e-05, p_none_pair=0.25 |
 | recipe-4b-v4-s2/00-trial-0 | Qwen3-4B-Base | 2 | 0.855 | 0.759 | 0.362 | 0.072 | 0.55 | 0.90 | 0.05 | fail | 2.83 | epochs=2, lr=5e-05, p_none_pair=0.25 |
+| v8-4b/01-trial-1 | Qwen3-4B-Base | 1 | 0.855 | 0.759 | 0.365 | 0.088 | 0.56 | 0.88 | 0.05 | fail | 3.1 | epochs=2, lr=5e-05, p_none_pair=0.25 |
 | recipe-4b-v4-s1/00-trial-0 | Qwen3-4B-Base | 1 | 0.853 | 0.758 | 0.371 | 0.062 | 0.58 | 0.88 | 0.05 | fail | 2.9 | epochs=2, lr=5e-05, p_none_pair=0.25 |
 | recipe-8b-r1/01-trial-1 | Qwen3-8B-Base | 0 | 0.861 | 0.758 | 0.370 | 0.090 | 0.56 | 0.85 | 0.00 | fail | 2.69 | accum=4, epochs=2, lr=5e-05, option_isolation=1, p_none_pair=0.25, public_frac=0.33, synthetic_repeat=2 |
 | auto-4b-r0-91266/05-trial-5 | Qwen3-4B-Base | 0 | 0.828 | 0.756 | 0.370 | 0.064 | 0.56 | 0.83 | 0.08 | fail | 1.7 | epochs=2, lr=3e-05, p_none_pair=0.25, public_frac=0.5 |

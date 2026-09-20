@@ -215,6 +215,12 @@ def launch_detached(suite, plan_path, name, gpu, existing=(), transfer=None, bud
     # parent whose loss would cancel children, nothing tied to this client. Results land on the volume; `pull` collects them.
     try:
         target = modal.Function.from_name(APP_NAME, "run_trial"); target.hydrate()
+        deployed_sources = modal.Function.from_name(APP_NAME, "remote_source_hashes").remote()
+        if deployed_sources != sources:
+            changed = sorted(k for k in set(deployed_sources) | set(sources) if deployed_sources.get(k) != sources.get(k))
+            raise SystemExit(f"deployed app has different kev/*.py than this checkout ({', '.join(changed)}); run `uv run modal deploy modal_app.py` first")
+    except SystemExit:
+        raise
     except Exception as error:
         print(f"deployed app not found ({type(error).__name__}); using the ephemeral function - run `modal deploy modal_app.py` for durable studies", flush=True)
         target = run_trial

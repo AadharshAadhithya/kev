@@ -75,9 +75,8 @@
  },
  "curve": [
   [
-   "0.6B",
    0.6,
-   "2e-4",
+   "default recipe",
    [
     0.598,
     0.595,
@@ -86,20 +85,18 @@
    "v4-06b-hardened"
   ],
   [
-   "0.6B",
    0.6,
-   "5e-5 + v7 data",
+   "low lr + random rule structures",
    [
     0.613,
     0.605,
     0.62
    ],
-   "v7-06b (lr 1e-4)"
+   "v7-06b"
   ],
   [
-   "4B",
    4.0,
-   "2e-4",
+   "default recipe",
    [
     0.704,
     0.735
@@ -107,9 +104,8 @@
    "v4-4b-baseline"
   ],
   [
-   "4B",
    4.0,
-   "5e-5",
+   "low lr",
    [
     0.759,
     0.758,
@@ -118,9 +114,8 @@
    "lowdrift-4b-v4/01, recipe-4b-v4-s1, recipe-4b-v4-s2"
   ],
   [
-   "4B",
    4.0,
-   "5e-5 + v7 data",
+   "low lr + random rule structures",
    [
     0.773,
     0.79,
@@ -129,9 +124,8 @@
    "v7-rc3, v7-final/02"
   ],
   [
-   "8B",
    8.2,
-   "2e-4",
+   "default recipe",
    [
     0.765,
     0.741
@@ -139,9 +133,8 @@
    "v3-8b-s0 (transfer-v3 = same bytes)"
   ],
   [
-   "8B",
    8.2,
-   "5e-5",
+   "low lr",
    [
     0.774,
     0.779,
@@ -150,9 +143,8 @@
    "recipe-8b-r1/00, recipe-8b-r2/01, recipe-8b-s2"
   ],
   [
-   "8B",
    8.2,
-   "5e-5 + v7 data",
+   "low lr + random rule structures",
    [
     0.796,
     0.774

@@ -31,8 +31,9 @@ See README.md (deep dive) and MODEL_CARD.md (checkpoint recipe + metrics). READM
   `kev/suite.py: SUITES_REVISION`) and `load_split` fetches + verifies them on first use. After freezing a new suite:
   `hf upload jaredpalmer/kev-suites evals . --type dataset --include "*.jsonl" --include "*.json"`, bump `SUITES_REVISION`, gitignore
   the large partitions. Never modify a frozen file; new data = new version.
-- Plot (README figure): `uv run python -m kev.plot --logs runs/logs/train_kev.log:kev-0.5b --eval runs/kev/eval.json --out docs/training.png`
-  Training logs to keep go in `runs/logs/train_*.log` (only path under runs/ besides eval.json that is committed).
+- Figures: `uv run python scripts/plot_family.py` and `uv run python scripts/plot_tweet.py` regenerate docs/kev-family.png and docs/kev-benchmark.png from
+  saved result files. Style lives in `scripts/chartstyle.py` (Geist type, Vercel color tokens, direct labels, no legends, one label/plot/value lane per bar set);
+  new figures should import it rather than set their own rcParams. `kev.plot` (loss curves from train logs) is a debugging aid, not a README figure.
 - Publish: `uv run python -m kev.publish --run runs/<run> --repo jaredpalmer/kev-<size>` (needs `hf auth login`). Repos are named by
   base model size (kev-0.5b = Qwen2.5-0.5B); versions within a size are Hub tags (`hf repos tag create jaredpalmer/kev-0.5b vX.Y`).
   Collection: huggingface.co/collections/jaredpalmer/kev-6aad9d0ea49f2589665e07cd. `--run` in serve/evaluate accepts a Hub id.

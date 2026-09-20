@@ -4,17 +4,17 @@ Small Jev-like decision models you can train and run yourself.
 
 <p>
   <a href="https://github.com/jaredpalmer/kev/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/jaredpalmer/kev/ci.yml?style=for-the-badge&labelColor=000000" height="28"></a>
-  <a href="https://huggingface.co/collections/jaredpalmer/kev-6aad9d0ea49f2589665e07cd"><img alt="Weights: Kev-0.6B · 4B · 9B" src="https://img.shields.io/badge/WEIGHTS-0.6B%20%C2%B7%204B%20%C2%B7%209B-0a0a0a.svg?style=for-the-badge&labelColor=000000" height="28"></a>
+  <a href="https://huggingface.co/collections/jaredpalmer/kev-6aad9d0ea49f2589665e07cd"><img alt="Weights: Kev-0.8B · 4B · 9B" src="https://img.shields.io/badge/WEIGHTS-0.8B%20%C2%B7%204B%20%C2%B7%209B-0a0a0a.svg?style=for-the-badge&labelColor=000000" height="28"></a>
   <a href="https://huggingface.co/datasets/jaredpalmer/kev-suites"><img alt="Frozen eval suites" src="https://img.shields.io/badge/EVAL%20SUITES-frozen-0a0a0a.svg?style=for-the-badge&labelColor=000000" height="28"></a>
   <a href="PLAN.md"><img alt="Research log" src="https://img.shields.io/badge/RESEARCH%20LOG-PLAN.md-0a0a0a.svg?style=for-the-badge&labelColor=000000" height="28"></a>
   <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-0a0a0a.svg?style=for-the-badge&labelColor=000000" height="28"></a>
 </p>
 
-Kev is a family of small decision models built on Qwen3.5 and Qwen3 and based on the architecture described in [Jev's Architecture Unmasked](https://archerhume.com/posts/jevs-architecture-unmasked). You can use the pretrained weights or train your own. The API matches TypeSafe's [System One](https://docs.typesafe.ai/api), so you can point their Python SDK at your local server.
+Kev is a family of small decision models built on Qwen3.5 and based on the architecture described in [Jev's Architecture Unmasked](https://archerhume.com/posts/jevs-architecture-unmasked). You can use the pretrained weights or train your own. The API matches TypeSafe's [System One](https://docs.typesafe.ai/api), so you can point their Python SDK at your local server.
 
 ## Highlights
 
-- 0.6B, 4B, and 9B models, with training code and evaluation data.
+- 0.8B, 4B, and 9B models, with training code and evaluation data.
 - Yes/no (`noul`), multiple-choice (`choice`), and rating (`score`) questions in the same request.
 - Questions share the input text but can't read each other.
 - Runs on CUDA and Apple Silicon. The 4B and 9B models fit a 32 GB Mac using bf16; see [Serving Performance](#serving-performance) for what to expect on a Mac.
@@ -120,26 +120,39 @@ There's a [chess demo](http://localhost:3001/chess), too. The board is the input
 
 ## Models
 
-Start with Kev-4B. Use Kev-9B when accuracy and calibration matter more than memory. Use Kev-0.6B if you need the smallest model. Kev-4B and Kev-9B are built on Qwen3.5; the previous Qwen3 models are still published and are the faster choice on a Mac (see below).
+Start with Kev-4B. Use Kev-9B when accuracy and calibration matter more than memory. Use Kev-0.8B if you need the smallest model. All three are built on Qwen3.5 bases with the same training data and settings.
 
 | Model | Base | Accuracy: Trained Sources | Accuracy: New Sources | Brier: New Sources | Model Card |
 |---|---|---|---|---|---|
-| [Kev-0.6B](https://huggingface.co/jaredpalmer/kev-0.6b) | Qwen3-0.6B-Base | 0.801 / 0.808 | 0.620 / 0.642 | 0.536 / 0.483 | [Details](docs/model-cards/kev-0.6b.md) |
+| [Kev-0.8B](https://huggingface.co/jaredpalmer/kev-0.8b) | Qwen3.5-0.8B-Base | 0.829 / 0.827 | 0.643 / 0.668 | 0.513 / 0.473 | [Details](docs/model-cards/kev-0.8b.md) |
 | [Kev-4B](https://huggingface.co/jaredpalmer/kev-4b) | Qwen3.5-4B-Base | 0.877 / 0.870 | 0.794 / 0.832 | 0.316 / 0.266 | [Details](docs/model-cards/kev-4b.md) |
 | [Kev-9B](https://huggingface.co/jaredpalmer/kev-9b) | Qwen3.5-9B-Base | 0.876 / 0.873 | **0.812 / 0.837** | **0.291 / 0.243** | [Details](docs/model-cards/kev-9b.md) |
-| Kev-4B (Qwen3) | Qwen3-4B-Base | 0.854 / 0.856 | 0.790 / 0.806 | 0.328 / 0.294 | [Details](docs/model-cards/kev-4b-qwen3.md) |
-| Kev-8B (Qwen3) | Qwen3-8B-Base | 0.863 / 0.870 | 0.796 / 0.780 | 0.337 / 0.327 | [Details](docs/model-cards/kev-8b-qwen3.md) |
 | Jev | Hosted | 0.845 / – | 0.857 / – | 0.211 / – | – |
 
 Each cell is **development / test**. "Trained sources" means held-out examples from the datasets used to train Kev. "New sources" means datasets and policy rule types Kev wasn't trained on. Every model was evaluated on the same development sets (`decision-v7`, `transfer-v4`) and the same test sets, which were read once per released checkpoint, after model selection. Lower Brier is better.
-
-The Qwen3.5 models were trained with the same data and settings as the Qwen3 models, so the differences come from the base model. On the development set the accuracy gain is within noise; on the test set Kev-9B is 7.3 points ahead of Kev-8B (95% CI +2.8 to +11.7) with a Brier score 0.08 lower, and Kev-4B is 2.9 points ahead of its predecessor (−0.9 to +6.4). [PLAN_Qwen35.md](PLAN_Qwen35.md) has the full experiment, including the criteria we set in advance and how the results measured against them.
 
 Kev-9B trails Jev by about 4.5 points on the new-source development set. We don't know which datasets Jev was trained on, so this isn't a controlled comparison of the two architectures.
 
 ![Accuracy by source for Kev and Jev](docs/kev-family.png)
 
-The previous Qwen3 weights stay available: `jaredpalmer/kev-4b@qwen3` and `jaredpalmer/kev-8b`. The original [Kev-0.5B](https://huggingface.co/jaredpalmer/kev-0.5b) used Qwen2.5-0.5B and is kept for reference; see its [model card](docs/model-cards/kev-0.5b.md). All weights are in the [Kev collection](https://huggingface.co/collections/jaredpalmer/kev-6aad9d0ea49f2589665e07cd) and the [GitHub release](https://github.com/jaredpalmer/kev/releases/tag/kev-family), which includes tarballs and SHA-256 checksums.
+All weights are in the [Kev collection](https://huggingface.co/collections/jaredpalmer/kev-6aad9d0ea49f2589665e07cd) and the [GitHub release](https://github.com/jaredpalmer/kev/releases/tag/kev-family), which includes tarballs and SHA-256 checksums.
+
+<details>
+<summary>Previous generation (Qwen3) and the prototype</summary>
+
+The first Kev family used Qwen3 bases with the same data and settings. Those weights stay published and are the faster choice on a Mac (see [Serving Performance](#serving-performance)), but they are no longer developed.
+
+| Model | Base | Accuracy: Trained Sources | Accuracy: New Sources | Brier: New Sources | Model Card |
+|---|---|---|---|---|---|
+| Kev-0.6B (Qwen3) — `jaredpalmer/kev-0.6b` | Qwen3-0.6B-Base | 0.801 / 0.808 | 0.620 / 0.642 | 0.536 / 0.483 | [Details](docs/model-cards/kev-0.6b-qwen3.md) |
+| Kev-4B (Qwen3) — `jaredpalmer/kev-4b@qwen3` | Qwen3-4B-Base | 0.854 / 0.856 | 0.790 / 0.806 | 0.328 / 0.294 | [Details](docs/model-cards/kev-4b-qwen3.md) |
+| Kev-8B (Qwen3) — `jaredpalmer/kev-8b` | Qwen3-8B-Base | 0.863 / 0.870 | 0.796 / 0.780 | 0.337 / 0.327 | [Details](docs/model-cards/kev-8b-qwen3.md) |
+
+Because only the base changed, the two generations are a controlled comparison. On the development set the accuracy gain is within noise; on the test set Kev-9B is 7.3 points ahead of Kev-8B (95% CI +2.8 to +11.7) with a Brier score 0.08 lower, Kev-4B is 2.9 points ahead of its predecessor (−0.9 to +6.4), and Kev-0.8B is 4.8 points ahead of Kev-0.6B (+0.2 to +9.3). [PLAN_Qwen35.md](PLAN_Qwen35.md) has the full experiment, including the criteria we set in advance and how the results measured against them.
+
+The original [Kev-0.5B](https://huggingface.co/jaredpalmer/kev-0.5b) used Qwen2.5-0.5B and is kept for reference; see its [model card](docs/model-cards/kev-0.5b.md).
+
+</details>
 
 ## API
 
@@ -205,12 +218,11 @@ On CUDA, install `flash-linear-attention` for the Qwen3.5 models (the Modal imag
 
 On Apple Silicon there are no fast kernels for the DeltaNet layers, so PyTorch runs reference code. Median model time in bf16 on an M5, five questions with three options each on a ~230-token state:
 
-| Model | Time |
-|---|---|
-| Kev-4B (Qwen3.5) | 779 ms |
-| Kev-4B (Qwen3), `jaredpalmer/kev-4b@qwen3` | 174 ms |
-| Kev-9B (Qwen3.5) | about 2 s |
-| Kev-8B (Qwen3) | about 300 ms |
+| Model | Time | Previous generation on the same request |
+|---|---|---|
+| Kev-0.8B | 329 ms | Kev-0.6B (Qwen3): 123 ms |
+| Kev-4B | 779 ms | Kev-4B (Qwen3), `jaredpalmer/kev-4b@qwen3`: 174 ms |
+| Kev-9B | about 2 s | Kev-8B (Qwen3): about 300 ms |
 
 If you serve on a Mac and need low latency, use the Qwen3 models for now. An MLX backend for the Qwen3.5 models is the next planned change.
 
@@ -220,14 +232,15 @@ You can disable these with `KEV_MERGE=0`, `KEV_ATTN=eager`, `KEV_SHAPE_BUCKET=1`
 
 ## Training
 
-The released models use `decision-v7`: 10,000 examples from ten public datasets, 896 generated policy examples, and 1,680 examples from 60 generated rule structures. All train for two epochs with LoRA rank 16 and cross-entropy. The learning rate is `1e-4` for 0.6B and `5e-5` for 4B/9B. For Qwen3.5 bases the adapter also covers the DeltaNet projections; `kev.train` picks the right targets from the model config.
+The released models use `decision-v7`: 10,000 examples from ten public datasets, 896 generated policy examples, and 1,680 examples from 60 generated rule structures. All train for two epochs with LoRA rank 16 and cross-entropy. The learning rate is `1e-4` for 0.8B and `5e-5` for 4B/9B. For Qwen3.5 bases the adapter also covers the DeltaNet projections; `kev.train` picks the right targets from the model config.
 
 ```bash
 # sanity run, ~1 minute
 uv run python -m kev.train --n_per_source 40 --accum 4 --out runs/smoke
 
-# Kev-0.6B on a Mac (~2 h on an M5) or a few minutes on one H100
-uv run python -m kev.train --suite evals/v7/decision-v7 --base Qwen/Qwen3-0.6B-Base --epochs 2 --lr 1e-4 --p_none_pair 0.25 --out runs/kev-0.6b
+# Kev-0.8B (~20 min on one H100; the Mac path works but is slow for Qwen3.5 bases)
+uv run python -m kev.train --suite evals/v7/decision-v7 --base Qwen/Qwen3.5-0.8B-Base --base_revision dc7cdfe2ee4154fa7e30f5b51ca41bfa40174e68 \
+    --epochs 2 --lr 1e-4 --batch 8 --dtype bf16 --p_none_pair 0.25 --device cuda --out runs/kev-0.8b
 
 # the Kev-4B recipe (one H100 via Modal, ~1 h; see below). Swap in Qwen/Qwen3-4B-Base for the previous generation.
 uv run python -m kev.train --suite evals/v7/decision-v7 --base Qwen/Qwen3.5-4B-Base --base_revision 1001bb4d826a52d1f399e183466143f4da7b741b \
@@ -280,7 +293,7 @@ These commands use development data. Test data requires `--allow-test`. The benc
 
 - Probabilities aren't well calibrated on new sources. On the new-source development set, Kev-4B assigns at least 0.9 probability to a wrong answer on 8.2% of questions (Kev-9B: 7.5%). Test it on your own data before choosing a probability threshold.
 - Fine-tuning can make the base model worse at individual tasks. Date arithmetic is the clearest case: the untrained Qwen3.5-9B base gets 0.82 on the `deadline` policy questions and Kev-9B gets 0.72, because training erodes the skill ([issue #8](https://github.com/jaredpalmer/kev/issues/8), [PLAN_Qwen35.md](PLAN_Qwen35.md)). Knowledge questions (MMLU 0.74 vs Jev 0.90) are the other large gap.
-- The Qwen3.5 models are slow on Apple Silicon (see Serving Performance) and need `transformers >= 5.17`.
+- The current models are slow on Apple Silicon (see Serving Performance) and need `transformers >= 5.17`.
 - Changing option order can change an answer. Question isolation doesn't prevent this.
 - Training uses at most 384 state tokens and 1,024 tokens for the state plus one question. Serving allows 8,192 tokens for the state plus one question; longer context wasn't covered by training.
 - The server handles one request at a time. It caches repeated state text, but doesn't batch requests from different callers.

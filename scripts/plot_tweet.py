@@ -17,7 +17,7 @@ MODELS = [("kev-9b", "Qwen3.5-9B", "runs/q35-9b/01-trial-1/result.json"),
           ("kev-4b", "Qwen3.5-4B", "runs/q35-4b-s23/00-trial-0/result.json"),
           ("kev-8b-qwen3", "Qwen3-8B, previous", "runs/v7-final/00-trial-0/result.json"),
           ("kev-4b-qwen3", "Qwen3-4B, previous", "runs/v7-rc3/01-trial-1/result.json"),
-          ("kev-0.6b", "Qwen3-0.6B", "runs/v7-06b/02-trial-2/result.json"),
+          ("kev-0.8b", "Qwen3.5-0.8B", "runs/q35-08b/02-trial-2/result.json"),
           ("kev-0.5b", "Qwen2.5-0.5B, prototype", "runs/kev-05b-transfer-v4/report.json")]
 BASES = [("Qwen3.5-9B", "untrained base", "runs/probes/qwen35-9b-base-base-transfer-v4/report.json"),
          ("Qwen3.5-4B instruct", "untrained, SemIf prompt", "runs/probes/qwen35-4b-semif-transfer-v4/report.json")]

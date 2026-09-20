@@ -86,7 +86,7 @@ Per-source out-of-domain accuracy (Kev-9B / Jev): QNLI 0.93 / 0.93, SciQ 0.96 / 
 
 ## Known limits
 
-- **Slow on a Mac.** The DeltaNet kernels have no MPS implementation; PyTorch falls back to reference code. A five-question request that takes 0.3 s on Kev-8B takes about 2 s here in bf16 on an M5. On CUDA with `flash-linear-attention` installed it is fast. Use Kev-8B (Qwen3) for low latency on Apple Silicon until an MLX path exists.
+- **Slow on a Mac.** The DeltaNet kernels have no MPS implementation; PyTorch falls back to reference code. A five-question request that takes 0.3 s on Kev-8B takes about 2 s here in bf16 on an M5. On CUDA with `flash-linear-attention` installed it is fast. Use Kev-8B (Qwen3, `jaredpalmer/kev-8b`) for low latency on Apple Silicon until an MLX path exists.
 - Requires `transformers >= 5.17` (the `qwen3_5` architecture) and `peft >= 0.21`.
 - Date arithmetic (`deadline` 0.72 vs Jev 0.93) and knowledge (MMLU 0.74 vs 0.90) remain the gap to Jev. Training data that renders day counts is the next experiment ([issue #8](https://github.com/jaredpalmer/kev/issues/8)).
 - Out-of-domain probabilities are usable but not calibrated (raw ECE 0.105 dev, 0.093 test); temperature fitted in-domain does not transfer.

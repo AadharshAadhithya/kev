@@ -28,7 +28,7 @@ metrics:
   - brier_score
   - expected_calibration_error
 model-index:
-  - name: Kev-0.6B
+  - name: Kev-0.6B (Qwen3)
     results:
       - task: { type: text-classification, name: typed decision (choice / noul / score) }
         dataset: { type: mixed, name: "decision-v4 development (1,204 records; ten trained public sources + programmatic policy pairs)" }
@@ -42,7 +42,9 @@ model-index:
           - { type: brier_score, value: 0.536 }
 ---
 
-# Kev-0.6B
+# Kev-0.6B (Qwen3)
+
+> **Previous generation (Qwen3).** Kept as the fast small option on Apple Silicon (0.12 s per five-question request vs 0.33 s for Kev-0.8B). For accuracy use [Kev-0.8B](kev-0.8b.md): on the locked test it scores 0.668 vs 0.642 out of domain against this model on the same items. Weights: `jaredpalmer/kev-0.6b`.
 
 Kev-0.6B is a **decision model**: one document (the *state*) and a set of typed questions in, a probability distribution per question out, in one forward pass. No text generation. It is a LoRA adapter (r=16) plus a pointer head on `Qwen/Qwen3-0.6B-Base`, and it serves TypeSafe's public `/v1/systemone` contract.
 

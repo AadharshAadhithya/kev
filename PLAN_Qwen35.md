@@ -82,7 +82,7 @@ Properties: isolation is exact **by construction** (rows are independent tensors
 | item | today | needed | evidence / risk |
 |---|---|---|---|
 | transformers | `>=4.51,<4.58` ([pyproject](pyproject.toml)) | `>=5.17` (qwen3_5 is not in 4.x) | 5.17.0 loads Qwen3.5-0.8B-Base and runs a forward (verified in a scratch venv). **Risk:** 5.x API changes for the existing Qwen3 path; gate with the parity tests in [`tests/test_v3.py`](tests/test_v3.py) (merged-vs-unmerged, prefix-vs-full, bucket padding) and a bf16 dev-set re-score of the published Kev-4B (must match [`runs/v7-rc3/01-trial-1/result.json`](runs/v7-rc3/01-trial-1/result.json) within bf16 noise). |
-| peft | `>=0.15` | a version tested with transformers 5 (`>=0.18`, used in the probe image) | LoRA target names on DeltaNet layers differ (`in_proj_qkvz`, `in_proj_ba`, `out_proj`); attention and MLP names are unchanged. |
+| peft | `>=0.15` | a version tested with transformers 5 (`>=0.18`, used in the probe image) | LoRA target names on DeltaNet layers differ (`in_proj_qkvz`, `in_proj_ba`, `out_proj`); attention and MLP names are unchanged. Existence proof that peft LoRA r=16 trains on Qwen3.5-4B-Base: [pngwn/system-one-qwen3.5-4b-scorer-v2b](https://huggingface.co/pngwn/system-one-qwen3.5-4b-scorer-v2b) (30.5M trainable params, lr 1e-4, seq 384, 11.5k steps) and [Bespoke-Nimble-9B](https://huggingface.co/bespokelabs/Bespoke-Nimble-9B) (LoRA on Qwen3.5-9B). Both score one question per sequence; neither shares the state across questions, which is what section 3 adds. |
 | DeltaNet kernel | – | [flash-linear-attention](https://github.com/fla-org/flash-linear-attention) + triton on CUDA | Without it transformers falls back to a reference PyTorch implementation ("correct but much slower", its own warning). CUDA-only. **Mac serving runs the fallback**; speed unmeasured — measured in phase 1 before committing to a Mac story. |
 | Modal image | pins `uv.lock` | a second image (or the upgraded lock) | [`modal_probe35.py`](modal_probe35.py) already builds the transformers-5 image; the main app follows once the lock is upgraded. |
 | suites | base revisions pinned per suite ([`kev.suite.freeze`](kev/suite.py#L146), [`validated_trial`](kev/experiment.py#L43) requires a 40-hex `base_revision` for unpinned bases) | pass `base_revision` per trial (already supported) or freeze `decision-v9` = v7 with Qwen3.5 revisions pinned | Dev/test bytes stay identical to v4 either way, so every number remains comparable. |
@@ -134,11 +134,41 @@ Same data, same recipe, new base. Nothing else changes, so any difference is the
 - **Their evaluation is thinner than ours** (144 authored rows, agreement rather than ground truth, no live Jev, no paired uncertainty). Phase 0 scores both ways on frozen items and runs live Jev on their rows; the neutral-ground position is worth more than winning any single cell.
 - **Their distribution is stronger than ours** (browser demo, "no waitlist"). Not something this plan addresses; noted in deferred work.
 
+### Laya (convaiinnovations), reviewed 2026-09-20
+
+[Laya](https://huggingface.co/convaiinnovations/laya) ([code](https://github.com/NandhaKishorM/laya), 957 Hub likes) is the other trained open decision model with weights, and it is built the opposite way from Kev: a **bidirectional encoder** (ModernBERT-large, 395M, fully fine-tuned; a 322M mmBERT variant for 100+ languages) plus a 2-layer transformer head that scores each option at its own `[MASK]` token ([`common.py`](https://github.com/NandhaKishorM/laya/blob/main/laya/common.py)). Sequence per question: `[CLS] type+instructions [SEP] [MASK] opt0 [MASK] opt1 … [SEP] state [SEP]`, 512 tokens (192 reserved for options). **One sequence per question**: "all questions in one forward pass" means a batch, so the state is re-encoded for every question and cost scales linearly (T4: 39.5 ms for 1 question, 158.6 ms for 10). Trained with what they call RLCD: REINFORCE with Gaussian logit noise against a strictly proper reward (log score + 0.5·spherical + ranked probability score for ordinals, group-mean baseline). In expectation that objective has the same optimum as the log loss Kev minimises directly; the RL framing adds variance, not a different target. Its Jev numbers are third-party published figures, not measured.
+
+What it teaches us, and what it does not:
+
+- **Encoders are strong in-distribution and near chance off it.** Their own limits section: base checkpoints score 0.362 zero-shot on their typed-decisions benchmark (random 0.318, majority 0.461); the 0.766 headline is a checkpoint fine-tuned on that benchmark's training split. They report no held-out-source number at all. That is the failure mode `transfer-v4` was built to expose, and the reason Kev's headline is out-of-domain accuracy on never-trained sources. Any comparison we publish should score Laya on our frozen OOD items (their SDK is pip-installable; `agent.predict(state, questions)` takes System One shaped questions, so the conversion is trivial).
+- **High-cardinality choice is a real Kev advantage.** Laya scores 0.425 on Banking77 (77 options at 3–4 tokens each in a 192-token option budget); pngwn's scorer caps options at 16; Jev supports 255. Kev-0.5B scored 0.86 on 77-way Banking77 with the pointer head and no option budget. We should measure and state it (a ≥ 50-option column in the README table).
+- **Calibration as shipped is worse than ours, fixed by finer temperature grouping.** Laya ships at ECE 0.466 (multilingual 0.314) and reaches 0.081 with one temperature per (question type, option count). Kev ships at 0.09 in-distribution raw; our single fitted temperature did not transfer out of domain. Their grouping is a cheap thing to test on our dev/test split (Phase 0 scope, one afternoon).
+- **Multilingual is a differentiator Kev gets for free from the base and has never measured.** Laya needs two checkpoints and a script-detecting router because ModernBERT is English-only. Qwen3 and Qwen3.5 are multilingual; one Kev should cover XNLI/MASSIVE languages without routing. Eval-only multilingual slices belong in `transfer-v5`.
+- **The "act/escalate" head is a product idea, not a model idea.** It is an MLP over (top-1, margin, entropy, K) features plus the `[CLS]` vector predicting act-vs-escalate. Kev can expose an equivalent abstain flag from the same probability features, calibrated on the development partition, with no retraining.
+- **Nothing to adopt from the training objective.** Log loss is already a strictly proper scoring rule; we tested the ranked probability score as an extra term (`--ord_w`) and it did not help; the spherical term is unlikely to differ. Their soft-target training against teacher distributions is closer to distillation; Kev deliberately trains on labels, not Jev outputs.
+
+### Where Kev sits in the field
+
+multimodalart's [Jev Reproductions Tracker](https://huggingface.co/spaces/multimodalart/jev-reproductions-tracker) lists ~60 artifacts (SemIf, Laya, Nimble, pngwn's Qwen3.5-4B scorer, several RLCD LoRAs, localjev, benchmarks). **Kev is not on it.** Submitting it is free and is the single cheapest distribution action available.
+
 ## 7. Decision criteria, stated in advance
 
 Ship a Qwen3.5-based Kev-9B as the new top of the family **only if**, on the same 764 items: transfer accuracy ≥ Kev-8B's 0.796 with the paired CI excluding zero, `deadline` ≥ 0.75, MMLU and PAWS not below Kev-8B by more than seed noise (~1 pp), and Brier ≤ 0.34. Ship a Qwen3.5-based Kev-4B if it beats Kev-4B (0.790) by the same test. Otherwise the outcome is a documented negative result and the Qwen3 family remains the release. Locked test read once per candidate, as always.
 
-## 8. Budget and time
+## 8. Future exploration after the re-architecture
+
+Not part of this plan's budget; ordered by expected value per dollar once a Qwen3.5-based Kev exists. Each is one controlled experiment on the frozen suites.
+
+1. **Multilingual out-of-domain slices** (XNLI in 14 languages, MASSIVE intent in 51; eval-only, in `transfer-v5`). Zero training cost; tests whether the multilingual base carries the trained readout across languages, which would make one Kev cover what Laya needs a router and two checkpoints for. ~$2.
+2. **Finer calibration** — one temperature per (question type, option count), fitted on the development partition, evaluated on the locked test only once at promotion time. Laya's evidence says this is the highest-value calibration fix; ours says a single temperature does not transfer. ~$0.
+3. **A high-cardinality column** in the README table (Banking77 77-way held out, plus a synthetic 100–255-option family), where Kev's pointer head has no option budget and every open competitor caps or collapses. ~$3.
+4. **An abstain signal** — a calibrated "uncertain" flag from (top-1, margin, entropy, K), reported alongside probabilities in `/v1/systemone`; product-level, no retraining. Evaluate as selective accuracy at fixed coverage on the OOD suite.
+5. **Small-model path via an encoder**: ModernBERT-large / mmBERT with Kev's pointer head and a block mask that keeps state tokens from attending to questions (so the state encoding is question-independent and shareable). Answers, for ~$5, whether a 400M encoder can beat Kev-0.6B's 0.62 out of domain or whether Laya's near-chance-off-distribution result is intrinsic to encoders. If it wins, it replaces Kev-0.6B for the 30 ms latency tier.
+6. **Self-distillation for the small model**: Kev-9B's probabilities as soft targets for Kev-0.6B/2B on the same training partition (no Jev outputs involved). Laya's soft-target training and Nimble's teacher setup both suggest gains at small sizes; our rule against training on Jev outputs is untouched.
+7. **Ordinal readout for Score** — the fix proposed in PLAN.md for the deadline family; if the Qwen3.5 base closes most of the gap by itself (section 2), this drops in priority, which is the cheapest possible outcome.
+8. **Qwen3.5-35B-A3B-Base** and, when Base weights ship, Qwen3.6/3.8 — same code path, no new engineering.
+
+## 9. Budget and time
 
 | phase | wall time | Modal |
 |---|---|---|

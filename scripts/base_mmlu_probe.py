@@ -27,10 +27,16 @@ def main():
                     help="semif: SemIf's readout (github.com/TheoLeeCJ/SemIf core.direct_messages): chat template, system instruction, JSON {evidence, criterion, options} payload, letter logits; for instruct models")
     ap.add_argument("--split", default="development")
     ap.add_argument("--revision", default=None, help="pin the Hub revision (recorded in the report)")
+    ap.add_argument("--adapter", default=None, help="diagnostic: merge this Kev LoRA checkpoint into the base, then read letter logits through the base lm_head. "
+                                                   "Separates 'the adapted backbone forgot X' from 'the pointer readout cannot express X'.")
     a = ap.parse_args()
     tok = AutoTokenizer.from_pretrained(a.base, revision=a.revision)
     dtype = torch.bfloat16 if a.device != "cpu" else torch.float32
     model = AutoModelForCausalLM.from_pretrained(a.base, dtype=dtype, revision=a.revision).to(a.device).eval()
+    if a.adapter:
+        from peft import PeftModel
+        model.model = PeftModel.from_pretrained(model.model, a.adapter).merge_and_unload()   # Kev adapters are trained on the bare backbone (.model)
+        model.eval()
     letters = "ABCDEFGHIJKLMNOP"
     letter_ids = [tok.encode((" " if a.prompt == "plain" else "") + L, add_special_tokens=False)[0] for L in letters]
     if len(set(letter_ids)) != len(letter_ids): raise ValueError("answer-slot tokens collide")
@@ -63,7 +69,7 @@ def main():
             rows.append({"id": m["id"], "group": m["group_id"], "question": qid, "source": src, "task": r["questions"][qid]["src"], "type": r["questions"][qid]["type"],
                          "variant": m["variant"], "keys": keys, "label": keys.index(q["label"]), "pair_id": m.get("pair_id"), "sibling": m.get("sibling"), "parent": m["id"],
                          "p": probs, "raw_probability_sum": 1.0, "zero_count": 0})
-    summary = {"base": a.base, "readout": "zero-shot next-token letter logits" + (" (SemIf prompt, chat template)" if a.prompt == "semif" else ""), "suite": a.suite, "split": a.split, "revision": a.revision,
+    summary = {"base": a.base, "readout": "zero-shot next-token letter logits" + (" (SemIf prompt, chat template)" if a.prompt == "semif" else ""), "suite": a.suite, "split": a.split, "revision": a.revision, "adapter": a.adapter,
                "sources": {k: {"n": n[k], "acc": round(hits[k] / n[k], 3)} for k in n}}   # namespaced: a source called "unknowable" must not shadow the report's unknowable block
     if a.out:
         from kev.benchmark import summarize

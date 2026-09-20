@@ -1,8 +1,8 @@
 # Leaderboard
 
-Generated 2026-09-20T02:35+00:00 from runs/*/result.json. Selection on development partitions only; the locked test is never read here.
+Generated 2026-09-20T14:54+00:00 from runs/*/result.json. Selection on development partitions only; the locked test is never read here.
 
-- **Qwen/Qwen3-0.6B-Base** incumbent: transfer 0.610, dev 0.799, seeds [0] (arch-06b/06-trial-6)
+- **Qwen/Qwen3-0.6B-Base** incumbent: transfer 0.620, dev 0.801, seeds [2] (v7-06b/02-trial-2)
 - **Qwen/Qwen3-4B-Base** incumbent: transfer 0.775, dev 0.858, seeds [0] (v7-rc3/00-trial-0, v8-4b/00-trial-0)
 - **Qwen/Qwen3-8B-Base** incumbent: transfer 0.796, dev 0.863, seeds [0] (v7-final/00-trial-0)
 
@@ -65,10 +65,13 @@ Generated 2026-09-20T02:35+00:00 from runs/*/result.json. Selection on developme
 | v4-4b-baseline/00-trial-0 | Qwen3-4B-Base | 0 | 0.849 | 0.704 | 0.463 | 0.113 | 0.58 | 0.93 | 0.02 | fail | 3.02 | epochs=2, p_none_pair=0.25 |
 | mix-4b-knobs/00-trial-0 | Qwen3-4B-Base | 0 | 0.850 | 0.686 | 0.435 | 0.076 | 0.45 | 0.92 | 0.02 | fail | 3.09 | epochs=2, p_none_pair=0.25, synthetic_repeat=3 |
 | ablation-v2/07-trial-7 | Qwen3-0.6B-Base | 1 | 0.793 | 0.621 | 0.532 |  | 0.07 | 0.74 | 0.04 | pass | 0.31 | epochs=2 |
+| v7-06b/02-trial-2 | Qwen3-0.6B-Base | 2 | 0.801 | 0.620 | 0.536 | 0.108 | 0.08 | 0.80 | 0.07 | fail | 0.8 | epochs=2, lr=0.0001, p_none_pair=0.25 |
 | ablation-v2/06-trial-6 | Qwen3-0.6B-Base | 0 | 0.816 | 0.620 | 0.525 |  | 0.03 | 0.76 | 0.06 | pass | 0.34 | epochs=2 |
+| v7-06b/00-trial-0 | Qwen3-0.6B-Base | 0 | 0.797 | 0.613 | 0.555 | 0.111 | 0.05 | 0.82 | 0.02 | fail | 0.95 | epochs=2, lr=0.0001, p_none_pair=0.25 |
 | arch-06b/06-trial-6 | Qwen3-0.6B-Base | 0 | 0.799 | 0.610 | 0.519 | 0.062 | 0.14 | 0.85 | 0.02 | fail | 0.31 | epochs=2, lr=0.0001, p_none_pair=0.25 |
 | ablation-v2/04-trial-4 | Qwen2.5-0.5B | 0 | 0.742 | 0.605 | 0.501 |  | 0.05 | 0.49 | 0.12 | fail | 0.27 | epochs=2 |
 | v4-06b-hardened/02-trial-2 | Qwen3-0.6B-Base | 2 | 0.800 | 0.605 | 0.545 | 0.066 | 0.06 | 0.85 | 0.02 | fail | 0.8 | epochs=2, p_none_pair=0.25 |
+| v7-06b/01-trial-1 | Qwen3-0.6B-Base | 1 | 0.788 | 0.605 | 0.533 | 0.084 | 0.14 | 0.77 | 0.05 | fail | 0.83 | epochs=2, lr=0.0001, p_none_pair=0.25 |
 | arch-06b/03-trial-3 | Qwen3-0.6B-Base | 0 | 0.799 | 0.599 | 0.538 | 0.050 | 0.19 | 0.82 | 0.00 | fail | 0.54 | epochs=2, option_isolation=1, p_none_pair=0.25, special_embeddings=1 |
 | v3-data-capacity-s1/00-trial-0 | Qwen3-0.6B-Base | 1 | 0.760 | 0.599 | 0.549 | 0.082 | 0.06 | 0.68 | 0.10 | fail | 0.36 | epochs=2, train_sources=banking77,boolq,agnews,mnli,sst5,yelp,trec,dbpedia14,amazon,imdb,legacy_policy |
 | ablation-v2/01-kev2 | legacy |  | 0.725 | 0.598 | 0.525 |  | 0.00 | 0.69 | 0.06 | pass | 0.07 | defaults |

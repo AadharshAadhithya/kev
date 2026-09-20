@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
-MODELS = [("kev-0.6b\nQwen3-0.6B", "runs/v4-06b-hardened/00-trial-0/result.json", "runs/v4-06b-hardened/00-trial-0/result.json", "#AFBBC1"),
+MODELS = [("kev-0.6b\nQwen3-0.6B", "runs/v7-06b/02-trial-2/result.json", "runs/v7-06b/02-trial-2/result.json", "#AFBBC1"),
           ("kev-4b\nQwen3-4B", "runs/v7-rc3/01-trial-1/result.json", "runs/v7-rc3/01-trial-1/result.json", "#6C8E9B"),
           ("kev-8b\nQwen3-8B", "runs/v7-final/00-trial-0/result.json", "runs/v7-final/00-trial-0/result.json", "#355C6B")]
 JEV_T, JEV_D = "runs/jev-transfer-v4/report.json", "runs/jev-decision-v4/report.json"

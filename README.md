@@ -50,7 +50,7 @@ KEV_DTYPE=bf16 uv run --extra serve python -m kev.serve --run jaredpalmer/kev-4b
 |---|---|---|---|---|---|
 | [`kev-8b`](https://huggingface.co/jaredpalmer/kev-8b) | Qwen3-8B-Base | 0.863 / **0.870** | **0.796** / 0.780 | bf16, ~0.5 s | [card](docs/model-cards/kev-8b.md) |
 | [`kev-4b`](https://huggingface.co/jaredpalmer/kev-4b) | Qwen3-4B-Base | 0.854 / 0.856 | 0.790 / **0.806** | bf16, ~0.3 s | [card](docs/model-cards/kev-4b.md) |
-| [`kev-0.6b`](https://huggingface.co/jaredpalmer/kev-0.6b) | Qwen3-0.6B-Base | 0.805 / 0.819 | 0.598 / 0.631 | fp32, ~0.1 s | [card](docs/model-cards/kev-0.6b.md) |
+| [`kev-0.6b`](https://huggingface.co/jaredpalmer/kev-0.6b) | Qwen3-0.6B-Base | 0.801 / 0.808 | 0.620 / 0.642 | fp32, ~0.1 s | [card](docs/model-cards/kev-0.6b.md) |
 | Jev (hosted reference) | – | 0.845 / – | 0.857 / – | | |
 
 Same frozen items for every row (`evals/v4`: 1,200 in-distribution questions from the trained sources; 764 out-of-domain records from six public sources kev never trained on plus held-out programmatic policy rules). Development partitions selected the checkpoints; the locked test was read once per checkpoint and is recorded in each card. Latencies are five 3-way questions on a ~230-token state, M5. The original prototype, [`kev-0.5b`](https://huggingface.co/jaredpalmer/kev-0.5b) (Qwen2.5-0.5B; 0.712 in-distribution, 0.575 out of domain on the same items), stays on the Hub for reference with its [card](MODEL_CARD.md).
@@ -224,14 +224,14 @@ flowchart TB
 
 ## Training
 
-Training data are public datasets converted to TypeSafe-shaped requests plus programmatic policy data, frozen into checksummed suites (`evals/`). `kev-4b` and `kev-8b` train on `decision-v7`: ten public sources at 1,000 records each, nine policy template families as minimal pairs (896 records), and 1,680 records from 60 randomly generated rule structures rendered in four styles; two epochs, LoRA r=16, **lr 5e-5** — the single largest recipe improvement we found, because the default 2e-4 erodes what the base model already knows (details and the base-model probe in [PLAN.md](PLAN.md)). `kev-0.6b` trains on `decision-v4` (same public sources, eight fixed rule shapes) at lr 1e-4.
+Training data are public datasets converted to TypeSafe-shaped requests plus programmatic policy data, frozen into checksummed suites (`evals/`). `kev-4b` and `kev-8b` train on `decision-v7`: ten public sources at 1,000 records each, nine policy template families as minimal pairs (896 records), and 1,680 records from 60 randomly generated rule structures rendered in four styles; two epochs, LoRA r=16, **lr 5e-5** — the single largest recipe improvement we found, because the default 2e-4 erodes what the base model already knows (details and the base-model probe in [PLAN.md](PLAN.md)). `kev-0.6b` trains on the same suite at lr 1e-4.
 
 ```bash
 # sanity run, ~1 minute
 uv run python -m kev.train --n_per_source 40 --accum 4 --out runs/smoke
 
 # kev-0.6b on a Mac (~2 h on an M5) or a few minutes on one H100
-uv run python -m kev.train --suite evals/v4/decision-v4 --base Qwen/Qwen3-0.6B-Base --epochs 2 --lr 1e-4 --p_none_pair 0.25 --out runs/kev-0.6b
+uv run python -m kev.train --suite evals/v7/decision-v7 --base Qwen/Qwen3-0.6B-Base --epochs 2 --lr 1e-4 --p_none_pair 0.25 --out runs/kev-0.6b
 
 # the kev-4b recipe (one H100 via Modal, ~50 min; see below)
 uv run python -m kev.train --suite evals/v7/decision-v7 --base Qwen/Qwen3-4B-Base --epochs 2 --lr 5e-5 \
@@ -308,11 +308,11 @@ Trials are configuration-only: `kev.experiment` refuses configs outside a bounde
 
 | out-of-domain, `transfer-v4` dev (764 records) | Qwen3-8B base, untrained | Qwen3-30B-A3B base, untrained | kev-0.6b | kev-4b | kev-8b | Jev |
 |---|---|---|---|---|---|---|
-| accuracy | 0.726 | 0.707 | 0.598 | 0.790 | 0.796 | **0.857** |
-| Brier (lower is better) | 0.366 | 0.365 | 0.521 | 0.328 | 0.337 | **0.211** |
-| confident errors (p ≥ 0.9 and wrong) | 0.6% | 0.5% | 5.2% | 8.2% | 9.9% | 3.7% |
-| held-out policy rules, both siblings correct | 0.55 | 0.44 | 0.11 | 0.73 | 0.69 | **0.86** |
-| MMLU / PAWS | 0.75 / 0.84 | 0.79 / 0.82 | 0.46 / 0.56 | 0.65 / 0.72 | 0.70 / 0.78 | 0.90 / 0.79 |
+| accuracy | 0.726 | 0.707 | 0.620 | 0.790 | 0.796 | **0.857** |
+| Brier (lower is better) | 0.366 | 0.365 | 0.536 | 0.328 | 0.337 | **0.211** |
+| confident errors (p ≥ 0.9 and wrong) | 0.6% | 0.5% | 10.8% | 8.2% | 9.9% | 3.7% |
+| held-out policy rules, both siblings correct | 0.55 | 0.44 | 0.08 | 0.73 | 0.69 | **0.86** |
+| MMLU / PAWS | 0.75 / 0.84 | 0.79 / 0.82 | 0.50 / 0.59 | 0.65 / 0.72 | 0.70 / 0.78 | 0.90 / 0.79 |
 
 The two untrained columns are the base models read zero-shot from next-token letter logits (`scripts/base_mmlu_probe.py`): kev-8b beats its own base by +5.8 pp [+1.8, +10.0] and the untrained 30B-A3B by +9.7 pp [+4.7, +14.4], while both untrained models beat every kev on knowledge (MMLU) and paraphrase (PAWS) — the fine-tune still gives back some of what the base knows.
 
@@ -339,7 +339,7 @@ The mechanism tests below are from `kev.evaluate` on the prototype; every releas
 
 ## Limitations
 
-- **Out of domain it trails Jev by 6–7 points** at 4B/8B and by 26 at 0.6B. The gap is concentrated in knowledge (MMLU 0.69–0.75 vs 0.90), paraphrase (PAWS), noisy-label emotion, and date arithmetic. Fine-tuning still loses some of what the base model knows even at lr 5e-5.
+- **Out of domain it trails Jev by 6–7 points** at 4B/8B and by 24 at 0.6B. The gap is concentrated in knowledge (MMLU 0.69–0.75 vs 0.90), paraphrase (PAWS), noisy-label emotion, and date arithmetic. Fine-tuning still loses some of what the base model knows even at lr 5e-5.
 - **Held-out rule reasoning** (unseen compositions of policy conditions) is 0.62–0.73 both-siblings-correct depending on the seed; Jev is 0.86. The remaining failures are concentrated in day-precision date arithmetic, which no data we generated has moved.
 - **Calibration is in-distribution.** Temperature fitted in-domain does not transfer; out-of-domain probabilities are usable but not calibrated (ECE ~0.1).
 - **Product-shaped questions** with no training analogue are not guaranteed; the low-drift 4B/8B recipes carry fewer task priors than the 0.6B and can answer differently on the same input. Measure on your own data.

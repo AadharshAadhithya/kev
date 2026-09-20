@@ -18,12 +18,12 @@ ROOT = Path(__file__).resolve().parents[1]
 TASKS = [("qnli", "QNLI"), ("sciq", "SciQ"), ("tweet_offensive", "TweetEval · offensive"), ("paws", "PAWS"), ("mmlu", "MMLU · 4-way"),
          ("emotion", "Emotion-6"), ("contrastive_authorization", "Policy · authorization"), ("contrastive_deadline", "Policy · deadline (Score)"),
          ("composition_held_and_or", "Rule · (A or B) and C"), ("composition_held_or_not", "Rule · (A and B) or not C"), ("composition_held_conditional", "Rule · if A then not B else C")]
-MODELS = [("kev-0.6b", "runs/v4-06b-hardened/00-trial-0/result.json", "#AFBBC1"),
+MODELS = [("kev-0.6b", "runs/v7-06b/02-trial-2/result.json", "#AFBBC1"),
           ("kev-4b", "runs/v7-rc3/01-trial-1/result.json", "#6C8E9B"),
           ("kev-8b", "runs/v7-final/00-trial-0/result.json", "#355C6B")]
 JEV = "runs/jev-transfer-v4/report.json"
 # capacity x learning-rate curve: (label, params in B, lr, [transfer acc per seed], source trials)
-CURVE = [("0.6B", 0.6, "2e-4", [0.598, 0.595, 0.605], "v4-06b-hardened"),
+CURVE = [("0.6B", 0.6, "2e-4", [0.598, 0.595, 0.605], "v4-06b-hardened"), ("0.6B", 0.6, "5e-5 + v7 data", [0.613, 0.605, 0.620], "v7-06b (lr 1e-4)"),
          ("4B", 4.0, "2e-4", [0.704, 0.735], "v4-4b-baseline"),
          ("4B", 4.0, "5e-5", [0.759, 0.758, 0.759], "lowdrift-4b-v4/01, recipe-4b-v4-s1, recipe-4b-v4-s2"),
          ("4B", 4.0, "5e-5 + v7 data", [0.773, 0.790, 0.770], "v7-rc3, v7-final/02"),
@@ -101,7 +101,7 @@ def main():
     fig.add_artist(Line2D([.04, .965], [.085, .085], transform=fig.transFigure, color=rule, lw=1))
     fig.text(.04, .055, "Sources never in kev's training: QNLI, SciQ, TweetEval, PAWS, MMLU, Emotion (public), plus programmatic policy pairs whose rule structure was held out. "
              "Exact-match state deduplication only; Jev's exposure to these public sets is unknown.", fontsize=8.8, color=muted)
-    fig.text(.04, .03, "Recipes: LoRA r=16 + pointer head; kev-0.6b lr 2e-4 on decision-v4; kev-4b and kev-8b lr 5e-5 on decision-v7 (random rule structures). Regenerate: uv run python scripts/plot_family.py",
+    fig.text(.04, .03, "Recipes: LoRA r=16 + pointer head; all on decision-v7 (random rule structures); kev-0.6b lr 1e-4, kev-4b and kev-8b lr 5e-5. Regenerate: uv run python scripts/plot_family.py",
              fontsize=8.8, color=muted)
     out = ROOT / "docs/kev-family.png"
     fig.savefig(out, dpi=170, metadata={"Title": "kev family vs Jev, out of domain"}); plt.close(fig)

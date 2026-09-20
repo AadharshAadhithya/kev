@@ -58,11 +58,11 @@ model-index:
 
 | | kev-0.5b (prototype) | kev-0.6b | kev-4b | **kev-8b** | Jev |
 |---|---|---|---|---|
-| in-distribution accuracy (decision-v4 dev, 1,200 q) | 0.712 | 0.805 | 0.854 | **0.863** | 0.845 |
-| out-of-domain accuracy (transfer-v4 dev, 560 q) | 0.575 | 0.598 | 0.790 | **0.796** | 0.857 |
-| out-of-domain Brier | 0.50 | 0.521 | 0.328 | **0.337** | 0.211 |
-| confident errors out of domain (p ≥ 0.9 and wrong) | – | 5.2% | 8.2% | 9.9% | 3.7% |
-| held-out policy structures, both siblings correct | – | 0.11 | 0.73 | 0.69 | 0.86 |
+| in-distribution accuracy (decision-v4 dev, 1,200 q) | 0.712 | 0.801 | 0.854 | **0.863** | 0.845 |
+| out-of-domain accuracy (transfer-v4 dev, 560 q) | 0.575 | 0.620 | 0.790 | **0.796** | 0.857 |
+| out-of-domain Brier | 0.50 | 0.536 | 0.328 | **0.337** | 0.211 |
+| confident errors out of domain (p ≥ 0.9 and wrong) | – | 10.8% | 8.2% | 9.9% | 3.7% |
+| held-out policy structures, both siblings correct | – | 0.08 | 0.73 | 0.69 | 0.86 |
 | option-order flip rate | 0.21 | 0.02 | 0.00 | 0.00 | 0.00 |
 
 Per-source out-of-domain accuracy (kev-8b / Jev): QNLI 0.91 / 0.93, SciQ 1.00 / 0.99, TweetEval-offensive 0.79 / 0.81, PAWS 0.78 / 0.79, MMLU 0.70 / 0.90, Emotion 0.56 / 0.59, deadline (3-level date arithmetic) 0.60 / 0.93, (A and B) or not C 0.91 / 0.97, if A then not B else C 0.59 / 0.78.

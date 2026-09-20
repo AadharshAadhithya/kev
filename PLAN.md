@@ -268,6 +268,14 @@ questions (the models hedge to the middle level on deadline); (2) explicit day-c
 (teaching the arithmetic is not the point of a decision model; giving it the number is); (3) capacity beyond 8B.
 Spend to date ~$250 of $500.
 
+**Release (2026-09-20).** The three checkpoints are published as the kev family, no version tags (nothing overlapping to
+version; the 0.5B prototype stays on the Hub for reference). The 70% held-out-pair screen is no longer a publication gate
+(it was within seed noise and decided by one arithmetic family); it stays in `kev.experiment` as a research gate and in
+`release-check`. Final selection, every checkpoint the best of its size on the leaderboard:
+kev-0.6b = `v7-06b/02-trial-2` (dev 0.801 / 0.620, locked 0.808 / 0.642; three v7 seeds 0.613 / 0.605 / 0.620, all above
+the previous 0.598), kev-4b = `v7-rc3/01-trial-1`, kev-8b = `v7-final/00-trial-0`. Serving: fp32-merged LoRA, SDPA on MPS,
+state-prefix KV cache, shape bucketing (all parity-tested).
+
 Ops: two studies were lost to the local client disconnecting (Modal cancels `.starmap` inputs when the caller dies; `--detach`
 keeps only the last-triggered function). Studies now fan out server-side from the **deployed** app (`modal deploy modal_app.py`;
 `run_study` spawned, `pull --name` afterwards). ~$35 of GPU time was lost to this.
@@ -299,7 +307,7 @@ Relevant code: [suite builder](kev/study_v3.py), [rule generator](kev/compositio
 
 Maintained by `kev.autoresearch`; full table in [`runs/leaderboard.md`](runs/leaderboard.md). Selection uses development partitions only.
 
-- **Qwen3-0.6B-Base** incumbent (v4 suites): transfer 0.610, dev 0.799, seeds [0], knobs `{"epochs": 2, "lr": 0.0001, "p_none_pair": 0.25}`
+- **Qwen3-0.6B-Base** incumbent (v4 suites): transfer 0.620, dev 0.801, seeds [2], knobs `{"epochs": 2, "lr": 0.0001, "p_none_pair": 0.25}`
 - **Qwen3-4B-Base** incumbent (v4 suites): transfer 0.775, dev 0.858, seeds [0], knobs `{"epochs": 2, "lr": 5e-05, "p_none_pair": 0.25}`
 - **Qwen3-8B-Base** incumbent (v4 suites): transfer 0.796, dev 0.863, seeds [0], knobs `{"epochs": 2, "lr": 5e-05, "p_none_pair": 0.25}`
 

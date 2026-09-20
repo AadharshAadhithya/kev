@@ -1,21 +1,21 @@
 {
  "models": {
   "kev-0.6b": {
-   "path": "runs/v4-06b-hardened/00-trial-0/result.json",
-   "transfer_acc": 0.5975609756097561,
-   "transfer_brier": 0.5206018637922263,
+   "path": "runs/v7-06b/02-trial-2/result.json",
+   "transfer_acc": 0.6204268292682927,
+   "transfer_brier": 0.5360083888306599,
    "tasks": {
-    "composition_held_and_or": 0.46875,
-    "composition_held_conditional": 0.28125,
-    "composition_held_or_not": 0.65625,
-    "contrastive_authorization": 0.5,
-    "contrastive_deadline": 0.325,
-    "emotion": 0.475,
-    "mmlu": 0.45,
-    "paws": 0.5375,
-    "qnli": 0.8625,
-    "sciq": 0.8875,
-    "tweet_offensive": 0.7125
+    "composition_held_and_or": 0.5,
+    "composition_held_conditional": 0.46875,
+    "composition_held_or_not": 0.53125,
+    "contrastive_authorization": 0.525,
+    "contrastive_deadline": 0.375,
+    "emotion": 0.4875,
+    "mmlu": 0.5,
+    "paws": 0.5875,
+    "qnli": 0.85,
+    "sciq": 0.925,
+    "tweet_offensive": 0.6875
    }
   },
   "kev-4b": {
@@ -84,6 +84,17 @@
     0.605
    ],
    "v4-06b-hardened"
+  ],
+  [
+   "0.6B",
+   0.6,
+   "5e-5 + v7 data",
+   [
+    0.613,
+    0.605,
+    0.62
+   ],
+   "v7-06b (lr 1e-4)"
   ],
   [
    "4B",

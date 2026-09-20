@@ -54,6 +54,13 @@ def local_source_hashes():
     return source_hashes()
 
 
+@app.function(image=image, cpu=1, memory=1024, timeout=120)
+def remote_source_hashes():
+    """Hashes of kev/*.py inside the deployed image: the launcher compares them with the checkout before spawning."""
+    from kev.experiment import source_hashes
+    return source_hashes()
+
+
 @app.function(image=image, gpu=GPU, cpu=2, memory=(32768, 49152), max_containers=8, retries=0, timeout=7200,
               volumes={RUNS_MOUNT: runs_volume, HF_MOUNT: hf_cache}, secrets=secrets)
 def run_trial(study, index, label, config, suite, expected_sources, git_commit, existing=None, transfer=None):
@@ -222,8 +229,7 @@ def launch_detached(suite, plan_path, name, gpu, existing=(), transfer=None, bud
     except SystemExit:
         raise
     except Exception as error:
-        print(f"deployed app not found ({type(error).__name__}); using the ephemeral function - run `modal deploy modal_app.py` for durable studies", flush=True)
-        target = run_trial
+        raise SystemExit(f"deployed app not usable ({type(error).__name__}: {str(error)[:120]}); run `uv run modal deploy modal_app.py` first - spawns on the ephemeral app die with this client")
     fn = target.with_options(gpu=gpu, timeout=timeout, retries=0)
     calls = [fn.spawn(*job) for job in jobs]
     (ROOT / "runs").mkdir(exist_ok=True)

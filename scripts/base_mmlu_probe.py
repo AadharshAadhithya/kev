@@ -63,7 +63,8 @@ def main():
             rows.append({"id": m["id"], "group": m["group_id"], "question": qid, "source": src, "task": r["questions"][qid]["src"], "type": r["questions"][qid]["type"],
                          "variant": m["variant"], "keys": keys, "label": keys.index(q["label"]), "pair_id": m.get("pair_id"), "sibling": m.get("sibling"), "parent": m["id"],
                          "p": probs, "raw_probability_sum": 1.0, "zero_count": 0})
-    summary = {"base": a.base, "readout": "zero-shot next-token letter logits" + (" (SemIf prompt, chat template)" if a.prompt == "semif" else ""), "suite": a.suite, "split": a.split, "revision": a.revision, **{k: {"n": n[k], "acc": round(hits[k] / n[k], 3)} for k in n}}
+    summary = {"base": a.base, "readout": "zero-shot next-token letter logits" + (" (SemIf prompt, chat template)" if a.prompt == "semif" else ""), "suite": a.suite, "split": a.split, "revision": a.revision,
+               "sources": {k: {"n": n[k], "acc": round(hits[k] / n[k], 3)} for k in n}}   # namespaced: a source called "unknowable" must not shadow the report's unknowable block
     if a.out:
         from kev.benchmark import summarize
         from kev.suite import write_json

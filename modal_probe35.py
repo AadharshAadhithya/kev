@@ -51,7 +51,7 @@ def main(bases: str, suite: str = "evals/v4/transfer-v4", tasks: str = "all", pr
         if (ROOT / "runs/probes" / name).exists():
             print(f"skip {name}: exists locally"); continue
         jobs.append((base, suite, name, tasks, prompt, split, revision or None))
-    for (base, _, name, _), result in zip(jobs, probe.starmap(jobs, return_exceptions=True)):
+    for (base, _, name, *_), result in zip(jobs, probe.starmap(jobs, return_exceptions=True)):
         if isinstance(result, Exception):
             print(f"{name}: FAILED {type(result).__name__}: {str(result)[:200]}"); continue
         target = ROOT / "runs/probes" / name; target.parent.mkdir(parents=True, exist_ok=True)

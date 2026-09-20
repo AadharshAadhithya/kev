@@ -6,7 +6,7 @@ The exact base checkpoint is recorded in the model card's `base_model` field and
     uv run python -m kev.publish --run runs/kev --repo jaredpalmer/kev-0.5b
     uv run python -m kev.publish --run runs/kev2 --repo jaredpalmer/kev-0.5b --message "v0.2: none-of-the-above fix"
 
-Uploads: adapter, head.pt, tokenizer files, eval.json, training log (if found), and MODEL_CARD.md as README.md
+Uploads: adapter, head.pt, tokenizer files, eval.json, training log (if found), and the model card (--card) as README.md
 with the repo id and run name filled in. Requires `hf auth login`.
 """
 import argparse, json, os, re, shutil, tempfile
@@ -22,7 +22,7 @@ def main():
     ap.add_argument("--run", required=True)
     ap.add_argument("--repo", required=True, help="e.g. jaredpalmer/kev-0.5b")
     ap.add_argument("--message", default=None)
-    ap.add_argument("--card", default="MODEL_CARD.md")
+    ap.add_argument("--card", required=True, help="model card markdown, e.g. docs/model-cards/kev-4b.md")
     ap.add_argument("--private", action="store_true")
     ap.add_argument("--tag", help="create this Hub tag on the uploaded commit (versioned release, e.g. v0.2)")
     a = ap.parse_args()

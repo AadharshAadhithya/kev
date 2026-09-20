@@ -3,7 +3,7 @@
 Causal LM (Qwen2.5-0.5B + LoRA) run prefill-only with a block-causal mask (shared state prefix,
 isolated question branches) and a pointer readout over option boundary tokens, trained with log loss
 on converted public datasets (Banking77, BoolQ, AG News, MNLI, SST-5, Yelp). No text generation.
-See README.md (deep dive) and MODEL_CARD.md (checkpoint recipe + metrics). README follows the Vercel Labs house style (tagline, for-the-badge badges, Highlights, Title Case sections, API tables, Authors + License); MODEL_CARD.md is formal.
+See README.md (deep dive) and docs/model-cards/ (one card per checkpoint: recipe + metrics; kev-0.5b.md is the superseded prototype). README follows the Vercel Labs house style (tagline, for-the-badge badges, Highlights, Title Case sections, API tables, Authors + License); MODEL_CARD.md is formal.
 
 ## Commands
 - Env: `uv sync` (torch MPS, transformers, peft, datasets)

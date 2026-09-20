@@ -10,6 +10,7 @@ tags:
   - lora
   - multiple-choice
   - typesafe
+  - prototype
 datasets:
   - legacy-datasets/banking77
   - google/boolq
@@ -32,14 +33,15 @@ model-index:
           - { type: expected_calibration_error, value: 0.031, name: "ECE after temperature scaling (T=1.47)" }
 ---
 
-# Model card: kev-0.5b
+# kev-0.5b — prototype (superseded)
 
 `kev-0.5b` is a **decision model**. It takes one document (the *state*) and a set of typed questions, and returns a probability distribution for each question in one forward pass. It does not generate text.
 
 It is a LoRA adapter plus a small pointer head on top of `Qwen/Qwen2.5-0.5B`. It reproduces the architecture that Archer Hume inferred for TypeSafe's Jev in [*Jev's Architecture Unmasked*](https://archerhume.com/posts/jevs-architecture-unmasked), and it serves TypeSafe's public `/v1/systemone` API contract.
 
-This checkpoint is a **research prototype** trained on a laptop. It shows that the mechanism works. It is not a production model and it is not Jev.
+This checkpoint is the **original prototype**, trained on a laptop in September 2026 to show the mechanism works. It is superseded by [`kev-0.6b`](kev-0.6b.md), [`kev-4b`](kev-4b.md) and [`kev-8b`](kev-8b.md), which use a Qwen3 base, frozen checksummed suites, and a recipe found through ~100 controlled trials; on the same out-of-domain items this model scores 0.575 against 0.620 / 0.790 / 0.796. It stays on the Hub for reference and reproducibility; use the current family for anything else.
 
+- Hub: [jaredpalmer/kev-0.5b](https://huggingface.co/jaredpalmer/kev-0.5b) (tag `v0.1`)
 - Code, training recipe, evaluation and demo: [github.com/jaredpalmer/kev](https://github.com/jaredpalmer/kev)
 - Weights: [GitHub release `v0.1.0`](https://github.com/jaredpalmer/kev/releases/tag/v0.1.0), `kev-0.5b.tar.gz` (38 MB; LoRA adapter `adapter_model.safetensors`, head `head.pt`, tokenizer files, `eval.json`, training log). SHA-256 `15639f79…6e12f8`, full digest in the sidecar `.sha256`. Extract to `runs/kev/`. Weights are not committed to git.
 

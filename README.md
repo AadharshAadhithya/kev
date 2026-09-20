@@ -53,7 +53,7 @@ KEV_DTYPE=bf16 uv run --extra serve python -m kev.serve --run jaredpalmer/kev-4b
 | [`kev-0.6b`](https://huggingface.co/jaredpalmer/kev-0.6b) | Qwen3-0.6B-Base | 0.801 / 0.808 | 0.620 / 0.642 | fp32, ~0.1 s | [card](docs/model-cards/kev-0.6b.md) |
 | Jev (hosted reference) | – | 0.845 / – | 0.857 / – | | |
 
-Same frozen items for every row (`evals/v4`: 1,200 in-distribution questions from the trained sources; 764 out-of-domain records from six public sources kev never trained on plus held-out programmatic policy rules). Development partitions selected the checkpoints; the locked test was read once per checkpoint and is recorded in each card. Latencies are five 3-way questions on a ~230-token state, M5. The original prototype, [`kev-0.5b`](https://huggingface.co/jaredpalmer/kev-0.5b) (Qwen2.5-0.5B; 0.712 in-distribution, 0.575 out of domain on the same items), stays on the Hub for reference with its [card](MODEL_CARD.md).
+Same frozen items for every row (`evals/v4`: 1,200 in-distribution questions from the trained sources; 764 out-of-domain records from six public sources kev never trained on plus held-out programmatic policy rules). Development partitions selected the checkpoints; the locked test was read once per checkpoint and is recorded in each card. Latencies are five 3-way questions on a ~230-token state, M5. The original prototype, [`kev-0.5b`](https://huggingface.co/jaredpalmer/kev-0.5b) (Qwen2.5-0.5B; 0.712 in-distribution, 0.575 out of domain on the same items), stays on the Hub for reference with its [card](docs/model-cards/kev-0.5b.md).
 
 ![kev benchmarks](docs/kev-benchmark.png)
 

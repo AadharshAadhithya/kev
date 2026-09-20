@@ -40,15 +40,17 @@ RED = {900: oklch_to_hex(0.5499, 0.232, 25.29), 700: oklch_to_hex(0.6256, 0.2524
 
 TEXT, TEXT2, RULE, GRID = GRAY[1000], GRAY[900], GRAY[500], GRAY[400]
 # series roles: the Kev family is one hue stepped by size; the hosted reference is a second hue; untrained bases neutral
-KEV = {"kev-8b": BLUE[1000], "kev-4b": BLUE[900], "kev-0.6b": oklch_to_hex(0.72, 0.13, 256), "kev-0.5b": oklch_to_hex(0.80, 0.09, 252)}
-HOLLOW = {"kev-0.5b"}   # the superseded prototype is drawn as an outlined marker / hatched bar so it reads as "older", not as a fourth size
+KEV = {"kev-9b": BLUE[1000], "kev-8b": BLUE[1000], "kev-4b": BLUE[900], "kev-0.6b": oklch_to_hex(0.72, 0.13, 256), "kev-0.5b": oklch_to_hex(0.80, 0.09, 252),
+       "kev-8b-qwen3": BLUE[1000], "kev-4b-qwen3": BLUE[900]}
+HOLLOW = {"kev-0.5b", "kev-8b-qwen3", "kev-4b-qwen3"}   # superseded checkpoints are drawn outlined / hatched so they read as "previous", not as extra sizes
 JEV = AMBER[700]
 NEUTRAL = GRAY[500]
 
 
 def display(name):
-    """Hub id -> display name: kev-4b -> Kev-4B. Everything else unchanged."""
+    """Hub id -> display name: kev-4b -> Kev-4B, kev-4b-qwen3 -> Kev-4B (Qwen3). Everything else unchanged."""
     import re
+    name = re.sub(r"^kev-(\d[\d.]*)b-qwen3", lambda m: f"Kev-{m.group(1)}B (Qwen3)", name)
     return re.sub(r"^kev-(\d[\d.]*)b", lambda m: f"Kev-{m.group(1)}B", name)
 
 

@@ -39,7 +39,7 @@ Kev-0.5B is a **decision model**. It takes one document (the *state*) and a set 
 
 It is a LoRA adapter plus a small pointer head on top of `Qwen/Qwen2.5-0.5B`. It reproduces the architecture that Archer Hume inferred for TypeSafe's Jev in [*Jev's Architecture Unmasked*](https://archerhume.com/posts/jevs-architecture-unmasked), and it serves TypeSafe's public `/v1/systemone` API contract.
 
-This checkpoint is the **original prototype**, trained on a laptop in September 2026 to show the mechanism works. It is superseded by [Kev-0.6B](kev-0.6b.md), [Kev-4B](kev-4b.md) and [Kev-8B](kev-8b.md), which use a Qwen3 base, frozen checksummed suites, and a recipe found through ~100 controlled trials; on the same out-of-domain items (transfer-v4 dev) this model scores 0.561 against 0.620 / 0.790 / 0.796. It stays on the Hub for reference and reproducibility; use the current family for anything else.
+This checkpoint is the **original prototype**, trained on a laptop in September 2026 to show the mechanism works. It is superseded by [Kev-0.8B](kev-0.8b.md), [Kev-4B](kev-4b.md) and [Kev-9B](kev-9b.md), which use Qwen3.5 bases, frozen checksummed suites, and a recipe found through ~110 controlled trials; on the same out-of-domain items (transfer-v4 dev) this model scores 0.561 against 0.643 / 0.794 / 0.812.620 / 0.790 / 0.796. It stays on the Hub for reference and reproducibility; use the current family for anything else.
 
 - Hub: [jaredpalmer/kev-0.5b](https://huggingface.co/jaredpalmer/kev-0.5b) (tag `v0.1`)
 - Code, training recipe, evaluation and demo: [github.com/jaredpalmer/kev](https://github.com/jaredpalmer/kev)

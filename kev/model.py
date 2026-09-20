@@ -271,7 +271,7 @@ class DecisionModel(nn.Module):
         mask = branch_mask_batch([enc["seg"]], self.device, dtype=dt, opts=[enc["opt"]] if enc.get("option_isolation") else None)
         out = self.lm(input_ids=ids, position_ids=pos, attention_mask=mask, past_key_values=DynamicCache(config=self.lm.config), use_cache=True)
         h = out.last_hidden_state[0].float()
-        out.past_key_values.crop(Ls)
+        out.past_key_values.crop(-(len(enc["ids"]) - Ls))     # keep the state only (negative = drop that many trailing tokens; positive form deprecated in transformers 5)
         return [F.softmax(z, -1).cpu() for z in self._readout(h, enc)], (Ls, out.past_key_values, h[:Ls].clone())
 
     @torch.no_grad()
@@ -290,7 +290,7 @@ class DecisionModel(nn.Module):
             out = self.lm(input_ids=ids, position_ids=pos, past_key_values=cache, attention_mask=mask, use_cache=True)
             h = torch.cat([h_state, out.last_hidden_state[0].float()], 0)
         finally:
-            cache.crop(Ls)
+            cache.crop(-(len(enc["ids"]) - Ls))
         return [F.softmax(z, -1).cpu() for z in self._readout(h, enc)]
 
     def trainable_parameters(self):

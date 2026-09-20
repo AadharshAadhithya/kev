@@ -87,15 +87,25 @@ def run_locked_test(trial_path, name, suites, git_commit):
     os.environ["KEV_GIT_COMMIT"] = git_commit
     trial = Path(RUNS_MOUNT) / trial_path
     out = Path(RUNS_MOUNT) / "locked" / name
+    runs_volume.reload()
+    summary = None
     if out.exists():
-        raise FileExistsError(f"locked test already read for {name}; a second read is not allowed")
-    out.mkdir(parents=True)
+        # an interrupted read may finish the suites it never touched; a suite that was read is never read again
+        prior = json.loads((out / "summary.json").read_text()) if (out / "summary.json").exists() else {"suites": {}}
+        if all(label in prior["suites"] for label in suites):
+            raise FileExistsError(f"locked test already read for {name}; a second read is not allowed")
+        for label in list(suites):
+            if label in prior["suites"] or (out / label).exists():
+                if label not in prior["suites"]: raise RuntimeError(f"{label} partition was touched but not summarised; refusing to re-read")
+                suites.pop(label)
+        summary = {**prior, "resumed_for": sorted(suites)}
+    out.mkdir(parents=True, exist_ok=True)
     result = json.loads((trial / "result.json").read_text())
     if not result["gates"]["passed"] and not name.endswith("-ungated"):
         raise RuntimeError("trial did not pass its gates; name the read '<name>-ungated' to record an exploratory read")
     temperature = result.get("temperature", 1.0)
     predictor = LocalPredictor(str(trial / "checkpoint"), "cuda")
-    summary = {"trial": trial_path, "trial_result_sha256": digest(trial / "result.json"), "temperature": temperature, "git_commit": git_commit, "suites": {}}
+    summary = summary or {"trial": trial_path, "trial_result_sha256": digest(trial / "result.json"), "temperature": temperature, "git_commit": git_commit, "suites": {}}
     try:
         for label, suite in suites.items():
             records = load_split(Path("/root") / suite, "test", allow_test=True)
@@ -310,10 +320,12 @@ def pull(name: str):
 def locked_test(trial: str, name: str, decision: str = "evals/v4/decision-v4", transfer: str = "evals/v4/transfer-v4", gpu: str = GPU):
     """One locked-test read for a promoted trial (path under the runs volume, e.g. v4-4b-baseline/01-trial-1)."""
     target = ROOT / "runs/locked" / name
-    if target.exists():
-        raise FileExistsError(f"{target} exists; the locked test is read once per candidate")
-    fn = run_locked_test.with_options(gpu=gpu)
+    if (target / "summary.json").exists() and all(k in json.loads((target / "summary.json").read_text())["suites"] for k in ("decision", "transfer")):
+        raise FileExistsError(f"{target} is complete; the locked test is read once per candidate")
+    fn = modal.Function.from_name(APP_NAME, "run_locked_test").with_options(gpu=gpu)
     summary = fn.remote(trial, name, {"decision": decision, "transfer": transfer}, local_git_commit())
+    import shutil
+    if target.exists(): shutil.rmtree(target)   # local copy only; the volume is the record
     target.parent.mkdir(parents=True, exist_ok=True)
     subprocess.run([sys.executable, "-m", "modal", "volume", "get", "kev-runs", f"/locked/{name}", str(target.parent)], check=True)
     print(json.dumps({k: {"acc": v["clean"]["acc"], "brier": v["clean"]["brier"]} for k, v in summary["suites"].items()}, indent=1))

@@ -5,7 +5,7 @@ import torch
 import torch.nn.functional as F
 from .data import EVAL_ONLY, build, augment, materialize, none_pair, source_seed
 from .suite import digest, load_split, write_json
-from .model import DecisionModel, load_tokenizer, encode
+from .model import MAX_BRANCH, MAX_STATE, DecisionModel, load_tokenizer, encode
 
 
 def permuted_copy(rec, rng):
@@ -37,6 +37,14 @@ def anchor_loss(z, q, target, dev):
     if target is None or set(target) != set(q["keys"]): return None
     t = torch.tensor([target[k] for k in q["keys"]], device=dev, dtype=torch.float32).clamp_min(1e-6); t = t / t.sum()
     return F.kl_div(F.log_softmax(z, -1), t, reduction="sum")
+
+
+def fits_context(tok, req):
+    """True when the clean record encodes within the training limits (the rule frozen suites are filtered by)."""
+    try:
+        return len(encode(tok, materialize(req), strict=True)["ids"]) <= 2048
+    except ValueError:
+        return False
 
 
 def accumulation_records(n, batch, accum, microbatch):
@@ -119,6 +127,14 @@ def main():
 
     holdout = manifest["holdout_sources"] if manifest else [s for s in a.holdout.split(",") if s]
     reqs = load_split(a.suite, "train") if manifest else build(a.n_per_source, "train", a.seed, exclude=holdout)
+    if not manifest:
+        # frozen suites are filtered to the training context when they are frozen (kev.suite.select_unique); records built
+        # on the fly here are not, so apply the same rule instead of letting the strict encoder abort the run (issue #5)
+        kept = [r for r in reqs if fits_context(tok, r)]
+        if len(kept) < len(reqs):
+            print(f"dropped {len(reqs) - len(kept)} of {len(reqs)} records that exceed the training context "
+                  f"({MAX_STATE} state / {MAX_BRANCH} branch / 2048 packed tokens)", flush=True)
+        reqs = kept
     if not reqs:
         raise ValueError("empty training set")
     forbidden = {r["_meta"]["source"] for r in reqs} & set(EVAL_ONLY)

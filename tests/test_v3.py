@@ -331,3 +331,14 @@ def test_shape_bucket_padding_is_exact_in_fp32():
             ids = torch.full((1, padded), m.pad_id); ids[0, :L] = torch.tensor(enc["ids"]); pos = torch.zeros((1, padded), dtype=torch.long); pos[0, :L] = torch.tensor(enc["pos"])
             hp = m.lm(input_ids=ids, position_ids=pos, attention_mask=branch_mask_batch([enc["seg"]], "cpu", length=padded)).last_hidden_state[0, :L]
         assert (h - hp).abs().max() < 1e-4 * h.abs().max()
+
+
+def test_train_path_drops_records_that_exceed_the_context():
+    """Issue #5: training without --suite built records straight from the datasets and the strict encoder aborted on the
+    first long passage. The on-the-fly path now applies the same context filter that suite freezing applies."""
+    from kev.model import load_tokenizer
+    from kev.train import fits_context
+    tok = load_tokenizer("Qwen/Qwen2.5-0.5B")
+    short = {"state": "s " * 10, "questions": {"q": {"type": "noul", "instructions": "i", "label": True, "src": "t"}}, "_meta": {"id": "a", "source": "t"}}
+    long = {**short, "state": "word " * 600}
+    assert fits_context(tok, short) and not fits_context(tok, long)

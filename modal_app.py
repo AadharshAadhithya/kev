@@ -79,7 +79,7 @@ def run_trial(study, index, label, config, suite, expected_sources, git_commit, 
 
 @app.function(image=image, gpu=GPU, cpu=2, memory=(32768, 49152), retries=0, timeout=3600,
               volumes={RUNS_MOUNT: runs_volume, HF_MOUNT: hf_cache}, secrets=secrets)
-def run_locked_test(trial_path, name, suites, git_commit):
+def run_locked_test(trial_path, name, suites, git_commit, redo_interrupted=False):
     """Read the locked test partitions ONCE for a promoted trial. Writes /runs/locked/<name>/... ; refuses to rerun."""
     import json
     from kev.benchmark import LocalPredictor, evaluate_records
@@ -94,11 +94,16 @@ def run_locked_test(trial_path, name, suites, git_commit):
         prior = json.loads((out / "summary.json").read_text()) if (out / "summary.json").exists() else {"suites": {}}
         if all(label in prior["suites"] for label in suites):
             raise FileExistsError(f"locked test already read for {name}; a second read is not allowed")
+        interrupted = []
         for label in list(suites):
-            if label in prior["suites"] or (out / label).exists():
-                if label not in prior["suites"]: raise RuntimeError(f"{label} partition was touched but not summarised; refusing to re-read")
+            if label in prior["suites"]:
                 suites.pop(label)
-        summary = {**prior, "resumed_for": sorted(suites)}
+            elif (out / label).exists():
+                # a read that crashed before any aggregate was produced: no number was ever observed, so completing it does
+                # not enable selection on the test; it must be requested explicitly and is recorded
+                if not redo_interrupted: raise RuntimeError(f"{label} partition was touched but not summarised; pass redo_interrupted to complete it")
+                import shutil; shutil.rmtree(out / label); interrupted.append(label)
+        summary = {**prior, "resumed_for": sorted(suites), "interrupted_reads_redone": interrupted}
     out.mkdir(parents=True, exist_ok=True)
     result = json.loads((trial / "result.json").read_text())
     if not result["gates"]["passed"] and not name.endswith("-ungated"):
@@ -317,13 +322,13 @@ def pull(name: str):
 
 
 @app.local_entrypoint()
-def locked_test(trial: str, name: str, decision: str = "evals/v4/decision-v4", transfer: str = "evals/v4/transfer-v4", gpu: str = GPU):
+def locked_test(trial: str, name: str, decision: str = "evals/v4/decision-v4", transfer: str = "evals/v4/transfer-v4", gpu: str = GPU, redo_interrupted: bool = False):
     """One locked-test read for a promoted trial (path under the runs volume, e.g. v4-4b-baseline/01-trial-1)."""
     target = ROOT / "runs/locked" / name
     if (target / "summary.json").exists() and all(k in json.loads((target / "summary.json").read_text())["suites"] for k in ("decision", "transfer")):
         raise FileExistsError(f"{target} is complete; the locked test is read once per candidate")
     fn = modal.Function.from_name(APP_NAME, "run_locked_test").with_options(gpu=gpu)
-    summary = fn.remote(trial, name, {"decision": decision, "transfer": transfer}, local_git_commit())
+    summary = fn.remote(trial, name, {"decision": decision, "transfer": transfer}, local_git_commit(), redo_interrupted)
     import shutil
     if target.exists(): shutil.rmtree(target)   # local copy only; the volume is the record
     target.parent.mkdir(parents=True, exist_ok=True)

@@ -87,6 +87,9 @@ def main():
     ap.add_argument("--anchor_w", type=float, default=0.0, help="weight of KL(base || model) toward the frozen base model's zero-shot distribution, per anchored question")
     ap.add_argument("--anchor_sources", default="", help="comma-separated sources to anchor (default: every record with a target)")
     ap.add_argument("--out", default="runs/kev")
+    ap.add_argument("--init_from", default="", help="delta mode: warm-start LoRA and the pointer head from an existing run "
+                                                   "(local directory or hub id) instead of starting from the base model; keeps the "
+                                                   "released model's in-domain skill while adapting to a new domain")
     ap.add_argument("--seed", type=int, default=0)
     a = ap.parse_args()
 
@@ -123,6 +126,35 @@ def main():
     if a.checkpointing:
         model.lm.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
     model.lm.config.use_cache = False
+    if a.init_from:
+        # delta mode: start from an already trained adapter + pointer head instead of the base model.
+        # Compatibility is checked field by field BEFORE loading, because peft loads matching keys silently
+        # and a half-loaded adapter would be a broken model that still trains and still reports a loss.
+        from peft import get_peft_model_state_dict, load_peft_weights, set_peft_model_state_dict
+        from .evaluate import resolve_run
+        src = resolve_run(a.init_from)
+        meta = torch.load(f"{src}/head.pt", map_location="cpu")
+        if meta["base"] != a.base:
+            raise ValueError(f"--init_from {src} was trained on {meta['base']}, this run builds on {a.base}")
+        if int(meta.get("lora", 0)) != a.lora:
+            raise ValueError(f"--init_from {src} has LoRA rank {meta.get('lora')}, this run builds rank {a.lora}")
+        if int(meta.get("head_dim", 256)) != a.head_dim:
+            raise ValueError(f"--init_from {src} has head_dim {meta.get('head_dim')}, this run builds {a.head_dim}")
+        weights = load_peft_weights(src, device="cpu")
+        mine = set(get_peft_model_state_dict(model.lm))
+        obce = sorted(set(weights) - mine)
+        if obce:
+            raise ValueError(f"--init_from {src} carries {len(obce)} adapter tensors this model does not have "
+                             f"(e.g. {obce[:2]}); check --lora_targets / --lora against its adapter_config.json")
+        brakujace = sorted(mine - set(weights))
+        if brakujace:
+            raise ValueError(f"--init_from {src} does not cover {len(brakujace)} of this model's adapter tensors "
+                             f"(e.g. {brakujace[:2]}); check --lora_targets")
+        res = set_peft_model_state_dict(model.lm, weights)
+        model.head.load_state_dict(meta["head"])
+        print(f"delta: warm start from {src}: {len(weights)} adapter tensors and the pointer head loaded "
+              f"(missing={len(getattr(res, 'missing_keys', []) or [])}, unexpected={len(getattr(res, 'unexpected_keys', []) or [])})",
+              flush=True)
     print(f"device={dev} trainable params={sum(p.numel() for p in model.trainable_parameters())/1e6:.1f}M", flush=True)
 
     holdout = manifest["holdout_sources"] if manifest else [s for s in a.holdout.split(",") if s]

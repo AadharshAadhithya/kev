@@ -1,6 +1,6 @@
 """Shared chart style for the repo figures, after vercel.com/design.md: Geist type, sentence-case headings, hierarchy
 through typography, gridlines quieter than data, direct labels (no legends), one shared label / plot / value lane for a
-bar set, zero baselines, a caption that says what to notice. Color carries meaning only: the kev family is one hue
+bar set, zero baselines, a caption that says what to notice. Color carries meaning only: the Kev family is one hue
 stepped by size, the hosted reference is a second hue, untrained baselines are neutral.
 
 Colors are Vercel's published tokens (oklch in vercel-brand.css) converted to sRGB hex here.
@@ -39,10 +39,16 @@ GREEN = {900: oklch_to_hex(0.5175, 0.1453, 147.65), 700: oklch_to_hex(0.6458, 0.
 RED = {900: oklch_to_hex(0.5499, 0.232, 25.29), 700: oklch_to_hex(0.6256, 0.2524, 23.03)}
 
 TEXT, TEXT2, RULE, GRID = GRAY[1000], GRAY[900], GRAY[500], GRAY[400]
-# series roles: the kev family is one hue stepped by size; the hosted reference is a second hue; untrained bases neutral
-KEV = {"kev-8b": BLUE[1000], "kev-4b": BLUE[900], "kev-0.6b": oklch_to_hex(0.72, 0.13, 256), "kev-0.5b": BLUE[400]}
+# series roles: the Kev family is one hue stepped by size; the hosted reference is a second hue; untrained bases neutral
+KEV = {"kev-8b": BLUE[1000], "kev-4b": BLUE[900], "kev-0.6b": oklch_to_hex(0.72, 0.13, 256), "kev-0.5b": oklch_to_hex(0.85, 0.06, 250)}
 JEV = AMBER[700]
 NEUTRAL = GRAY[500]
+
+
+def display(name):
+    """Hub id -> display name: kev-4b -> Kev-4B. Everything else unchanged."""
+    import re
+    return re.sub(r"^kev-(\d[\d.]*)b", lambda m: f"Kev-{m.group(1)}B", name)
 
 
 def use_style():

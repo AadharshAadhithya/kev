@@ -28,7 +28,7 @@ metrics:
   - brier_score
   - expected_calibration_error
 model-index:
-  - name: kev-0.6b
+  - name: Kev-0.6B
     results:
       - task: { type: text-classification, name: typed decision (choice / noul / score) }
         dataset: { type: mixed, name: "decision-v4 development (1,204 records; ten trained public sources + programmatic policy pairs)" }
@@ -42,24 +42,24 @@ model-index:
           - { type: brier_score, value: 0.536 }
 ---
 
-# kev-0.6b
+# Kev-0.6B
 
-`kev-0.6b` is a **decision model**: one document (the *state*) and a set of typed questions in, a probability distribution per question out, in one forward pass. No text generation. It is a LoRA adapter (r=16) plus a pointer head on `Qwen/Qwen3-0.6B-Base`, and it serves TypeSafe's public `/v1/systemone` contract.
+Kev-0.6B is a **decision model**: one document (the *state*) and a set of typed questions in, a probability distribution per question out, in one forward pass. No text generation. It is a LoRA adapter (r=16) plus a pointer head on `Qwen/Qwen3-0.6B-Base`, and it serves TypeSafe's public `/v1/systemone` contract.
 
-**The small member of the kev family.** It is the best 0.6B checkpoint under a frozen, checksummed evaluation protocol: the 4B/8B recipe's data (`decision-v7`) at lr 1e-4, three seeds (transfer 0.613 / 0.605 / **0.620**), after eight one-knob mutations and three seeds of the previous data found nothing better than 0.61. Out of domain it is a 0.6B model — use `kev-4b` for accuracy; use this one where memory or latency rule the 4B out, and measure on your own data.
+**The small member of the Kev family.** It is the best 0.6B checkpoint under a frozen, checksummed evaluation protocol: the 4B/8B recipe's data (`decision-v7`) at lr 1e-4, three seeds (transfer 0.613 / 0.605 / **0.620**), after eight one-knob mutations and three seeds of the previous data found nothing better than 0.61. Out of domain it is a 0.6B model — use Kev-4B for accuracy; use this one where memory or latency rule the 4B out, and measure on your own data.
 
 - Hub: `jaredpalmer/kev-0.6b` (this repo; trial `v7-06b/02-trial-2`, seed 2 of 3)
 - Code, suites, results, and the full research log: [github.com/jaredpalmer/kev](https://github.com/jaredpalmer/kev) — see `PLAN.md`, `runs/leaderboard.md`, and `evals/v4/*/manifest.json`
 
-## What changed since kev-0.5b
+## What changed since Kev-0.5B
 
-| | kev-0.5b | kev-0.6b (this) |
+| | Kev-0.5B | Kev-0.6B (this) |
 |---|---|---|
 | backbone | Qwen2.5-0.5B | Qwen3-0.6B-Base |
 | training records | 9,000 (six sources) | 12,576 (ten public sources + 896 policy minimal pairs + 1,680 records from 60 random rule structures) |
 | none-of-the-above | augmentation fix only | + minimal pairs: same state rendered with the true option present and removed |
 | in-distribution accuracy (decision-v4 dev) | 0.712 | **0.801** |
-| out-of-domain accuracy (transfer-v4 dev) | 0.575 | **0.620** |
+| out-of-domain accuracy (transfer-v4 dev) | 0.561 | **0.620** |
 | none-option present, accuracy | 0.25 (transfer-v1) | 0.80 |
 | seeds behind the number | 1 | 3 (transfer 0.605–0.620) |
 
@@ -68,7 +68,7 @@ Jev (`typesafe-ai/jev` via Vercel AI Gateway) on the same frozen development set
 ## Known limits
 
 - **Out of domain it is a 0.6B model.** Transfer accuracy is flat at ~0.60 across every hyperparameter we tried (eight one-knob mutations, three seeds). The same recipe at 4B reaches 0.72–0.75 and at 8B 0.74–0.77; capacity, not data, is the bottleneck at this size.
-- **Held-out policy reasoning fails**: on programmatic policy pairs whose rule structure was never trained, both-siblings-correct is 6–11% (kev-4b 0.73, Jev 0.86).
+- **Held-out policy reasoning fails**: on programmatic policy pairs whose rule structure was never trained, both-siblings-correct is 6–11% (Kev-4B 0.73, Jev 0.86).
 - **Ordinal hedging**: on 3-level Score questions with date arithmetic it collapses to the middle level.
 - Confident-error rate out of domain is 11% (≥0.9 confidence and wrong); raw ECE 0.09 in-domain, 0.15 out of domain. Probabilities are usable in-domain; treat them as advisory elsewhere.
 - **Locked test, read once** (`runs/locked/kev-06b-v7-ungated/`): in-distribution accuracy **0.808** (Brier 0.266, ECE 0.089), out-of-domain **0.642** (Brier 0.483, ECE 0.128, confident errors 7.9%). This partition will not be read again for this checkpoint.

@@ -1,5 +1,23 @@
 {
  "models": {
+  "kev-0.5b": {
+   "path": "runs/kev-05b-transfer-v4/report.json",
+   "transfer_acc": 0.5609756097560976,
+   "transfer_brier": 0.533826849184614,
+   "tasks": {
+    "composition_held_and_or": 0.625,
+    "composition_held_conditional": 0.40625,
+    "composition_held_or_not": 0.4375,
+    "contrastive_authorization": 0.65,
+    "contrastive_deadline": 0.275,
+    "emotion": 0.475,
+    "mmlu": 0.4,
+    "paws": 0.5,
+    "qnli": 0.7625,
+    "sciq": 0.8875,
+    "tweet_offensive": 0.525
+   }
+  },
   "kev-0.6b": {
    "path": "runs/v7-06b/02-trial-2/result.json",
    "transfer_acc": 0.6204268292682927,

@@ -1,4 +1,4 @@
-# kev — prototype of a Jev-style decision model
+# Kev — prototype of a Jev-style decision model
 
 Causal LM (Qwen2.5-0.5B + LoRA) run prefill-only with a block-causal mask (shared state prefix,
 isolated question branches) and a pointer readout over option boundary tokens, trained with log loss
@@ -35,7 +35,7 @@ See README.md (deep dive) and docs/model-cards/ (one card per checkpoint: recipe
   saved result files. Style lives in `scripts/chartstyle.py` (Geist type, Vercel color tokens, direct labels, no legends, one label/plot/value lane per bar set);
   new figures should import it rather than set their own rcParams. `kev.plot` (loss curves from train logs) is a debugging aid, not a README figure.
 - Publish: `uv run python -m kev.publish --run runs/<run> --repo jaredpalmer/kev-<size>` (needs `hf auth login`). Repos are named by
-  base model size (kev-0.5b = Qwen2.5-0.5B); versions within a size are Hub tags (`hf repos tag create jaredpalmer/kev-0.5b vX.Y`).
+  base model size (Kev-0.5B = Qwen2.5-0.5B); versions within a size are Hub tags (`hf repos tag create jaredpalmer/kev-0.5b vX.Y`).
   Collection: huggingface.co/collections/jaredpalmer/kev-6aad9d0ea49f2589665e07cd. `--run` in serve/evaluate accepts a Hub id.
 - Serve: `uv run --extra serve python -m kev.serve --run runs/kev --port 8008` (falls back to runs/smoke)
   - TypeSafe-compatible: `POST /v1/systemone`, `GET /v1/models` (no auth). Playground routes under `/api/*`.

@@ -31,7 +31,7 @@ metrics:
   - brier_score
   - expected_calibration_error
 model-index:
-  - name: kev-8b
+  - name: Kev-8B
     results:
       - task: { type: text-classification, name: typed decision (choice / noul / score) }
         dataset: { type: mixed, name: "decision-v4/v6 development (1,204 records; trained public sources + programmatic policy pairs)" }
@@ -45,27 +45,27 @@ model-index:
           - { type: brier_score, value: 0.337 }
 ---
 
-# kev-8b
+# Kev-8B
 
-`kev-8b` is a **decision model**: one document (the *state*) and a set of typed questions in, a probability distribution per question out, in one forward pass. No text generation. It is a LoRA adapter (r=16) plus a pointer head on `Qwen/Qwen3-8B-Base` (revision `49e3418f`), serving TypeSafe's public `/v1/systemone` contract.
+Kev-8B is a **decision model**: one document (the *state*) and a set of typed questions in, a probability distribution per question out, in one forward pass. No text generation. It is a LoRA adapter (r=16) plus a pointer head on `Qwen/Qwen3-8B-Base` (revision `49e3418f`), serving TypeSafe's public `/v1/systemone` contract.
 
-**The most accurate kev.** The best checkpoint of any size under a frozen, checksummed protocol: best in-distribution accuracy, best out-of-domain accuracy (0.796 on transfer-v4 dev, six points from Jev), best held-out rule reasoning of any kev at 8B. Same recipe at two seeds: 0.796 / 0.774; this checkpoint is the seed selected on the development partition.
+**The most accurate kev.** The best checkpoint of any size under a frozen, checksummed protocol: best in-distribution accuracy, best out-of-domain accuracy (0.796 on transfer-v4 dev, six points from Jev), best held-out rule reasoning of any Kev at 8B. Same recipe at two seeds: 0.796 / 0.774; this checkpoint is the seed selected on the development partition.
 
 - Hub: `jaredpalmer/kev-8b` (this repo; trial `v7-final/00-trial-0`)
 - Code, suites, every trial with hashes and paired bootstraps: [github.com/jaredpalmer/kev](https://github.com/jaredpalmer/kev) — `PLAN.md`, `runs/leaderboard.md`
 
 ## Results (same frozen items for every row)
 
-| | kev-0.5b (prototype) | kev-0.6b | kev-4b | **kev-8b** | Jev |
+| | Kev-0.5B (prototype) | Kev-0.6B | Kev-4B | **Kev-8B** | Jev |
 |---|---|---|---|---|
 | in-distribution accuracy (decision-v4 dev, 1,200 q) | 0.712 | 0.801 | 0.854 | **0.863** | 0.845 |
-| out-of-domain accuracy (transfer-v4 dev, 560 q) | 0.575 | 0.620 | 0.790 | **0.796** | 0.857 |
+| out-of-domain accuracy (transfer-v4 dev, 560 q) | 0.561 | 0.620 | 0.790 | **0.796** | 0.857 |
 | out-of-domain Brier | 0.50 | 0.536 | 0.328 | **0.337** | 0.211 |
 | confident errors out of domain (p ≥ 0.9 and wrong) | – | 10.8% | 8.2% | 9.9% | 3.7% |
 | held-out policy structures, both siblings correct | – | 0.08 | 0.73 | 0.69 | 0.86 |
 | option-order flip rate | 0.21 | 0.02 | 0.00 | 0.00 | 0.00 |
 
-Per-source out-of-domain accuracy (kev-8b / Jev): QNLI 0.91 / 0.93, SciQ 1.00 / 0.99, TweetEval-offensive 0.79 / 0.81, PAWS 0.78 / 0.79, MMLU 0.70 / 0.90, Emotion 0.56 / 0.59, deadline (3-level date arithmetic) 0.60 / 0.93, (A and B) or not C 0.91 / 0.97, if A then not B else C 0.59 / 0.78.
+Per-source out-of-domain accuracy (Kev-8B / Jev): QNLI 0.91 / 0.93, SciQ 1.00 / 0.99, TweetEval-offensive 0.79 / 0.81, PAWS 0.78 / 0.79, MMLU 0.70 / 0.90, Emotion 0.56 / 0.59, deadline (3-level date arithmetic) 0.60 / 0.93, (A and B) or not C 0.91 / 0.97, if A then not B else C 0.59 / 0.78.
 
 Seeds: two seeds on decision-v7: transfer **0.796** / 0.774, held-out rule pairs 0.69 / 0.64 (Jev 0.86); this checkpoint is seed 0. Trained on `decision-v7` (10k public records + 896 policy records over nine template families incl. four ordinal Score threshold families + 1,680 records from 60 random rule structures with negation anywhere); development/test items are byte-identical to v4, so every number here is comparable with earlier checkpoints.
 

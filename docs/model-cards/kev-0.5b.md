@@ -23,7 +23,7 @@ metrics:
   - expected_calibration_error
   - nll
 model-index:
-  - name: kev-0.5b
+  - name: Kev-0.5B
     results:
       - task: { type: text-classification, name: typed decision (choice / noul / score) }
         dataset: { type: mixed, name: "held-out split of the six training sources (1,350 questions)" }
@@ -33,13 +33,13 @@ model-index:
           - { type: expected_calibration_error, value: 0.031, name: "ECE after temperature scaling (T=1.47)" }
 ---
 
-# kev-0.5b — prototype (superseded)
+# Kev-0.5B — prototype (superseded)
 
-`kev-0.5b` is a **decision model**. It takes one document (the *state*) and a set of typed questions, and returns a probability distribution for each question in one forward pass. It does not generate text.
+Kev-0.5B is a **decision model**. It takes one document (the *state*) and a set of typed questions, and returns a probability distribution for each question in one forward pass. It does not generate text.
 
 It is a LoRA adapter plus a small pointer head on top of `Qwen/Qwen2.5-0.5B`. It reproduces the architecture that Archer Hume inferred for TypeSafe's Jev in [*Jev's Architecture Unmasked*](https://archerhume.com/posts/jevs-architecture-unmasked), and it serves TypeSafe's public `/v1/systemone` API contract.
 
-This checkpoint is the **original prototype**, trained on a laptop in September 2026 to show the mechanism works. It is superseded by [`kev-0.6b`](kev-0.6b.md), [`kev-4b`](kev-4b.md) and [`kev-8b`](kev-8b.md), which use a Qwen3 base, frozen checksummed suites, and a recipe found through ~100 controlled trials; on the same out-of-domain items this model scores 0.575 against 0.620 / 0.790 / 0.796. It stays on the Hub for reference and reproducibility; use the current family for anything else.
+This checkpoint is the **original prototype**, trained on a laptop in September 2026 to show the mechanism works. It is superseded by [Kev-0.6B](kev-0.6b.md), [Kev-4B](kev-4b.md) and [Kev-8B](kev-8b.md), which use a Qwen3 base, frozen checksummed suites, and a recipe found through ~100 controlled trials; on the same out-of-domain items (transfer-v4 dev) this model scores 0.561 against 0.620 / 0.790 / 0.796. It stays on the Hub for reference and reproducibility; use the current family for anything else.
 
 - Hub: [jaredpalmer/kev-0.5b](https://huggingface.co/jaredpalmer/kev-0.5b) (tag `v0.1`)
 - Code, training recipe, evaluation and demo: [github.com/jaredpalmer/kev](https://github.com/jaredpalmer/kev)
@@ -61,7 +61,7 @@ This checkpoint is the **original prototype**, trained on a laptop in September 
 | Question types | `noul` (yes/no), `choice` (2–255 options), `score` (2–255 ordered levels) |
 | Language | English |
 | License | Apache-2.0 for the adapter and head. The base model is under the Qwen license (Apache-2.0 for Qwen2.5-0.5B). Datasets carry their own licenses. |
-| Version | `kev-0.5b` v0.1, trained 2026-09-17 |
+| Version | Kev-0.5B v0.1, trained 2026-09-17 |
 
 ## Intended use
 
@@ -132,7 +132,7 @@ Held-out **test / validation** splits of the same six sources, 150 records per s
 
 ### Accuracy and calibration
 
-| source | K | zero-shot base | zero-shot Instruct | **kev-0.5b** |
+| source | K | zero-shot base | zero-shot Instruct | **Kev-0.5B** |
 |---|---|---|---|---|
 | | | acc / ECE | acc / ECE | acc / ECE / NLL |
 | banking77 | 77 | – | – | 0.860 / 0.057 / 0.56 |

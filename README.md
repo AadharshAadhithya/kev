@@ -54,7 +54,7 @@ KEV_DTYPE=bf16 uv run --extra serve python -m kev.serve --run jaredpalmer/kev-4b
 | [Kev-0.5B](https://huggingface.co/jaredpalmer/kev-0.5b) · prototype | Qwen2.5-0.5B | 0.712 / – | 0.561 / – | fp32, ~0.2 s | [card](docs/model-cards/kev-0.5b.md) |
 | Jev (hosted reference) | – | 0.845 / – | 0.857 / – | | |
 
-Same frozen items for every row (`evals/v4`: 1,200 in-distribution questions from the trained sources; 764 out-of-domain records from six public sources Kev never trained on plus held-out programmatic policy rules). Development partitions selected the checkpoints; the locked test was read once per checkpoint and is recorded in each card. Latencies are five 3-way questions on a ~230-token state, M5. Kev-0.5B is the original laptop-trained prototype (September 2026), kept on the Hub for reference; it was never scored on the locked test.
+Same frozen items for every row (`evals/v4`: 1,200 in-distribution questions from the trained sources; 764 out-of-domain records from six public sources Kev never trained on plus held-out programmatic policy rules). Development partitions selected the checkpoints; the locked test was read once per checkpoint and is recorded in each card. Latencies are five 3-way questions on a ~230-token state, M5. Kev-0.5B is the original laptop-trained prototype (September 2026), kept on the Hub for reference; it was never scored on the locked test. The same three checkpoints, as tarballs with SHA-256 sums, are attached to the [GitHub release](https://github.com/jaredpalmer/kev/releases/tag/kev-family).
 
 ![Kev benchmarks](docs/kev-benchmark.png)
 

@@ -32,6 +32,9 @@ image = (
     modal.Image.debian_slim(python_version="3.13")
     .apt_install("git")
     .uv_sync(uv_project_dir=str(ROOT), groups=[])           # exact locked deps; Linux torch wheels are the CUDA build
+    # Gated DeltaNet kernels for the Qwen3.5 hybrid backbones (transformers falls back to slow reference code without them)
+    # fla refuses its gated chunk backward on Hopper with Triton 3.4-3.7.0 (incorrect results, fla#640); torch 2.8 pins 3.4
+    .uv_pip_install("flash-linear-attention", "triton>=3.7.1")
     .env({"HF_HOME": HF_MOUNT, "HF_HUB_DISABLE_PROGRESS_BARS": "1", "TOKENIZERS_PARALLELISM": "false", "PYTHONUNBUFFERED": "1"})
     .add_local_python_source("kev")
     .add_local_file(ROOT / "uv.lock", "/root/uv.lock")

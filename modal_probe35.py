@@ -30,13 +30,13 @@ secrets = [modal.Secret.from_name("huggingface-secret")]
 
 @app.function(image=image, gpu="H100", cpu=2, memory=(32768, 65536), retries=0, timeout=3600,
               volumes={"/runs": runs_volume, "/root/.cache/huggingface": hf_cache}, secrets=secrets)
-def probe(base, suite, name, tasks="all"):
+def probe(base, suite, name, tasks="all", prompt="plain", split="development", revision=None):
     import os
     out = Path("/runs/probes") / name
     if out.exists():
         raise FileExistsError(f"probe {name} exists")
     try:
-        subprocess.run([sys.executable, "/root/scripts/base_mmlu_probe.py", "--base", base, "--suite", f"/root/{suite}", "--tasks", tasks, "--device", "cuda", "--out", str(out)],
+        subprocess.run([sys.executable, "/root/scripts/base_mmlu_probe.py", "--base", base, "--suite", f"/root/{suite}", "--tasks", tasks, "--device", "cuda", "--out", str(out), "--prompt", prompt, "--split", split] + (["--revision", revision] if revision else []),
                        check=True, cwd="/root", env={**os.environ, "PYTHONPATH": "/root"})
     finally:
         runs_volume.commit(); hf_cache.commit()
@@ -44,13 +44,13 @@ def probe(base, suite, name, tasks="all"):
 
 
 @app.local_entrypoint()
-def main(bases: str, suite: str = "evals/v4/transfer-v4", tasks: str = "all"):
+def main(bases: str, suite: str = "evals/v4/transfer-v4", tasks: str = "all", prompt: str = "plain", split: str = "development", revision: str = ""):
     jobs = []
     for base in bases.split(","):
-        name = base.split("/")[-1].lower().replace(".", "") + "-base-" + suite.split("/")[-1]
+        name = base.split("/")[-1].lower().replace(".", "") + ("-semif" if prompt == "semif" else "-base") + "-" + suite.split("/")[-1] + ("" if split == "development" else f"-{split}")
         if (ROOT / "runs/probes" / name).exists():
             print(f"skip {name}: exists locally"); continue
-        jobs.append((base, suite, name, tasks))
+        jobs.append((base, suite, name, tasks, prompt, split, revision or None))
     for (base, _, name, _), result in zip(jobs, probe.starmap(jobs, return_exceptions=True)):
         if isinstance(result, Exception):
             print(f"{name}: FAILED {type(result).__name__}: {str(result)[:200]}"); continue

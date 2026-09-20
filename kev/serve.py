@@ -17,7 +17,9 @@ INFER_MAX_STATE, INFER_MAX_BRANCH = 8192, 8192
 
 app = FastAPI(title="kev")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
-STATE = {"run": None, "tok": None, "model": None, "dev": None, "lock": threading.Lock()}
+STATE = {"run": None, "tok": None, "model": None, "dev": None, "lock": threading.Lock(), "prefix_cache": {}, "prefix_hits": 0, "prefix_misses": 0}
+PREFIX_CACHE_SIZE = int(os.environ.get("KEV_PREFIX_CACHE", "4"))          # states kept (KV + hidden); 0 disables
+PREFIX_MIN_TOKENS = int(os.environ.get("KEV_PREFIX_MIN_TOKENS", "384"))   # below this the branch-only pass is not faster on MPS (per-op overhead dominates)
 
 
 class Question(BaseModel):
@@ -41,16 +43,35 @@ def _rec(r: Record):
     return {"state": r.state, "questions": [{"instr": q.instr, "options": q.options, "label": 0} for q in r.questions]}
 
 
+def _sync(dev):
+    if dev == "mps": torch.mps.synchronize()
+    elif dev == "cuda": torch.cuda.synchronize()
+
+
 def _probs(rec):
+    """One forward pass; the state prefix (tokens up to the first question) is cached across requests, so a repeated state
+    only pays for its question branches. Exactness: the state's activations do not depend on the branches."""
     tok, model, dev = STATE["tok"], STATE["model"], STATE["dev"]
     try: enc = model.encode(tok, rec, max_state=INFER_MAX_STATE, max_branch=INFER_MAX_BRANCH)
     except ValueError as e: raise HTTPException(422, str(e))
+    Ls = enc["seg"].count(0); key = (tuple(enc["ids"][:Ls]), bool(enc.get("option_isolation")))
+    cache = STATE["prefix_cache"]
     with STATE["lock"]:
-        if dev == "mps": torch.mps.synchronize()
-        t = time.time(); ps = model.probs(enc)
-        if dev == "mps": torch.mps.synchronize()
-        dt = time.time() - t
-    return [p.tolist() for p in ps], {"tokens": len(enc["ids"]), "state_tokens": enc["seg"].count(0), "latency_ms": round(dt * 1000, 1)}
+        _sync(dev); t = time.time()
+        eligible = PREFIX_CACHE_SIZE and Ls >= PREFIX_MIN_TOKENS
+        if eligible and key in cache:
+            prefix = cache.pop(key)                       # pop + reinsert = LRU order
+            ps = model.probs_with_prefix(enc, prefix); cache[key] = prefix
+            STATE["prefix_hits"] += 1; hit = True
+        elif eligible:
+            ps, prefix = model.probs_and_prefix(enc)      # one pass, and the state prefix is kept for next time
+            cache[key] = prefix
+            while len(cache) > PREFIX_CACHE_SIZE: cache.pop(next(iter(cache)))
+            STATE["prefix_misses"] += 1; hit = False
+        else:
+            ps = model.probs(enc); hit = False
+        _sync(dev); dt = time.time() - t
+    return [p.tolist() for p in ps], {"tokens": len(enc["ids"]), "state_tokens": Ls, "latency_ms": round(dt * 1000, 1), "prefix_cache_hit": hit}
 
 
 @app.post("/v1/systemone")
@@ -105,7 +126,8 @@ def models():
 def info():
     ev = f"{STATE['run']}/eval.json"
     return {"run": STATE["run"], "device": STATE["dev"], "base": STATE["base"], "lora": STATE["lora"],
-            "none_option": NONE, "distractors": DISTRACTORS, "has_eval": os.path.exists(ev)}
+            "none_option": NONE, "distractors": DISTRACTORS, "has_eval": os.path.exists(ev),
+            "prefix_cache": {"size": PREFIX_CACHE_SIZE, "min_state_tokens": PREFIX_MIN_TOKENS, "hits": STATE["prefix_hits"], "misses": STATE["prefix_misses"], "cached_states": len(STATE["prefix_cache"])}}
 
 
 @app.get("/api/eval")
@@ -163,6 +185,7 @@ def main():
     run = resolve_run(run)
     dev = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
     meta = torch.load(f"{run}/head.pt", map_location="cpu")
+    if dev == "mps" and not os.environ.get("KEV_ATTN"): os.environ["KEV_ATTN"] = "sdpa"   # serving default on Apple GPUs (parity measured)
     tok, model = load(run, dev)
     STATE.update(run=label, tok=tok, model=model, dev=dev, base=meta["base"], lora=meta["lora"])
     print(f"serving {label} ({run}) on {dev} :{a.port}")

@@ -275,3 +275,59 @@ def test_anchor_trial_validation():
     with pytest.raises(ValueError, match="anchor_sources"):
         validated_trial({"base": "m", "anchor": "runs/anchors/x.json", "anchor_w": 0.5, "anchor_sources": "mmlu"}, m)
     assert validated_trial({"base": "m", "anchor": "runs/anchors/x.json", "anchor_w": 0.5, "anchor_sources": "arc"}, m)["anchor_w"] == 0.5
+
+
+def test_merged_load_matches_unmerged_exactly_in_fp32():
+    import torch
+    from kev.evaluate import load
+    from kev.data import materialize
+    from kev.suite import load_split
+    run = "runs/smoke-hl/00-trial-0/checkpoint"
+    if not __import__("os").path.exists(f"{run}/head.pt"): pytest.skip("smoke checkpoint not present")
+    recs = [materialize(r) for r in load_split("evals/smoke-v1", "development")[:3]]
+    tok, a = load(run, "cpu", merge=False); _, b = load(run, "cpu", merge=True)
+    with torch.no_grad():
+        for r in recs:
+            pa, pb = torch.cat(a.probs(a.encode(tok, r))), torch.cat(b.probs(b.encode(tok, r)))
+            assert (pa - pb).abs().max() < 1e-5
+
+
+def test_prefix_cache_matches_full_pass():
+    import torch
+    from kev.evaluate import load
+    from kev.data import materialize
+    from kev.suite import load_split
+    run = "runs/smoke-hl/00-trial-0/checkpoint"
+    if not __import__("os").path.exists(f"{run}/head.pt"): pytest.skip("smoke checkpoint not present")
+    tok, m = load(run, "cpu")
+    recs = [materialize(r) for r in load_split("evals/smoke-v1", "development")[:3]]
+    for r in recs:
+        enc = m.encode(tok, r); full = torch.cat(m.probs(enc))
+        prefix = m.prefix(enc)
+        a = torch.cat(m.probs_with_prefix(enc, prefix)); b = torch.cat(m.probs_with_prefix(enc, prefix))   # reuse twice: crop() must restore the cache
+        assert (full - a).abs().max() < 1e-4 and (a - b).abs().max() < 1e-6
+        p2, prefix2 = m.probs_and_prefix(enc)                                                               # single-pass miss path
+        assert (torch.cat(p2) - full).abs().max() < 1e-5 and prefix2[0] == prefix[0] and (prefix2[2] - prefix[2]).abs().max() < 1e-3 * prefix[2].abs().max()
+        assert (torch.cat(m.probs_with_prefix(enc, prefix2)) - full).abs().max() < 1e-4
+        # a different question set on the same state also reuses the prefix
+        r2 = {**r, "questions": r["questions"][:1]}; enc2 = m.encode(tok, r2)
+        assert (torch.cat(m.probs(enc2)) - torch.cat(m.probs_with_prefix(enc2, prefix))).abs().max() < 1e-4
+
+
+def test_shape_bucket_padding_is_exact_in_fp32():
+    import torch
+    from kev.evaluate import load
+    from kev.data import materialize
+    from kev.suite import load_split
+    run = "runs/smoke-hl/00-trial-0/checkpoint"
+    if not __import__("os").path.exists(f"{run}/head.pt"): pytest.skip("smoke checkpoint not present")
+    tok, m = load(run, "cpu")
+    recs = [materialize(r) for r in load_split("evals/smoke-v1", "development")[:3]]
+    from kev.model import branch_mask_batch
+    for r in recs:
+        enc = m.encode(tok, r); L = len(enc["ids"]); padded = -(-L // 64) * 64
+        with torch.no_grad():
+            h = m.hidden_batch([enc])[0, :L]
+            ids = torch.full((1, padded), m.pad_id); ids[0, :L] = torch.tensor(enc["ids"]); pos = torch.zeros((1, padded), dtype=torch.long); pos[0, :L] = torch.tensor(enc["pos"])
+            hp = m.lm(input_ids=ids, position_ids=pos, attention_mask=branch_mask_batch([enc["seg"]], "cpu", length=padded)).last_hidden_state[0, :L]
+        assert (h - hp).abs().max() < 1e-4 * h.abs().max()

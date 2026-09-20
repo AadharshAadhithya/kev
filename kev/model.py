@@ -72,7 +72,7 @@ def branch_mask(seg, device, dtype=torch.float32):
     return branch_mask_batch([seg], device, dtype)
 
 
-def branch_mask_batch(segs, device, dtype=torch.float32, opts=None):
+def branch_mask_batch(segs, device, dtype=torch.float32, opts=None, length=None):
     """Batched block-causal mask, additive [B,1,L,L], right-padded to the longest sequence.
 
     Padded key positions are masked for every query; padded query rows keep the diagonal so no row is fully
@@ -81,7 +81,7 @@ def branch_mask_batch(segs, device, dtype=torch.float32, opts=None):
 
     opts (option isolation): within a question, an option-span token may attend to state, the instruction, and its own
     span only; <decide> attends to everything in its question. Instruction tokens never see option spans (causal)."""
-    L = max(len(s) for s in segs)
+    L = max(max(len(s) for s in segs), length or 0)
     s = torch.full((len(segs), L), -1, device=device)
     for b, seg in enumerate(segs):
         s[b, : len(seg)] = torch.tensor(seg, device=device)
@@ -140,9 +140,13 @@ class DecisionModel(nn.Module):
     def hidden(self, enc):
         return self.hidden_batch([enc])[0, : len(enc["ids"])]
 
+    SHAPE_BUCKET = 64   # on MPS every new sequence length pays a per-shape kernel warm-up (~150 ms measured); pad to buckets
+
     def hidden_batch(self, encs):
-        """[B, L_max, d] hidden states for a right-padded batch of encoded records."""
+        """[B, L_max, d] hidden states for a right-padded batch of encoded records. Pads are masked keys and sit after every
+        real token, so padding never changes a real token's hidden state (parity measured exact)."""
         L = max(len(e["ids"]) for e in encs)
+        if str(self.device) == "mps" and not self.training: L = -(-L // self.SHAPE_BUCKET) * self.SHAPE_BUCKET
         ids = torch.full((len(encs), L), self.pad_id, device=self.device)
         pos = torch.zeros((len(encs), L), dtype=torch.long, device=self.device)
         for b, e in enumerate(encs):
@@ -152,7 +156,7 @@ class DecisionModel(nn.Module):
         if isolate and not all(e.get("option_isolation") for e in encs):
             raise ValueError("cannot mix option-isolated and plain encodings in one batch")
         lm_dtype = next(self.lm.parameters()).dtype
-        mask = branch_mask_batch([e["seg"] for e in encs], self.device, dtype=lm_dtype, opts=[e["opt"] for e in encs] if isolate else None)
+        mask = branch_mask_batch([e["seg"] for e in encs], self.device, dtype=lm_dtype, opts=[e["opt"] for e in encs] if isolate else None, length=L)
         return self.lm(input_ids=ids, position_ids=pos, attention_mask=mask).last_hidden_state.float()   # head stays fp32
 
     def _readout(self, h, enc):
@@ -170,6 +174,49 @@ class DecisionModel(nn.Module):
     @torch.no_grad()
     def probs(self, enc):
         return [F.softmax(z, -1).cpu() for z in self.forward(enc)]
+
+    # --- state-prefix reuse (serving): the state is encoded once, question branches attend to its cached keys/values.
+    # Exact by construction: branch tokens never attend to each other across questions (block-causal mask) and the state
+    # never sees the branches (causal), so the state's hidden states and KV are identical with or without the branches.
+
+    @torch.no_grad()
+    def prefix(self, enc):
+        """Run the state tokens only. Returns (n_state_tokens, kv cache, state hidden states [Ls, d])."""
+        from transformers import DynamicCache
+        Ls = enc["seg"].count(0)
+        ids = torch.tensor([enc["ids"][:Ls]], device=self.device); pos = torch.tensor([enc["pos"][:Ls]], device=self.device)
+        out = self.lm(input_ids=ids, position_ids=pos, past_key_values=DynamicCache(), use_cache=True)
+        return Ls, out.past_key_values, out.last_hidden_state[0].float()
+
+    @torch.no_grad()
+    def probs_and_prefix(self, enc):
+        """One full pass that also returns the state prefix (KV cropped to the state, state hidden states): a cache miss
+        costs a single forward pass, not two."""
+        from transformers import DynamicCache
+        Ls = enc["seg"].count(0)
+        ids = torch.tensor([enc["ids"]], device=self.device); pos = torch.tensor([enc["pos"]], device=self.device)
+        dt = next(self.lm.parameters()).dtype
+        mask = branch_mask_batch([enc["seg"]], self.device, dtype=dt, opts=[enc["opt"]] if enc.get("option_isolation") else None)
+        out = self.lm(input_ids=ids, position_ids=pos, attention_mask=mask, past_key_values=DynamicCache(), use_cache=True)
+        h = out.last_hidden_state[0].float()
+        out.past_key_values.crop(Ls)
+        return [F.softmax(z, -1).cpu() for z in self._readout(h, enc)], (Ls, out.past_key_values, h[:Ls].clone())
+
+    @torch.no_grad()
+    def probs_with_prefix(self, enc, prefix):
+        """probs() for a record whose state tokens equal the cached prefix's; only the branches run. The cache is cropped
+        back to the state afterwards so it can be reused."""
+        Ls, cache, h_state = prefix
+        if enc["seg"].count(0) != Ls: raise ValueError("prefix does not match this record's state")
+        ids = torch.tensor([enc["ids"][Ls:]], device=self.device); pos = torch.tensor([enc["pos"][Ls:]], device=self.device)
+        dt = next(self.lm.parameters()).dtype
+        mask = branch_mask_batch([enc["seg"]], self.device, dtype=dt, opts=[enc["opt"]] if enc.get("option_isolation") else None)[:, :, Ls:, :]
+        try:
+            out = self.lm(input_ids=ids, position_ids=pos, past_key_values=cache, attention_mask=mask, use_cache=True)
+            h = torch.cat([h_state, out.last_hidden_state[0].float()], 0)
+        finally:
+            cache.crop(Ls)
+        return [F.softmax(z, -1).cpu() for z in self._readout(h, enc)]
 
     def trainable_parameters(self):
         return [p for p in self.parameters() if p.requires_grad]

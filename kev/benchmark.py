@@ -57,7 +57,7 @@ def prediction_rows(record, prediction):
         p, total = validate_distribution(prediction["probabilities"][qid], keys)
         row = {"id": meta["id"], "group": meta["group_id"], "question": qid,
                "source": meta["source"], "task": q["src"], "type": q["type"],
-               "variant": meta["variant"], "keys": keys, "label": y,
+               "variant": meta["variant"], "keys": keys, "label": y, "control_id": meta.get("control_id"),
                "pair_id": meta.get("pair_id"), "sibling": meta.get("sibling"), # suites frozen before parent_id existed stored the parent's id in group_id for variants
                "parent": meta.get("parent_id") or (meta["id"] if meta["variant"] == "clean" else meta["group_id"]),
                "p": p.tolist(), "raw_probability_sum": total, "zero_count": int((p == 0).sum())}
@@ -88,6 +88,7 @@ def metrics(rows, temperature=1.0):
     high = confidence >= 0.9
     result.update(confident_error_rate=float(np.mean(high & ~correct)), coverage_at_0_9=float(high.mean()),
                   accuracy_at_0_9=float(correct[high].mean()) if high.any() else None,
+                  coverage_at_5pct_error=coverage_at_error(confidence, correct, 0.05), coverage_at_1pct_error=coverage_at_error(confidence, correct, 0.01),
                   # signed over-confidence (mean top probability minus accuracy) and errors within the top confidence bins;
                   # the sign is diagnostic: untrained readouts run positive, outcome-trained ones near zero or negative
                   confidence_bias=float(confidence.mean() - correct.mean()),
@@ -102,6 +103,32 @@ def metrics(rows, temperature=1.0):
     if mae:
         result.update(score_mae=float(np.mean(mae)), ranked_probability_score=float(np.mean(rps)))
     return result
+
+
+def coverage_at_error(confidence, correct, budget):
+    """Selective automation: the largest share of decisions that can be accepted, in descending confidence order, while
+    the empirical error among the accepted stays <= budget (jev-benchmarks' "coverage at a fixed error budget"). A model
+    whose probabilities are honest gets high coverage; one that is confidently wrong gets little, whatever its accuracy."""
+    order = np.argsort(-np.asarray(confidence), kind="stable"); wrong = np.cumsum(~np.asarray(correct, dtype=bool)[order])
+    accepted = np.arange(1, len(order) + 1)
+    ok = np.nonzero(wrong <= budget * accepted)[0]
+    return float(accepted[ok[-1]] / len(order)) if len(ok) else 0.0
+
+
+def unknowable_report(rows):
+    """Confidence on records whose deciding evidence was removed (source 'unknowable') against their intact controls.
+    Accuracy on the unknowable records is meaningless by construction; what is scored is whether the model knows it
+    cannot know: mean max-probability and the share of records answered at >= 0.9."""
+    unk = [r for r in rows if r["source"] == "unknowable"]; ctl = [r for r in rows if r["source"] == "unknowable_control"]
+    if not unk: return None
+    conf = lambda rs: [float(max(r["p"])) for r in rs]
+    by_id = {r["id"]: r for r in ctl}
+    paired = [(max(r["p"]), max(by_id[r["control_id"]]["p"])) for r in unk if r.get("control_id") in by_id]
+    return {"n": len(unk), "mean_max_p": float(np.mean(conf(unk))), "share_at_0_9": float(np.mean([c >= 0.9 for c in conf(unk)])),
+            "control_mean_max_p": float(np.mean(conf(ctl))) if ctl else None, "control_share_at_0_9": float(np.mean([c >= 0.9 for c in conf(ctl)])) if ctl else None,
+            "control_acc": float(np.mean([int(np.argmax(r["p"]) == r["label"]) for r in ctl])) if ctl else None,
+            "paired_confidence_drop": float(np.mean([c - u for u, c in paired])) if paired else None,
+            "share_less_confident_than_control": float(np.mean([u < c for u, c in paired])) if paired else None}
 
 
 def grouped_metrics(rows, key, temperature=1.0):
@@ -160,9 +187,10 @@ def summarize(rows, temperature=1.0, heldout_sources=("mnli", "sst5")):
             diffs.append(float(np.max(np.abs(np.array(aligned) - original["p"]))))
             flips.append(int(np.argmax(aligned) != np.argmax(original["p"])))
     from kev.contrastive import paired_flip
-    return {"objective": -float(np.mean([v["nll"] for v in tasks.values()])),
-            "paired_flip": paired_flip(clean),
-            "clean": metrics(clean), "tasks": tasks, "variants": variants,
+    knowable = [r for r in clean if r["source"] != "unknowable"]     # unknowable records are scored on confidence, never on accuracy
+    return {"objective": -float(np.mean([v["nll"] for k, v in tasks.items() if not k.startswith("unknowable_") or k.startswith("unknowable_control")])),
+            "paired_flip": paired_flip(clean), "unknowable": unknowable_report(clean),
+            "clean": metrics(knowable), "tasks": tasks, "variants": variants,
             "heldout_tasks": grouped_metrics([r for r in clean if r["source"] in heldout_sources], "task") if any(r["source"] in heldout_sources for r in clean) else {},
             "permutation": {"n": len(diffs), "mean_max_delta": float(np.mean(diffs)) if diffs else None,
                             "flip_rate": float(np.mean(flips)) if flips else None},

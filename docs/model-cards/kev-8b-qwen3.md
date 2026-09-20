@@ -31,7 +31,7 @@ metrics:
   - brier_score
   - expected_calibration_error
 model-index:
-  - name: Kev-8B
+  - name: Kev-8B (Qwen3)
     results:
       - task: { type: text-classification, name: typed decision (choice / noul / score) }
         dataset: { type: mixed, name: "decision-v4/v6 development (1,204 records; trained public sources + programmatic policy pairs)" }
@@ -45,7 +45,9 @@ model-index:
           - { type: brier_score, value: 0.337 }
 ---
 
-# Kev-8B
+# Kev-8B (Qwen3)
+
+> **Previous generation (Qwen3).** This checkpoint is kept as the fast option on Apple Silicon (its attention-only backbone runs the packed forward at full speed on MPS). For accuracy and calibration use [Kev-9B](kev-9b.md): on the locked test it scores 0.837 vs 0.780 out of domain against this model on the same items. Weights: `jaredpalmer/kev-8b`.
 
 Kev-8B is a **decision model**: one document (the *state*) and a set of typed questions in, a probability distribution per question out, in one forward pass. No text generation. It is a LoRA adapter (r=16) plus a pointer head on `Qwen/Qwen3-8B-Base` (revision `49e3418f`), serving TypeSafe's public `/v1/systemone` contract.
 

@@ -276,6 +276,13 @@ Kev-0.6B = `v7-06b/02-trial-2` (dev 0.801 / 0.620, locked 0.808 / 0.642; three v
 the previous 0.598), Kev-4B = `v7-rc3/01-trial-1`, Kev-8B = `v7-final/00-trial-0`. Serving: fp32-merged LoRA, SDPA on MPS,
 state-prefix KV cache, shape bucketing (all parity-tested).
 
+**Qwen3.5 generation (2026-09-20).** Same data and recipe on Qwen3.5-4B/9B bases (hybrid Gated DeltaNet + attention; questions run
+as causal rows from a shared state instead of under a packed mask). Development criteria set in advance were not met (accuracy CI
+includes zero; deadline 0.72 not 0.75); the single locked-test read shows Kev-9B **0.837** vs Kev-8B 0.780 out of domain
+(+7.3 pp [+2.8, +11.7], Brier 0.243 vs 0.327) and Kev-4B 0.832 vs 0.806. Published as the current family: `jaredpalmer/kev-9b`,
+`jaredpalmer/kev-4b` (Qwen3 weights at tag `qwen3`); `kev-8b` stays as the fast Mac option. The deadline family is a training-data
+problem, not a readout problem (issue #8; adapter-merge probe). Full log: [PLAN_Qwen35.md](PLAN_Qwen35.md).
+
 Ops: two studies were lost to the local client disconnecting (Modal cancels `.starmap` inputs when the caller dies; `--detach`
 keeps only the last-triggered function). Studies now fan out server-side from the **deployed** app (`modal deploy modal_app.py`;
 `run_study` spawned, `pull --name` afterwards). ~$35 of GPU time was lost to this.
@@ -310,6 +317,8 @@ Maintained by `kev.autoresearch`; full table in [`runs/leaderboard.md`](runs/lea
 - **Qwen3-0.6B-Base** incumbent (v4 suites): transfer 0.620, dev 0.801, seeds [2], knobs `{"epochs": 2, "lr": 0.0001, "p_none_pair": 0.25}`
 - **Qwen3-4B-Base** incumbent (v4 suites): transfer 0.775, dev 0.858, seeds [0], knobs `{"epochs": 2, "lr": 5e-05, "p_none_pair": 0.25}`
 - **Qwen3-8B-Base** incumbent (v4 suites): transfer 0.796, dev 0.863, seeds [0], knobs `{"epochs": 2, "lr": 5e-05, "p_none_pair": 0.25}`
+- **Qwen3.5-4B-Base** (v7 recipe unchanged): transfer 0.788 / 0.800 / 0.794 / 0.770 over four seeds, dev 0.877; released seed 2 (`q35-4b-s23/00-trial-0`)
+- **Qwen3.5-9B-Base** (v7 recipe unchanged): transfer 0.802 / 0.812, dev 0.876; released seed 1 (`q35-9b/01-trial-1`). Details in [PLAN_Qwen35.md](PLAN_Qwen35.md) §10.
 
 | round | base | trials | best transfer | best knobs | incumbent after | spend |
 |---|---|---|---|---|---|---|

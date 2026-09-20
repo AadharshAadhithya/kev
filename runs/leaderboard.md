@@ -1,6 +1,6 @@
 # Leaderboard
 
-Generated 2026-09-20T14:54+00:00 from runs/*/result.json. Selection on development partitions only; the locked test is never read here.
+Generated 2026-09-20T22:52+00:00 from runs/*/result.json. Selection on development partitions only; the locked test is never read here.
 
 - **Qwen/Qwen3-0.6B-Base** incumbent: transfer 0.620, dev 0.801, seeds [2] (v7-06b/02-trial-2)
 - **Qwen/Qwen3-4B-Base** incumbent: transfer 0.775, dev 0.858, seeds [0] (v7-rc3/00-trial-0, v8-4b/00-trial-0)
@@ -8,8 +8,13 @@ Generated 2026-09-20T14:54+00:00 from runs/*/result.json. Selection on developme
 
 | study/trial | base | seed | dev acc | transfer acc | Brier | conf-err | held-out pairs | none_present | perm flip | gates | $ | knobs |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
+| q35-9b/01-trial-1 | Qwen3.5-9B-Base | 1 | 0.876 | 0.812 | 0.291 | 0.075 | 0.80 | 0.90 | 0.02 | pass | 6.6 | accum=4, epochs=2, lr=5e-05, p_none_pair=0.25 |
+| q35-9b/00-trial-0 | Qwen3.5-9B-Base | 0 | 0.871 | 0.802 | 0.308 | 0.069 | 0.75 | 0.92 | 0.03 | pass | 5.78 | accum=4, epochs=2, lr=5e-05, p_none_pair=0.25 |
+| q35-4b/01-trial-1 | Qwen3.5-4B-Base | 1 | 0.876 | 0.800 | 0.322 | 0.095 | 0.75 | 0.88 | 0.02 | pass | 3.99 | epochs=2, lr=5e-05, p_none_pair=0.25 |
 | v7-final/00-trial-0 | Qwen3-8B-Base | 0 | 0.863 | 0.796 | 0.337 | 0.099 | 0.69 | 0.87 | 0.02 | fail | 5.78 | accum=4, epochs=2, lr=5e-05, p_none_pair=0.25 |
+| q35-4b-s23/00-trial-0 | Qwen3.5-4B-Base | 2 | 0.877 | 0.794 | 0.316 | 0.082 | 0.78 | 0.93 | 0.02 | pass | 4.01 | epochs=2, lr=5e-05, p_none_pair=0.25 |
 | v7-rc3/01-trial-1 | Qwen3-4B-Base | 1 | 0.854 | 0.790 | 0.328 | 0.082 | 0.73 | 0.87 | 0.02 | pass | 2.84 | epochs=2, lr=5e-05, p_none_pair=0.25 |
+| q35-4b/00-trial-0 | Qwen3.5-4B-Base | 0 | 0.877 | 0.788 | 0.339 | 0.096 | 0.72 | 0.92 | 0.03 | pass | 4.15 | epochs=2, lr=5e-05, p_none_pair=0.25 |
 | recipe-8b-r2/01-trial-1 | Qwen3-8B-Base | 1 | 0.868 | 0.779 | 0.336 | 0.081 | 0.67 | 0.87 | 0.05 | fail | 6.49 | accum=4, epochs=2, lr=5e-05, p_none_pair=0.25 |
 | v8-4b/00-trial-0 | Qwen3-4B-Base | 0 | 0.858 | 0.777 | 0.338 | 0.076 | 0.69 | 0.85 | 0.03 | fail | 3.06 | epochs=2, lr=5e-05, p_none_pair=0.25 |
 | recipe-8b-r1/00-trial-0 | Qwen3-8B-Base | 0 | 0.869 | 0.774 | 0.339 | 0.082 | 0.61 | 0.88 | 0.02 | fail | 4.96 | accum=4, epochs=2, lr=5e-05, p_none_pair=0.25 |
@@ -17,6 +22,7 @@ Generated 2026-09-20T14:54+00:00 from runs/*/result.json. Selection on developme
 | v7-final/01-trial-1 | Qwen3-8B-Base | 1 | 0.864 | 0.774 | 0.358 | 0.099 | 0.64 | 0.90 | 0.03 | fail | 5.98 | accum=4, epochs=2, lr=5e-05, p_none_pair=0.25 |
 | anchor-4b-v6/00-trial-0 | Qwen3-4B-Base | 0 | 0.861 | 0.773 | 0.358 | 0.085 | 0.61 | 0.88 | 0.02 | fail | 3.4 | anchor=/runs/anchors/v6-qwen3-4b.json, anchor_sources=arc,openbookqa,csqa, anchor_w=0.5, epochs=2, lr=5e-05, p_none_pair=0.25 |
 | v7-rc3/00-trial-0 | Qwen3-4B-Base | 0 | 0.858 | 0.773 | 0.359 | 0.098 | 0.62 | 0.87 | 0.05 | fail | 3.01 | epochs=2, lr=5e-05, p_none_pair=0.25 |
+| q35-4b-s23/01-trial-1 | Qwen3.5-4B-Base | 3 | 0.873 | 0.770 | 0.346 | 0.093 | 0.69 | 0.92 | 0.00 | fail | 4.17 | epochs=2, lr=5e-05, p_none_pair=0.25 |
 | recipe-8b-r2/00-trial-0 | Qwen3-8B-Base | 0 | 0.855 | 0.770 | 0.348 | 0.075 | 0.62 | 0.87 | 0.05 | fail | 5.92 | accum=4, epochs=2, lr=2e-05, p_none_pair=0.25 |
 | v7-final/02-trial-2 | Qwen3-4B-Base | 2 | 0.849 | 0.770 | 0.371 | 0.105 | 0.67 | 0.87 | 0.02 | fail | 3.07 | epochs=2, lr=5e-05, p_none_pair=0.25 |
 | auto-4b-r0-91266/01-trial-1 | Qwen3-4B-Base | 0 | 0.840 | 0.767 | 0.355 | 0.062 | 0.61 | 0.87 | 0.07 | fail | 2.76 | epochs=2, lora_targets=all, lr=3e-05, p_none_pair=0.25 |
@@ -89,6 +95,7 @@ Generated 2026-09-20T14:54+00:00 from runs/*/result.json. Selection on developme
 | arch-06b/00-trial-0 | Qwen3-0.6B-Base | 0 | 0.800 | 0.581 | 0.587 | 0.098 | 0.06 | 0.82 | 0.00 | fail | 0.33 | epochs=2, option_isolation=1, p_none_pair=0.25 |
 | ablation-v2/00-kev-0.5b | legacy |  | 0.712 | 0.575 | 0.514 |  | 0.20 | 0.62 | 0.06 | pass | 0.07 | defaults |
 | auto-06b-r1/06-trial-6 | Qwen3-0.6B-Base | 0 | 0.816 | 0.575 | 0.514 | 0.047 | 0.05 | 0.80 | 0.02 | fail | 1.13 | epochs=2, option_isolation=0, p_none_pair=0.25, perm_kl=0.2 |
+| q35-smoke/00-trial-0 | Qwen3.5-0.8B-Base | 0 | 0.733 | 0.575 | 0.545 | 0.037 | 0.02 | 0.42 | 0.08 | fail | 0.51 | lr=0.0001, p_none_pair=0.25, public_frac=0.1 |
 | auto-06b-r1/05-trial-5 | Qwen3-0.6B-Base | 0 | 0.771 | 0.572 | 0.535 | 0.034 | 0.02 | 0.72 | 0.08 | fail | 0.51 | p_none_pair=0.25 |
 | auto-06b-r1/03-trial-3 | Qwen3-0.6B-Base | 0 | 0.768 | 0.569 | 0.515 | 0.020 | 0.14 | 0.77 | 0.03 | fail | 0.93 | epochs=2, lora=64, ord_w=0.5, p_none_pair=0.25 |
 | ablation-v2/03-trial-3 | Qwen2.5-0.5B | 0 | 0.722 | 0.562 | 0.590 |  | 0.00 | 0.64 | 0.10 | fail | 0.2 | epochs=2, train_sources=banking77,boolq,agnews,mnli,sst5,yelp,trec,dbpedia14,amazon,imdb |
@@ -105,6 +112,8 @@ Generated 2026-09-20T14:54+00:00 from runs/*/result.json. Selection on developme
 | backbone-v1/03-trial-3 | Qwen2.5-0.5B | 1 | 0.697 |  |  |  |  | 0.36 | 0.11 | fail | 0.11 | epochs=2 |
 | backbone-v1/04-trial-4 | Qwen3-0.6B-Base | 1 | 0.721 |  |  |  |  | 0.22 | 0.17 | fail | 0.15 | epochs=2 |
 | gatecheck-trial4/00-checkpoint | legacy |  | 0.721 |  |  |  |  | 0.22 | 0.17 | pass | 0.03 | defaults |
+| kev-4b-transfer-v9/00-kev-4b | legacy |  | 0.729 |  |  |  |  | 0.58 | 0.06 | pass | 0.08 | defaults |
+| kev-8b-transfer-v9/00-kev-8b | legacy |  | 0.747 |  |  |  |  | 0.61 | 0.00 | pass | 0.11 | defaults |
 | research-smoke-runner-v2/00-trial-0 | Qwen2.5-0.5B | 0 | 0.389 |  |  |  |  | 0.33 | 1.00 | pass |  | ord_w=0.1, perm_frac=1, perm_kl=0.1 |
 | research-smoke-runner-verified/00-trial-0 | Qwen2.5-0.5B | 0 | 0.389 |  |  |  |  | 0.33 | 1.00 | pass |  | accum=3, ord_w=0.1, perm_frac=1, perm_kl=0.1 |
 | smoke/00-trial-0 | Qwen2.5-0.5B | 0 | 0.389 |  |  |  |  | 0.33 | 1.00 | pass | 0.04 | ord_w=0.1, perm_frac=1, perm_kl=0.1 |

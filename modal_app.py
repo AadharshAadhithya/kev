@@ -32,6 +32,9 @@ image = (
     modal.Image.debian_slim(python_version="3.13")
     .apt_install("git")
     .uv_sync(uv_project_dir=str(ROOT), groups=[])           # exact locked deps; Linux torch wheels are the CUDA build
+    # Gated DeltaNet kernels for the Qwen3.5 hybrid backbones (transformers falls back to slow reference code without them)
+    # fla refuses its gated chunk backward on Hopper with Triton 3.4-3.7.0 (incorrect results, fla#640); torch 2.8 pins 3.4
+    .uv_pip_install("flash-linear-attention", "triton>=3.7.1")
     .env({"HF_HOME": HF_MOUNT, "HF_HUB_DISABLE_PROGRESS_BARS": "1", "TOKENIZERS_PARALLELISM": "false", "PYTHONUNBUFFERED": "1"})
     .add_local_python_source("kev")
     .add_local_file(ROOT / "uv.lock", "/root/uv.lock")
@@ -61,7 +64,7 @@ def remote_source_hashes():
     return source_hashes()
 
 
-@app.function(image=image, gpu=GPU, cpu=2, memory=(32768, 49152), max_containers=8, retries=0, timeout=7200,
+@app.function(image=image, gpu=GPU, cpu=2, memory=(32768, 49152), max_containers=8, retries=0, timeout=14400,
               volumes={RUNS_MOUNT: runs_volume, HF_MOUNT: hf_cache}, secrets=secrets)
 def run_trial(study, index, label, config, suite, expected_sources, git_commit, existing=None, transfer=None):
     """One trial in one container. `existing` is a checkpoint path on the runs volume or a Hub id (legacy scoring)."""
@@ -208,7 +211,7 @@ def launch_detached(suite, plan_path, name, gpu, existing=(), transfer=None, bud
     from kev.experiment import load_plan
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,79}", name): raise ValueError("study name must be a simple unique identifier")
     if (ROOT / "runs" / name).exists(): raise FileExistsError("choose a new study name; existing results are immutable")
-    if not 60 <= timeout <= 7200 or not 0 < budget <= 250: raise ValueError("timeout must be 60..7200 seconds and study budget <= $250")
+    if not 60 <= timeout <= 14400 or not 0 < budget <= 250: raise ValueError("timeout must be 60..14400 seconds and study budget <= $250")
     trials = load_plan(ROOT / suite, ROOT / plan_path) if plan_path else []
     rates = {"H100": 3.95, "T4": .59}
     upper = (rates[gpu] + 2 * .04730 + 48 * .008) * timeout / 3600 * (len(trials) + len(existing))
@@ -256,8 +259,8 @@ def launch(suite, plan_path, name, gpu, existing=(), transfer=None, budget=20.0,
         raise ValueError("study name must be a simple unique identifier")
     if (ROOT / "runs" / name).exists():
         raise FileExistsError("choose a new study name; existing results are immutable")
-    if not 60 <= timeout <= 7200 or not 0 < budget <= 250:   # overnight authorization: $500 total, tracked in PLAN.md
-        raise ValueError("timeout must be 60..7200 seconds and study budget <= $250")
+    if not 60 <= timeout <= 14400 or not 0 < budget <= 250:   # overnight authorization: $500 total, tracked in PLAN.md
+        raise ValueError("timeout must be 60..14400 seconds and study budget <= $250")
     trials = load_plan(ROOT / suite, ROOT / plan_path) if plan_path else []
     rates = {"H100": 3.95, "T4": .59}
     if gpu not in rates:

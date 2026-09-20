@@ -36,25 +36,7 @@
     "tweet_offensive": 0.6875
    }
   },
-  "kev-4b": {
-   "path": "runs/v7-rc3/01-trial-1/result.json",
-   "transfer_acc": 0.7896341463414634,
-   "transfer_brier": 0.32825872907075376,
-   "tasks": {
-    "composition_held_and_or": 0.78125,
-    "composition_held_conditional": 0.875,
-    "composition_held_or_not": 0.96875,
-    "contrastive_authorization": 1.0,
-    "contrastive_deadline": 0.525,
-    "emotion": 0.6625,
-    "mmlu": 0.65,
-    "paws": 0.725,
-    "qnli": 0.8875,
-    "sciq": 0.9875,
-    "tweet_offensive": 0.75
-   }
-  },
-  "kev-8b": {
+  "kev-8b-qwen3": {
    "path": "runs/v7-final/00-trial-0/result.json",
    "transfer_acc": 0.7957317073170732,
    "transfer_brier": 0.33668244926717933,
@@ -70,6 +52,42 @@
     "qnli": 0.9125,
     "sciq": 1.0,
     "tweet_offensive": 0.7875
+   }
+  },
+  "kev-4b": {
+   "path": "runs/q35-4b-s23/00-trial-0/result.json",
+   "transfer_acc": 0.7942073170731707,
+   "transfer_brier": 0.3159265371065754,
+   "tasks": {
+    "composition_held_and_or": 0.90625,
+    "composition_held_conditional": 1.0,
+    "composition_held_or_not": 0.875,
+    "contrastive_authorization": 1.0,
+    "contrastive_deadline": 0.55,
+    "emotion": 0.5375,
+    "mmlu": 0.7,
+    "paws": 0.7375,
+    "qnli": 0.925,
+    "sciq": 0.9875,
+    "tweet_offensive": 0.7375
+   }
+  },
+  "kev-9b": {
+   "path": "runs/q35-9b/01-trial-1/result.json",
+   "transfer_acc": 0.8125,
+   "transfer_brier": 0.2906168410765693,
+   "tasks": {
+    "composition_held_and_or": 0.84375,
+    "composition_held_conditional": 0.90625,
+    "composition_held_or_not": 0.875,
+    "contrastive_authorization": 1.0,
+    "contrastive_deadline": 0.725,
+    "emotion": 0.5875,
+    "mmlu": 0.7375,
+    "paws": 0.7625,
+    "qnli": 0.925,
+    "sciq": 0.9625,
+    "tweet_offensive": 0.775
    }
   }
  },
@@ -168,6 +186,26 @@
     0.774
    ],
    "v7-final/00, v7-final/01"
+  ],
+  [
+   4.0,
+   "Qwen3.5 base, same recipe",
+   [
+    0.788,
+    0.8,
+    0.794,
+    0.77
+   ],
+   "q35-4b, q35-4b-s23"
+  ],
+  [
+   9.7,
+   "Qwen3.5 base, same recipe",
+   [
+    0.802,
+    0.812
+   ],
+   "q35-9b"
   ]
  ]
 }

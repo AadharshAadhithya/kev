@@ -342,3 +342,43 @@ def test_train_path_drops_records_that_exceed_the_context():
     short = {"state": "s " * 10, "questions": {"q": {"type": "noul", "instructions": "i", "label": True, "src": "t"}}, "_meta": {"id": "a", "source": "t"}}
     long = {**short, "state": "word " * 600}
     assert fits_context(tok, short) and not fits_context(tok, long)
+
+
+def test_rows_match_packed():
+    """The row form (state + one branch per causal row) must reproduce the packed block-causal form on an attention-only
+    backbone: each row holds exactly the tokens its question may attend to, at the same positions."""
+    import torch
+    from kev.model import DecisionModel, load_tokenizer, rows_of
+    tok = load_tokenizer("Qwen/Qwen2.5-0.5B"); m = DecisionModel("Qwen/Qwen2.5-0.5B", tok, "cpu").eval()
+    rec = {"state": "Order 4411 arrived two weeks late and the box was crushed. Two charges appear on the card.",
+           "questions": [{"instr": "Is there a billing problem?", "options": ["yes", "no"], "label": 0},
+                         {"instr": "Which team should handle this?", "options": ["returns", "shipping", "billing", "other"], "label": 2},
+                         {"instr": "How upset is the customer?", "options": ["calm", "annoyed", "furious"], "label": 1}]}
+    enc = m.encode(tok, rec)
+    S, Sp, rows = rows_of(enc)
+    assert len(rows) == 3 and all(r["ids"][-1] == enc["ids"][d] for r, d in zip(rows, enc["decide_idx"]))
+    with torch.no_grad():
+        packed = [torch.softmax(z, -1) for z in m._readout(m.hidden(enc), enc)]
+        rowed = [torch.softmax(z, -1) for z in m.forward_rows_batch([enc])[0]]
+    for a, b in zip(packed, rowed):
+        assert (a - b).abs().max() < 1e-4, (a, b)
+
+
+def test_hybrid_rows_isolation_and_prefix():
+    """Qwen3.5 (Gated DeltaNet + attention): the row form isolates questions exactly, and the serving prefix path
+    (state once, cache replicated per question) reproduces it. Uses the 0.8B base; slow reference kernels on CPU."""
+    import torch
+    from kev.model import DecisionModel, load_tokenizer
+    tok = load_tokenizer("Qwen/Qwen3.5-0.8B-Base"); m = DecisionModel("Qwen/Qwen3.5-0.8B-Base", tok, "cpu").eval()
+    assert m.hybrid
+    rec = {"state": "Order 4411 arrived late and the box was crushed. Two charges appear on the card.",
+           "questions": [{"instr": "Is there a billing problem?", "options": ["yes", "no"], "label": 0},
+                         {"instr": "Which team should handle this?", "options": ["returns", "shipping", "billing", "other"], "label": 2}]}
+    enc = m.encode(tok, rec)
+    with torch.no_grad():
+        together = m.probs(enc)
+        alone = [m.probs(m.encode(tok, {"state": rec["state"], "questions": [q]}))[0] for q in rec["questions"]]
+        cached, prefix = m.probs_and_prefix(enc)
+        again = m.probs_with_prefix(enc, prefix); again2 = m.probs_with_prefix(enc, prefix)
+    for a, b, c, d, e in zip(together, alone, cached, again, again2):
+        assert (a - b).abs().max() < 1e-4 and (a - c).abs().max() < 1e-4 and (a - d).abs().max() < 1e-4 and (a - e).abs().max() < 1e-4

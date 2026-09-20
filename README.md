@@ -1,72 +1,40 @@
 # Kev
 
-Jev-inspired decision model. Typed questions in, calibrated probabilities out, one forward pass.
+Small Jev-like decision models you can train and run yourself.
 
 <p>
   <a href="https://github.com/jaredpalmer/kev/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/jaredpalmer/kev/ci.yml?style=for-the-badge&labelColor=000000" height="28"></a>
-  <a href="https://huggingface.co/collections/jaredpalmer/kev-6aad9d0ea49f2589665e07cd"><img alt="Weights: Kev-0.6B · 4B · 8B" src="https://img.shields.io/badge/WEIGHTS-0.6B%20%C2%B7%204B%20%C2%B7%208B-0a0a0a.svg?style=for-the-badge&labelColor=000000" height="28"></a>
+  <a href="https://huggingface.co/collections/jaredpalmer/kev-6aad9d0ea49f2589665e07cd"><img alt="Weights: Kev-0.6B · 4B · 9B" src="https://img.shields.io/badge/WEIGHTS-0.6B%20%C2%B7%204B%20%C2%B7%209B-0a0a0a.svg?style=for-the-badge&labelColor=000000" height="28"></a>
   <a href="https://huggingface.co/datasets/jaredpalmer/kev-suites"><img alt="Frozen eval suites" src="https://img.shields.io/badge/EVAL%20SUITES-frozen-0a0a0a.svg?style=for-the-badge&labelColor=000000" height="28"></a>
   <a href="PLAN.md"><img alt="Research log" src="https://img.shields.io/badge/RESEARCH%20LOG-PLAN.md-0a0a0a.svg?style=for-the-badge&labelColor=000000" height="28"></a>
   <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-0a0a0a.svg?style=for-the-badge&labelColor=000000" height="28"></a>
 </p>
 
-![Kev playground](docs/playground.png)
-
-Kev is a LoRA adapter and a small readout head on top of a Qwen3 base model (0.6B, 4B or 8B). It reads a document once and answers many typed questions about it in parallel, in a single prefill pass with no decoding. The document and every question are packed into one sequence; a block-causal mask lets each question see the document but never another question. A pointer head then scores each question's options against its decision token and applies softmax. Those probabilities are the output. The head is trained with cross-entropy against labelled outcomes, so the probabilities are learned rather than generated as text.
-
-The architecture follows the reconstruction of TypeSafe's Jev in [Jev's Architecture Unmasked](https://archerhume.com/posts/jevs-architecture-unmasked). The API follows TypeSafe's [System One](https://docs.typesafe.ai/api) contract, so the official `typesafe-sdk` works against a local Kev server with a `base_url` change.
+Kev is a family of small decision models built on Qwen3.5 and Qwen3 and based on the architecture described in [Jev's Architecture Unmasked](https://archerhume.com/posts/jevs-architecture-unmasked). You can use the pretrained weights or train your own. The API matches TypeSafe's [System One](https://docs.typesafe.ai/api), so you can point their Python SDK at your local server.
 
 ## Highlights
 
-- **Three question types.** `noul` (yes/no), `choice` (2–255 options), `score` (ordered levels). One shared readout.
-- **One pass, many answers.** The state is encoded once. Questions run as isolated branches under a block-causal mask.
-- **Isolation is exact.** A question cannot see a sibling question. Packed and separate requests agree to `4e-6`.
-- **Probabilities, not prose.** Trained with cross-entropy on labelled outcomes. Out of domain, Kev-4B has Brier 0.33 and 8% confident errors on sources it never saw.
-- **Drop-in API.** `POST /v1/systemone` with TypeSafe's request and response shapes. Their SDK's quickstart runs unmodified.
-- **A family, measured the same way.** 0.6B, 4B and 8B checkpoints scored on frozen, checksummed suites with a locked test, against the real Jev on the same items. Out of domain: Kev-4B 0.79, Kev-8B 0.80, Jev 0.86.
-- **Runs on a laptop; trains in the cloud.** Kev-0.6B trains in minutes on one H100 (or ~2 h on an Apple M5); the 4B/8B recipes take 40–70 min on one H100 via Modal and serve on a 32 GB Mac in bf16.
+- 0.6B, 4B, and 9B models, with training code and evaluation data.
+- Yes/no (`noul`), multiple-choice (`choice`), and rating (`score`) questions in the same request.
+- Questions share the input text but can't read each other.
+- Runs on CUDA and Apple Silicon. The 4B and 9B models fit a 32 GB Mac using bf16; see [Serving Performance](#serving-performance) for what to expect on a Mac.
+- A web playground for trying your own inputs and checking how option order affects the answers.
 
-![Kev family vs Jev on sources Kev never trained on](docs/kev-family.png)
+![Kev playground](docs/playground.png)
 
-## Installation
+## Quick Start
 
-Requires Python 3.12+, [uv](https://docs.astral.sh/uv/), and Node 20+ for the playground. Serving is tested on Apple Silicon (MPS); training and evaluation on CUDA (H100 via Modal) and MPS.
+You'll need Python 3.12+ and [uv](https://docs.astral.sh/uv/).
 
 ```bash
 git clone https://github.com/jaredpalmer/kev.git && cd kev
 uv sync --extra serve
-cd playground && npm install && cd ..
-```
-
-### Download the weights
-
-All checkpoints are on the Hugging Face Hub in the [Kev collection](https://huggingface.co/collections/jaredpalmer/kev-6aad9d0ea49f2589665e07cd). `--run` accepts a Hub id; the base model downloads on first load. **Kev-4B is the one to start with**: the best accuracy per byte, and it serves on a 32 GB Mac in bf16.
-
-```bash
 KEV_DTYPE=bf16 uv run --extra serve python -m kev.serve --run jaredpalmer/kev-4b --port 8009
 ```
 
-| checkpoint | base | in-distribution (dev / locked test) | out-of-domain (dev / locked test) | serve on a Mac | card |
-|---|---|---|---|---|---|
-| [Kev-8B](https://huggingface.co/jaredpalmer/kev-8b) | Qwen3-8B-Base | 0.863 / **0.870** | **0.796** / 0.780 | bf16, ~0.5 s | [card](docs/model-cards/kev-8b.md) |
-| [Kev-4B](https://huggingface.co/jaredpalmer/kev-4b) | Qwen3-4B-Base | 0.854 / 0.856 | 0.790 / **0.806** | bf16, ~0.3 s | [card](docs/model-cards/kev-4b.md) |
-| [Kev-0.6B](https://huggingface.co/jaredpalmer/kev-0.6b) | Qwen3-0.6B-Base | 0.801 / 0.808 | 0.620 / 0.642 | fp32, ~0.1 s | [card](docs/model-cards/kev-0.6b.md) |
-| [Kev-0.5B](https://huggingface.co/jaredpalmer/kev-0.5b) · prototype | Qwen2.5-0.5B | 0.712 / – | 0.561 / – | fp32, ~0.2 s | [card](docs/model-cards/kev-0.5b.md) |
-| Jev (hosted reference) | – | 0.845 / – | 0.857 / – | | |
+This starts Kev-4B locally. The first run downloads the adapter and base model. `--run` also accepts a local checkpoint directory or a Hub revision, such as `jaredpalmer/kev-4b@qwen3` for the previous generation.
 
-Same frozen items for every row (`evals/v4`: 1,200 in-distribution questions from the trained sources; 764 out-of-domain records from six public sources Kev never trained on plus held-out programmatic policy rules). Development partitions selected the checkpoints; the locked test was read once per checkpoint and is recorded in each card. Latencies are five 3-way questions on a ~230-token state, M5. Kev-0.5B is the original laptop-trained prototype (September 2026), kept on the Hub for reference; it was never scored on the locked test. The same three checkpoints, as tarballs with SHA-256 sums, are attached to the [GitHub release](https://github.com/jaredpalmer/kev/releases/tag/kev-family).
-
-![Kev benchmarks](docs/kev-benchmark.png)
-
-## Quick Start
-
-Start the server:
-
-```bash
-KEV_DTYPE=bf16 uv run --extra serve python -m kev.serve --run jaredpalmer/kev-4b --port 8009
-```
-
-Ask it something:
+In another terminal, send it a ticket:
 
 ```bash
 curl -s localhost:8009/v1/systemone -H 'content-type: application/json' -d '{
@@ -83,68 +51,101 @@ curl -s localhost:8009/v1/systemone -H 'content-type: application/json' -d '{
   }}'
 ```
 
+Example response from Kev-4B, running in bf16 on an Apple M5:
+
 ```json
 {
   "model": "kev-latest",
   "answers": {
-    "department":  { "type": "choice", "choice": "returns", "confidence": 0.83,
-                     "probabilities": { "returns": 0.89, "shipping": 0.04, "billing": 0.07 } },
-    "escalate":    { "type": "noul", "noul": 0.54 },
-    "frustration": { "type": "score", "score": 1.25, "confidence": 0.88,
+    "department":  { "type": "choice", "choice": "returns", "confidence": 0.21,
+                     "probabilities": { "returns": 0.47, "shipping": 0.28, "billing": 0.25 } },
+    "escalate":    { "type": "noul", "noul": 0.93 },
+    "frustration": { "type": "score", "score": 1.44, "confidence": 0.78,
                      "legend": { "0": "Calm", "1": "Frustrated", "2": "Very angry" },
-                     "probabilities": { "0": 0.00, "1": 0.75, "2": 0.25 } }
+                     "probabilities": { "0": 0.00, "1": 0.56, "2": 0.44 } }
   },
   "usage": { "input_tokens": 101, "output_tokens": 161 },
-  "latency_ms": 277
+  "latency_ms": 495
 }
 ```
 
-(Kev-4B, bf16 on an M5.)
+The ticket mentions a return, a late delivery, and a billing problem, and the department probabilities say so. That is the point of getting probabilities back instead of a single label.
 
-Or use the TypeSafe SDK:
+### Python
+
+The TypeSafe SDK is included in `uv sync --extra serve`:
 
 ```python
-from typesafe_sdk import TypeSafeClient, Choice, Noul, Score
+from typesafe_sdk import Choice, Noul, Score, TypeSafeClient
 
-client = TypeSafeClient(api_key="local", base_url="http://127.0.0.1:8009", model="kev-latest")
-r = client.system_one(
+client = TypeSafeClient(
+    api_key="local",
+    base_url="http://127.0.0.1:8009",
+    model="kev-latest",
+)
+response = client.system_one(
     state="I was charged twice. Please fix this ASAP.",
     questions={
         "billing": Noul(instructions="Is this ticket about billing?"),
-        "tone": Choice(instructions="What is the customer's tone?", criteria={"calm": None, "frustrated": None, "angry": None}),
-        "urgency": Score(instructions="How urgent is this ticket?", criteria=["can wait", "this week", "today"]),
+        "tone": Choice(
+            instructions="What is the customer's tone?",
+            criteria={"calm": None, "frustrated": None, "angry": None},
+        ),
+        "urgency": Score(
+            instructions="How urgent is this ticket?",
+            criteria=["can wait", "this week", "today"],
+        ),
     },
 )
-r.nouls["billing"].noul, r.choices["tone"].choice, r.scores["urgency"].score
+print(response.nouls["billing"].noul)
+print(response.choices["tone"].choice)
+print(response.scores["urgency"].score)
 ```
 
 ### Playground
 
+With the server still running, open another terminal. You'll need Node 20.9+:
+
 ```bash
-cd playground && npm run dev -- -p 3001
+cd playground
+npm install
+npm run dev -- -p 3001
 ```
 
-Open [localhost:3001](http://localhost:3001). Load a preset, edit the state and questions, press `⌘↵`. **Packed vs separate** compares one N-question request with N single-question requests. **Permute** re-asks a Choice under six option orders. The **Isolation probe** and **Boundary forgery** presets reproduce the two experiments from the blog post.
+Open [localhost:3001](http://localhost:3001), load a preset, and edit the text and questions. Press `⌘↵` to run it. "Packed vs separate" compares asking all questions at once with asking them one at a time. "Permute" runs a Choice question with six option orders. There are also presets for testing question isolation and fake delimiter tokens.
 
-**Chess** at [localhost:3001/chess](http://localhost:3001/chess): the legal moves are the options of one Choice question, the board is the state, and a Score rates the position in the same request. Play the model or watch it play itself; games are kept in `localStorage`.
+There's a [chess demo](http://localhost:3001/chess), too. The board is the input, legal moves are Choice options, and a Score question rates the position. You can play against Kev or let it play itself. Games are saved in `localStorage`.
 
-![Kev chess: every move is a Choice question](docs/chess.png)
+![Kev chess](docs/chess.png)
 
-### Serving performance
+## Models
 
-`kev.serve` folds the LoRA into the base weights in fp32 before any cast (exact; in bf16 it is *closer* to the fp32 numbers than running the adapter unmerged), uses SDPA on Apple GPUs, pads to 64-token buckets on MPS (per-shape kernel warm-up), and keeps a small LRU of **state-prefix KV caches** so a repeated state only pays for its question branches — exact, because under the block-causal mask the state's activations do not depend on the questions. Kev-4B, bf16, M5, five 3-way questions, median model time:
+Start with Kev-4B. Use Kev-9B when accuracy and calibration matter more than memory. Use Kev-0.6B if you need the smallest model. Kev-4B and Kev-9B are built on Qwen3.5; the previous Qwen3 models are still published and are the faster choice on a Mac (see below).
 
-| | before | now |
-|---|---|---|
-| short state (232 tokens), new text every call | 442 ms | **296 ms** |
-| long state (772 tokens), new text every call | 1290 ms | **861 ms** |
-| long state, repeated (agent loops, permute/separate probes) | 1214 ms | **242 ms** |
+| Model | Base | Accuracy: Trained Sources | Accuracy: New Sources | Brier: New Sources | Model Card |
+|---|---|---|---|---|---|
+| [Kev-0.6B](https://huggingface.co/jaredpalmer/kev-0.6b) | Qwen3-0.6B-Base | 0.801 / 0.808 | 0.620 / 0.642 | 0.536 / 0.483 | [Details](docs/model-cards/kev-0.6b.md) |
+| [Kev-4B](https://huggingface.co/jaredpalmer/kev-4b) | Qwen3.5-4B-Base | 0.877 / 0.870 | 0.794 / 0.832 | 0.316 / 0.266 | [Details](docs/model-cards/kev-4b.md) |
+| [Kev-9B](https://huggingface.co/jaredpalmer/kev-9b) | Qwen3.5-9B-Base | 0.876 / 0.873 | **0.812 / 0.837** | **0.291 / 0.243** | [Details](docs/model-cards/kev-9b.md) |
+| Kev-4B (Qwen3) | Qwen3-4B-Base | 0.854 / 0.856 | 0.790 / 0.806 | 0.328 / 0.294 | [Details](docs/model-cards/kev-4b-qwen3.md) |
+| Kev-8B (Qwen3) | Qwen3-8B-Base | 0.863 / 0.870 | 0.796 / 0.780 | 0.337 / 0.327 | [Details](docs/model-cards/kev-8b-qwen3.md) |
+| Jev | Hosted | 0.845 / – | 0.857 / – | 0.211 / – | – |
 
-Every change is parity-tested against the exact fp32 path (`tests/test_v3.py`); on 24 out-of-domain records the served bf16 probabilities are within 0.017 of fp32 with zero argmax flips. Knobs: `KEV_MERGE=0`, `KEV_ATTN=eager`, `KEV_SHAPE_BUCKET=1`, `KEV_PREFIX_CACHE=0` restore the old behaviour. On an H100 the same request is ~40 ms.
+Each cell is **development / test**. "Trained sources" means held-out examples from the datasets used to train Kev. "New sources" means datasets and policy rule types Kev wasn't trained on. Every model was evaluated on the same development sets (`decision-v7`, `transfer-v4`) and the same test sets, which were read once per released checkpoint, after model selection. Lower Brier is better.
+
+The Qwen3.5 models were trained with the same data and settings as the Qwen3 models, so the differences come from the base model. On the development set the accuracy gain is within noise; on the test set Kev-9B is 7.3 points ahead of Kev-8B (95% CI +2.8 to +11.7) with a Brier score 0.08 lower, and Kev-4B is 2.9 points ahead of its predecessor (−0.9 to +6.4). [PLAN_Qwen35.md](PLAN_Qwen35.md) has the full experiment, including the criteria we set in advance and how the results measured against them.
+
+Kev-9B trails Jev by about 4.5 points on the new-source development set. We don't know which datasets Jev was trained on, so this isn't a controlled comparison of the two architectures.
+
+![Accuracy by source for Kev and Jev](docs/kev-family.png)
+
+The previous Qwen3 weights stay available: `jaredpalmer/kev-4b@qwen3` and `jaredpalmer/kev-8b`. The original [Kev-0.5B](https://huggingface.co/jaredpalmer/kev-0.5b) used Qwen2.5-0.5B and is kept for reference; see its [model card](docs/model-cards/kev-0.5b.md). All weights are in the [Kev collection](https://huggingface.co/collections/jaredpalmer/kev-6aad9d0ea49f2589665e07cd) and the [GitHub release](https://github.com/jaredpalmer/kev/releases/tag/kev-family), which includes tarballs and SHA-256 checksums.
 
 ## API
 
 ### `POST /v1/systemone`
+
+`state` is the text to evaluate. Each question has instructions and, where needed, a set of answers to choose from.
 
 ```jsonc
 {
@@ -160,72 +161,66 @@ Every change is parity-tested against the exact fp32 path (`tests/test_v3.py`); 
 }
 ```
 
-| Answer type | Fields | Derived from the distribution `p` |
+| Type | Criteria | Answer |
 |---|---|---|
-| `noul` | `noul` | `p[yes]` |
-| `choice` | `choice`, `probabilities`, `confidence` | `argmax`, `p` by option key, `(p_max − 1/K) / (1 − 1/K)` |
-| `score` | `score`, `legend`, `probabilities`, `confidence` | `Σ k·p[k]`, level index → text, `p` by level index |
+| `noul` | Optional descriptions for `true` and `false` | `noul`: probability of yes |
+| `choice` | 1–255 option names, each with a description or `null` | `choice`: most likely option; `probabilities` and `confidence` |
+| `score` | 2–255 descriptions, ordered from lowest to highest | `score`: mean level index, starting at 0; `legend`, `probabilities`, and `confidence` |
 
-Structured `instructions`, `criteria` and `state` are flattened to labelled text. Option and branch delimiters cannot be forged from user text. Validation errors return `422`.
+For Choice with `K > 1` options, confidence is `(p_max − 1/K) / (1 − 1/K)`. A single option has confidence 1. Score confidence measures how close the distribution is to its most likely level. It's an approximation of TypeSafe's formula, which isn't public. Neither field is a measured accuracy rate.
 
-### Other endpoints
+Objects and arrays are converted to labeled text. Delimiter-like strings in user input are escaped before tokenization. Invalid requests return `422`. `usage.output_tokens` counts tokens in the serialized answers, not generated tokens.
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/v1/models` | Model, base and run info |
-| `POST` | `/v1/systemone/permute` | One Choice question under N option orders |
-| `POST` | `/v1/systemone/separate` | Each question in its own pass, for comparison |
+| `GET` | `/v1/models` | Loaded model and checkpoint information |
+| `POST` | `/v1/systemone/permute` | Run one Choice question with different option orders |
+| `POST` | `/v1/systemone/separate` | Run each question in its own forward pass |
 
-There is no authentication. The server is intended for local use.
+The server binds to `127.0.0.1` and has no authentication. Keep it local unless you add authentication yourself.
 
 ## How It Works
 
-```mermaid
-flowchart LR
-    A[API request<br/>state + typed questions] --> B[render to text<br/>api.to_record]
-    B --> C[pack into one sequence<br/>model.encode]
-    C --> D[block-causal mask +<br/>branch position ids]
-    D --> E[causal LM backbone<br/>Qwen base + LoRA<br/>prefill only]
-    E --> F[pointer readout<br/>decide token · option tokens]
-    F --> G[softmax per question]
-    G --> H[API response<br/>choice · confidence · score]
-```
+Each checkpoint is a rank-16 LoRA adapter and a small pointer head on a Qwen base model. On an attention-only base (Qwen3), the state and questions go into one token sequence:
 
-**Packing.** The state and every question go into one token sequence. Reserved tokens mark the structure.
-
-```
+```text
 <state> …state…
-<q> instructions <opt> option 1 </opt> <opt> option 2 </opt> … <decide>    ← question 1
-<q> instructions <opt> option 1 </opt> <opt> option 2 </opt> … <decide>    ← question 2
+<q> instructions <opt> option 1 </opt> <opt> option 2 </opt> … <decide>
+<q> instructions <opt> option 1 </opt> <opt> option 2 </opt> … <decide>
 ```
 
-**Mask.** Position `i` attends to `j` when `j ≤ i` and `j` is in the state or in the same question as `i`. State tokens are computed once. Question branches never see each other.
+The attention mask lets a token read the state and its own question, but not other questions or future tokens. Each question's position IDs restart just after the state. This lets the model process the state once and answer each question independently.
 
-```mermaid
-flowchart TB
-    subgraph S[state prefix — computed once]
-        s1[t1] --> s2[t2] --> s3[t3]
-    end
-    subgraph Q1[question 1 branch]
-        q1a[q] --> q1b[opt] --> q1c[opt] --> q1d[decide]
-    end
-    subgraph Q2[question 2 branch]
-        q2a[q] --> q2b[opt] --> q2c[opt] --> q2d[decide]
-    end
-    S --> Q1
-    S --> Q2
-    Q1 -. no attention .- Q2
-```
+Qwen3.5 mixes attention layers with Gated DeltaNet layers, which are recurrent and ignore attention masks. For those models, each question runs as its own row: the state followed by that question, with the same positions as above. The rows are independent, so isolation is exact, and the server computes the state once and reuses its cache for every row. On attention-only models the two forms give identical probabilities (`tests/test_v3.py`).
 
-**Positions.** Each branch restarts its position ids after the state. Every question sees "state, then one question". Question order does not matter.
+The pointer head scores each option's `</opt>` hidden state against the question's `<decide>` hidden state. A softmax turns those scores into probabilities. Because `<decide>` comes last, it can attend to the full option list.
 
-**Readout.** A pointer head scores each option's `</opt>` hidden state against the `<decide>` hidden state and applies softmax. `K` is whatever the request sends. `<decide>` follows all options, so the model reads the full list before scoring; this is what makes "none of the above" work.
+Training uses cross-entropy on the correct answer. The adapter and head are trained together; the rest of the base weights stay fixed. Training examples and API requests use the same text format. No Jev outputs were used for training.
 
-**Training.** LoRA (r=16) on the backbone, head from scratch, cross-entropy on the option distribution. Training data and live requests go through the same renderer, so the model never meets a format at inference that it did not see in training.
+Asking questions together or separately produces probabilities within 4e-6 in the fp32 tests. This does **not** mean option order is irrelevant: options within a question can still affect one another. See [the model code](kev/model.py) and [parity tests](tests/test_v3.py).
+
+## Serving Performance
+
+On CUDA, install `flash-linear-attention` for the Qwen3.5 models (the Modal image does this); a five-question request takes tens of milliseconds on an H100.
+
+On Apple Silicon there are no fast kernels for the DeltaNet layers, so PyTorch runs reference code. Median model time in bf16 on an M5, five questions with three options each on a ~230-token state:
+
+| Model | Time |
+|---|---|
+| Kev-4B (Qwen3.5) | 779 ms |
+| Kev-4B (Qwen3), `jaredpalmer/kev-4b@qwen3` | 174 ms |
+| Kev-9B (Qwen3.5) | about 2 s |
+| Kev-8B (Qwen3) | about 300 ms |
+
+If you serve on a Mac and need low latency, use the Qwen3 models for now. An MLX backend for the Qwen3.5 models is the next planned change.
+
+For the attention-only models the server merges the LoRA weights in fp32 before casting, uses SDPA attention on Apple GPUs, pads MPS inputs to 64-token buckets, and caches the state prefix for repeated requests (four states of at least 384 tokens by default). With a repeated 772-token state, Kev-4B (Qwen3) answers in 242 ms instead of 861 ms.
+
+You can disable these with `KEV_MERGE=0`, `KEV_ATTN=eager`, `KEV_SHAPE_BUCKET=1`, and `KEV_PREFIX_CACHE=0`. On 24 new-source records, bf16 probabilities differed from fp32 by at most 0.017, with no change in the highest-probability answer. That is a small check, not a guarantee for every input.
 
 ## Training
 
-Training data are public datasets converted to TypeSafe-shaped requests plus programmatic policy data, frozen into checksummed suites (`evals/`). Kev-4B and Kev-8B train on `decision-v7`: ten public sources at 1,000 records each, nine policy template families as minimal pairs (896 records), and 1,680 records from 60 randomly generated rule structures rendered in four styles; two epochs, LoRA r=16, **lr 5e-5** — the single largest recipe improvement we found, because the default 2e-4 erodes what the base model already knows (details and the base-model probe in [PLAN.md](PLAN.md)). Kev-0.6B trains on the same suite at lr 1e-4.
+The released models use `decision-v7`: 10,000 examples from ten public datasets, 896 generated policy examples, and 1,680 examples from 60 generated rule structures. All train for two epochs with LoRA rank 16 and cross-entropy. The learning rate is `1e-4` for 0.6B and `5e-5` for 4B/9B. For Qwen3.5 bases the adapter also covers the DeltaNet projections; `kev.train` picks the right targets from the model config.
 
 ```bash
 # sanity run, ~1 minute
@@ -234,32 +229,18 @@ uv run python -m kev.train --n_per_source 40 --accum 4 --out runs/smoke
 # Kev-0.6B on a Mac (~2 h on an M5) or a few minutes on one H100
 uv run python -m kev.train --suite evals/v7/decision-v7 --base Qwen/Qwen3-0.6B-Base --epochs 2 --lr 1e-4 --p_none_pair 0.25 --out runs/kev-0.6b
 
-# the Kev-4B recipe (one H100 via Modal, ~50 min; see below)
-uv run python -m kev.train --suite evals/v7/decision-v7 --base Qwen/Qwen3-4B-Base --epochs 2 --lr 5e-5 \
-    --batch 4 --accum 2 --dtype bf16 --checkpointing 1 --p_none_pair 0.25 --device cuda --out runs/kev-4b
+# the Kev-4B recipe (one H100 via Modal, ~1 h; see below). Swap in Qwen/Qwen3-4B-Base for the previous generation.
+uv run python -m kev.train --suite evals/v7/decision-v7 --base Qwen/Qwen3.5-4B-Base --base_revision 1001bb4d826a52d1f399e183466143f4da7b741b \
+    --epochs 2 --lr 5e-5 --batch 4 --accum 2 --dtype bf16 --checkpointing 1 --p_none_pair 0.25 --device cuda --out runs/kev-4b
 ```
 
-| Flag | Default | Purpose |
-|---|---|---|
-| `--base` | `Qwen/Qwen3-0.6B-Base` | Causal LM backbone (any Qwen2.5/Qwen3 base; Qwen3-4B/8B for the released checkpoints) |
-| `--n_per_source` | `1000` | Records sampled per dataset |
-| `--holdout` | – | Sources to exclude, e.g. `mnli,sst5`, for out-of-source evaluation |
-| `--perm_kl` | `0` | Optional symmetric KL between predictions under two option orders |
-| `--ord_w` | `0` | Optional ranked probability score for ordered levels |
-| `--suite` | – | Train on a frozen suite's training partition |
-| `--batch`, `--dtype` | `1`, `fp32` | Padded batch size; `bf16` autocast on CUDA (fp32 master weights) |
-| `--device` | auto | `cuda`, `mps`, or `cpu` |
-| `--p_none_pair` | `0` | Fraction of Choice records that also emit a none-of-the-above minimal pair (true option present / removed) |
-| `--option_isolation` | `0` | Option spans as isolated sub-branches with shared positions: exact permutation invariance (costs accuracy at 4B) |
-| `--lora_targets`, `--head_lr`, `--weight_decay` | `all`, `=lr`, `0.01` | Low-drift knobs; none beat plain lr 5e-5 |
+Use `uv run python -m kev.train --help` for all training options. The released models don't use the optional `--perm_kl` or `--ord_w` losses. The [model cards](docs/model-cards/) have the training settings and dataset lists; [PLAN.md](PLAN.md) records what was tried and what helped.
 
-The released checkpoints used cross-entropy without either extra loss (`--perm_kl`, `--ord_w` are research knobs; neither beat the plain recipe). The optional ordinal loss compares cumulative probabilities, a proper scoring rule, rather than absolute error of the expected level.
-
-On a Mac, run one training job at a time; two jobs on the same Apple GPU slow each other by about 10×. The MBP path is kept working, but anything longer than a smoke run goes to Modal.
+On a Mac, run one training job at a time. Two jobs on the same Apple GPU are much slower. Use Modal for longer runs.
 
 ### Modal
 
-Studies run as one H100 container per trial, in parallel, with results pulled back into `runs/` and ranked by the same code that runs locally.
+Each trial gets its own H100. The study keeps running if you disconnect, and you can download the results when it finishes:
 
 ```bash
 uv run modal token new                                    # once; opens the browser
@@ -270,100 +251,56 @@ uv run modal run modal_app.py::study \
     --suite evals/v7/decision-v7 --plan experiments/v7-final.json \
     --name my-study --transfer evals/v4/transfer-v4 --budget 30 --timeout 7200
 uv run modal run modal_app.py::pull --name my-study       # results -> runs/my-study, ranked
+```
+
+[Study plans](experiments/v7-final.json) list training settings. Each trial saves the settings, code hashes, dataset hashes, and results. Choose models using the development results, not the locked test. After choosing a final candidate, you can read its test results once:
+
+```bash
 uv run modal run modal_app.py::locked_test --trial my-study/00-trial-0 --name my-candidate   # one read, ever
 ```
 
-A plan is a JSON list of 1–8 trials over an allowlisted set of training parameters (`kev/experiment.py`). Each trial records the local git commit, the suite hash, and the hashes of the shipped `kev/*.py`; the container refuses to run if they differ from what the launcher hashed. Training uses TF32 and optional bf16; evaluation is fp32-exact (TF32 alone moves probabilities by ~1e-3, enough to trip the isolation gate). Measured: 0.019 s/record for Qwen2.5-0.5B at batch 8 on an H100 vs 0.34 s/record on an M5, ~$0.15–0.30 per 0.5B trial.
-
 ## Evaluation
+
+The evaluation data under `evals/` is frozen: dataset versions and file checksums are recorded in each manifest. Large training files are downloaded from [the Hub mirror](https://huggingface.co/datasets/jaredpalmer/kev-suites) and checked against those hashes.
 
 ```bash
 uv run python -m kev.benchmark --run jaredpalmer/kev-4b --suite evals/v4/transfer-v4 --out runs/my-eval      # out of domain
-uv run python -m kev.benchmark --run jaredpalmer/kev-4b --suite evals/v4/decision-v4 --out runs/my-eval-id   # in distribution
+uv run python -m kev.benchmark --run jaredpalmer/kev-4b --suite evals/v9/transfer-v9 --out runs/my-eval-v9   # + MMLU-Pro, buried states, unknowable items
+uv run python -m kev.benchmark --run jaredpalmer/kev-4b --suite evals/v7/decision-v7 --out runs/my-eval-id   # in distribution
 uv run python -m kev.benchmark --remote http://127.0.0.1:8009 --suite evals/v4/transfer-v4 --out runs/my-remote   # any System One endpoint
 ```
 
-Every number in this README comes from these commands on frozen suites (accuracy, Brier, ECE, confident-error rate, held-out-pair correctness, permutation flips, packed-vs-separate isolation, per-source breakdowns, record-clustered paired bootstraps against a reference run via `kev.compare`).
+These commands use development data. Test data requires `--allow-test`. The benchmark reports accuracy, Brier score, calibration error, the share of decisions you could automate at a 5% error budget, option-order changes, and question isolation. `transfer-v9` adds 10-way MMLU-Pro, records buried among unrelated text, and "unknowable" records whose deciding evidence was removed; for those it reports how often the model still answers with at least 0.9 confidence (Kev-9B 5%, Jev 9%, Kev-8B 26%). Published accuracy numbers use fp32 evaluation, not the bf16 serving path.
 
-### Frozen research suites
+`evals/external/` holds two other projects' test sets converted to this format, with their published live Jev results: [SemIf](https://github.com/TheoLeeCJ/SemIf)'s 144 authored decisions (Kev-9B 0.917, Jev 0.965) and [scienthoon](https://github.com/scienthoon/jev-ood-calibration)'s 900 support tickets (Kev-9B 0.952 on routing and 0.911 on tone, Jev 0.897 and 0.914).
 
-Every number in this README after the table above comes from frozen, checksummed suites under `evals/`: separate training, calibration, development, and locked test partitions; pinned dataset and base-model revisions; per-record provenance. Development partitions select models; the locked test is read once per published candidate (`--allow-test`, or `modal_app.py::locked_test`, which refuses a second read). Manifests and dev/test partitions are in git; training partitions over 10 MB are fetched from the [`jaredpalmer/kev-suites`](https://huggingface.co/datasets/jaredpalmer/kev-suites) mirror and verified against the manifest hash on first use.
-
-| suite | trains on | evaluates | used for |
-|---|---|---|---|
-| `decision-v4` / `v6` | 10–13 public sources + programmatic policy pairs | 1,200 in-distribution questions | model selection, Kev-4B / Kev-8B |
-| `transfer-v4` | nothing | QNLI, SciQ, TweetEval, PAWS, MMLU, Emotion + held-out policy rule structures | out-of-domain, every trial |
-| `decision-v1`, `transfer-v1` | six sources | first prototype (Kev-0.5B) vs Jev comparison | historical |
-
-```bash
-uv run python -m kev.benchmark --run jaredpalmer/kev-4b --suite evals/v4/transfer-v4 --out runs/my-eval
-uv run python -m kev.experiment --suite evals/v4/decision-v4 --plan experiments/auto/lowdrift-4b-v4.json --out runs/my-study --transfer evals/v4/transfer-v4
-uv run python -m kev.autoresearch leaderboard        # rebuild runs/leaderboard.md from every study
-```
-
-Trials are configuration-only: `kev.experiment` refuses configs outside a bounded allowlist, records code, suite, and git hashes, checks complete coverage, isolation, and packing, scores the transfer suite, and never reads the locked test. `kev.autoresearch` runs bounded hill-climb rounds over that allowlist on Modal and keeps the leaderboard; 90 trials so far, all in [`runs/leaderboard.md`](runs/leaderboard.md).
-
-### Comparison with Jev
-
-`kev.jev` scores the same frozen partitions against the real `typesafe-ai/jev` through Vercel AI Gateway (AI SDK 7 `experimental_evaluate`, cost-capped; about two cents per suite). Jev is the hosted reference product; its training exposure to these public datasets is unknown, so this is a shared-item comparison, not a controlled ablation.
-
-| out-of-domain, `transfer-v4` dev (764 records) | Qwen3-8B base, untrained | Qwen3-30B-A3B base, untrained | Kev-0.5B (prototype) | Kev-0.6B | Kev-4B | Kev-8B | Jev |
-|---|---|---|---|---|---|---|---|
-| accuracy | 0.726 | 0.707 | 0.561 | 0.620 | 0.790 | 0.796 | **0.857** |
-| Brier (lower is better) | 0.366 | 0.365 | 0.534 | 0.536 | 0.328 | 0.337 | **0.211** |
-| confident errors (p ≥ 0.9 and wrong) | 0.6% | 0.5% | 2.0% | 10.8% | 8.2% | 9.9% | 3.7% |
-| held-out policy rules, both siblings correct | 0.55 | 0.44 | 0.09 | 0.08 | 0.73 | 0.69 | **0.86** |
-| MMLU / PAWS | 0.75 / 0.84 | 0.79 / 0.82 | 0.40 / 0.50 | 0.50 / 0.59 | 0.65 / 0.72 | 0.70 / 0.78 | 0.90 / 0.79 |
-
-The two untrained columns are the base models read zero-shot from next-token letter logits (`scripts/base_mmlu_probe.py`): Kev-8B beats its own base by +5.8 pp [+1.8, +10.0] and the untrained 30B-A3B by +9.7 pp [+4.7, +14.4], while both untrained models beat every Kev on knowledge (MMLU) and paraphrase (PAWS) — the fine-tune still gives back some of what the base knows.
-
-What the controlled studies established (record-clustered paired bootstraps, seeds replicated; full log in [PLAN.md](PLAN.md)):
-
-- **Capacity dominates out of domain.** With public examples and synthetic budget held equal, 0.6B → 4B is +14–19 pp; 4B → 8B is +1.5–2 pp.
-- **Fine-tuning erodes base capability, and the learning rate controls it.** The 4B base scores 0.69 on the same MMLU items zero-shot; the default recipe trained it down to 0.60–0.66. lr 5e-5 recovers most of it: +4.7 pp [+0.4, +9.6], replicated at three seeds on 4B and 8B.
-- **More public data raises in-distribution accuracy and lowers or flattens transfer.** Knowledge MCQ sources lift MMLU a few points without moving the total.
-- **Programmatic contrastive policy pairs** teach the trained rule structures (0.85–1.0) and transfer partially to unseen ones (0.5–0.67 at 4B/8B, near chance at 0.6B); none-of-the-above minimal pairs fixed the "none" shortcut in-domain (0.75 → 0.93 at 4B).
-- **Structural diversity in the synthetic rules** (60 random rule trees with negation anywhere, instead of eight fixed shapes) fixed the two failing held-out compositions (0.62–0.66 → 0.75–0.97) and produced the released 4B/8B checkpoints (+3 pp transfer). Day-precision date arithmetic (`deadline`) did not move under any data we generated (0.45–0.60; untrained bases 0.53; Jev 0.93).
-- Fourteen one-knob mutations around the low-lr recipe, anchoring to the base model's own distribution, and weight-space interpolation all land within ±1 pp: the remaining gap to Jev is MMLU, PAWS, Emotion, and date arithmetic, not hyperparameters.
-
-The prototype's first comparison (Kev-0.5B on `decision-v1`/`transfer-v1`: −1.8 pp in-distribution with a CI including zero, **−19.1 pp [−23.1, −15.0]** out of domain) is kept in `runs/kev-vs-jev-v1.json` and `runs/kev-vs-jev-transfer-v1.json`. Figures: `uv run python scripts/plot_family.py` (per-source figure above), `uv run python scripts/plot_tweet.py` (benchmark card); both read saved result files only and share `scripts/chartstyle.py`.
-
-The mechanism tests below are from `kev.evaluate` on the prototype; every released checkpoint reproduces the isolation and packing results exactly (max delta 4e-6, checked on every trial).
-
-| Mechanism test | Result |
-|---|---|
-| Isolation — secret in sibling question / absent / in state | `p = 0.03` / `0.03` / **`0.99`** |
-| Packed vs separate — max probability difference | **`3.7e-6`**, packed 2.0× faster |
-| Permutation — argmax flips under 4 option orders | 7.4% |
-| IIA — log-odds shift from one irrelevant option | 0.13 mean, 0.34 p90 |
-| Boundary forgery — fake delimiters in option text | option count unchanged, forged option `p ≤ 0.09` |
+`kev.jev` runs the same questions against Jev through Vercel AI Gateway. `kev.compare` compares two saved runs with paired bootstrap confidence intervals. For the full experiment history, see [PLAN.md](PLAN.md) and [the leaderboard](runs/leaderboard.md).
 
 ## Limitations
 
-- **Out of domain it trails Jev by 6–7 points** at 4B/8B and by 24 at 0.6B. The gap is concentrated in knowledge (MMLU 0.69–0.75 vs 0.90), paraphrase (PAWS), noisy-label emotion, and date arithmetic. Fine-tuning still loses some of what the base model knows even at lr 5e-5.
-- **Held-out rule reasoning** (unseen compositions of policy conditions) is 0.62–0.73 both-siblings-correct depending on the seed; Jev is 0.86. The remaining failures are concentrated in day-precision date arithmetic, which no data we generated has moved.
-- **Calibration is in-distribution.** Temperature fitted in-domain does not transfer; out-of-domain probabilities are usable but not calibrated (ECE ~0.1).
-- **Product-shaped questions** with no training analogue are not guaranteed; the low-drift 4B/8B recipes carry fewer task priors than the 0.6B and can answer differently on the same input. Measure on your own data.
-- **Context.** Trained at 384 state / 1,024 branch tokens; serving caps at 8,192. Jev allows ~32k per branch.
-- **Serving.** One request at a time; the state prefix is cached across requests (`KEV_PREFIX_CACHE`, states ≥ 384 tokens) but there is no cross-request batching. 8B needs bf16 (`KEV_DTYPE=bf16`) on a 32 GB Mac.
-- **Score confidence** uses a stand-in formula. TypeSafe has not published theirs.
+- Probabilities aren't well calibrated on new sources. On the new-source development set, Kev-4B assigns at least 0.9 probability to a wrong answer on 8.2% of questions (Kev-9B: 7.5%). Test it on your own data before choosing a probability threshold.
+- Fine-tuning can make the base model worse at individual tasks. Date arithmetic is the clearest case: the untrained Qwen3.5-9B base gets 0.82 on the `deadline` policy questions and Kev-9B gets 0.72, because training erodes the skill ([issue #8](https://github.com/jaredpalmer/kev/issues/8), [PLAN_Qwen35.md](PLAN_Qwen35.md)). Knowledge questions (MMLU 0.74 vs Jev 0.90) are the other large gap.
+- The Qwen3.5 models are slow on Apple Silicon (see Serving Performance) and need `transformers >= 5.17`.
+- Changing option order can change an answer. Question isolation doesn't prevent this.
+- Training uses at most 384 state tokens and 1,024 tokens for the state plus one question. Serving allows 8,192 tokens for the state plus one question; longer context wasn't covered by training.
+- The server handles one request at a time. It caches repeated state text, but doesn't batch requests from different callers.
 
 ## Development
 
 ```bash
-uv run python -m pytest tests/test_unit.py -q                                      # no weights, no server; runs in CI
+uv run --extra serve python -m pytest tests/test_unit.py tests/test_research.py -q  # no weights, no server; runs in CI
 KEV_BASE_URL=http://127.0.0.1:8009 uv run --extra serve python -m pytest tests/test_api.py -q   # against a running server
-cd playground && npm run lint && npx tsc --noEmit -p .
+cd playground && npm run lint && npx next typegen && npx tsc --noEmit -p .
 ```
 
-`tests/test_api.py` runs the TypeSafe docs' example requests and the official SDK against the local server.
+The API tests run TypeSafe's example requests and the official SDK against your local server.
 
 <details>
 <summary>Troubleshooting</summary>
 
-- **`MPS backend out of memory` while training.** Do not enable `output_hidden_states`; read `last_hidden_state` from the bare backbone. Do not add tokens with peft `trainable_token_indices`. Lower `--n_per_source` on small machines.
-- **Playground shows `connecting…` and buttons do nothing.** Next.js 16 dev only trusts the hostname it started with. Use `localhost:3001` or add your host to `allowedDevOrigins` in `next.config.ts`. Nothing is logged; verify hydration with a browser, not `curl`.
-- **`Dataset scripts are no longer supported`.** Use `legacy-datasets/banking77`; already wired in `data.py`.
+- If MPS runs out of memory during training, check that you're running only one job. Don't enable `output_hidden_states` or add tokens with peft's `trainable_token_indices`; both have caused memory problems here.
+- If the playground loads but buttons don't work, use `localhost:3001`. Next.js checks development hostnames. Other hosts need an entry in `allowedDevOrigins` in `playground/next.config.ts`.
+- If dataset loading reports `Dataset scripts are no longer supported`, use `legacy-datasets/banking77`. This repo already uses it.
 
 </details>
 
@@ -371,8 +308,10 @@ cd playground && npm run lint && npx tsc --noEmit -p .
 
 - Jared Palmer ([@jaredpalmer](https://github.com/jaredpalmer))
 
-Built with [Devin](https://devin.ai). Architecture claims from [Archer Hume](https://archerhume.com/posts/jevs-architecture-unmasked). API contract from [TypeSafe](https://docs.typesafe.ai/api). Backbone: [Qwen2.5-0.5B](https://huggingface.co/Qwen/Qwen2.5-0.5B). Related work: [Hydragen](https://arxiv.org/abs/2402.05099), [DeFT](https://arxiv.org/abs/2404.00242), [FIRST](https://arxiv.org/abs/2406.15657).
+Built with [Devin](https://devin.ai). Thanks to [Archer Hume](https://archerhume.com/posts/jevs-architecture-unmasked) for the architecture write-up, [TypeSafe](https://docs.typesafe.ai/api) for the API design, [Qwen](https://huggingface.co/Qwen/Qwen3.5-9B-Base) for the base models, and [3x3xX3N0N](https://github.com/jaredpalmer/kev/issues/8) for showing where the date-arithmetic failure really is.
+
+Related work: [Hydragen](https://arxiv.org/abs/2402.05099), [DeFT](https://arxiv.org/abs/2404.00242), [FIRST](https://arxiv.org/abs/2406.15657).
 
 ## License
 
-[Apache-2.0](LICENSE). The base model is distributed under the Qwen license. Datasets carry their own licenses; see the [model cards](docs/model-cards/#training-data).
+[Apache-2.0](LICENSE). The Qwen3 and Qwen3.5 base models are also Apache-2.0. Training datasets have their own licenses; see the [model cards](docs/model-cards/).

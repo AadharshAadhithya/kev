@@ -30,13 +30,13 @@ secrets = [modal.Secret.from_name("huggingface-secret")]
 
 @app.function(image=image, gpu="H100", cpu=2, memory=(32768, 65536), retries=0, timeout=3600,
               volumes={"/runs": runs_volume, "/root/.cache/huggingface": hf_cache}, secrets=secrets)
-def probe(base, suite, name, tasks="all"):
+def probe(base, suite, name, tasks="all", prompt="plain", split="development", revision=None, adapter=None):
     import os
     out = Path("/runs/probes") / name
     if out.exists():
         raise FileExistsError(f"probe {name} exists")
     try:
-        subprocess.run([sys.executable, "/root/scripts/base_mmlu_probe.py", "--base", base, "--suite", f"/root/{suite}", "--tasks", tasks, "--device", "cuda", "--out", str(out)],
+        subprocess.run([sys.executable, "/root/scripts/base_mmlu_probe.py", "--base", base, "--suite", f"/root/{suite}", "--tasks", tasks, "--device", "cuda", "--out", str(out), "--prompt", prompt, "--split", split] + (["--revision", revision] if revision else []) + (["--adapter", adapter] if adapter else []),
                        check=True, cwd="/root", env={**os.environ, "PYTHONPATH": "/root"})
     finally:
         runs_volume.commit(); hf_cache.commit()
@@ -44,16 +44,40 @@ def probe(base, suite, name, tasks="all"):
 
 
 @app.local_entrypoint()
-def main(bases: str, suite: str = "evals/v4/transfer-v4", tasks: str = "all"):
+def main(bases: str, suite: str = "evals/v4/transfer-v4", tasks: str = "all", prompt: str = "plain", split: str = "development", revision: str = "", adapter: str = "", tag: str = ""):
     jobs = []
     for base in bases.split(","):
-        name = base.split("/")[-1].lower().replace(".", "") + "-base-" + suite.split("/")[-1]
+        name = base.split("/")[-1].lower().replace(".", "") + ("-semif" if prompt == "semif" else "-base") + (f"-{tag}" if tag else "") + "-" + suite.split("/")[-1] + ("" if split == "development" else f"-{split}")
         if (ROOT / "runs/probes" / name).exists():
             print(f"skip {name}: exists locally"); continue
-        jobs.append((base, suite, name, tasks))
-    for (base, _, name, _), result in zip(jobs, probe.starmap(jobs, return_exceptions=True)):
+        jobs.append((base, suite, name, tasks, prompt, split, revision or None, adapter or None))
+    for (base, _, name, *_), result in zip(jobs, probe.starmap(jobs, return_exceptions=True)):
         if isinstance(result, Exception):
             print(f"{name}: FAILED {type(result).__name__}: {str(result)[:200]}"); continue
         target = ROOT / "runs/probes" / name; target.parent.mkdir(parents=True, exist_ok=True)
         subprocess.run([sys.executable, "-m", "modal", "volume", "get", "kev-runs", f"/probes/{name}", str(target.parent)], check=True)
         print(f"{name}: acc {result['acc']:.3f} brier {result['brier']:.3f} conf-err {result['confident_error_rate']:.3f}")
+
+
+@app.function(image=image, gpu="H100", cpu=2, memory=(32768, 65536), retries=0, timeout=3600,
+              volumes={"/runs": runs_volume, "/root/.cache/huggingface": hf_cache}, secrets=secrets)
+def bench(run, suite, name):
+    """kev.benchmark for a Hub checkpoint on any local suite directory (mounted at run time), written to /runs/bench/<name>."""
+    import os
+    out = Path("/runs/bench") / name
+    if out.exists(): raise FileExistsError(f"bench {name} exists")
+    try:
+        subprocess.run([sys.executable, "-m", "kev.benchmark", "--run", run, "--suite", f"/root/{suite}", "--out", str(out), "--device", "cuda"], check=True, cwd="/root", env={**os.environ, "PYTHONPATH": "/root"})
+    finally:
+        runs_volume.commit(); hf_cache.commit()
+    return json.loads((out / "report.json").read_text())["clean"]
+
+
+@app.local_entrypoint()
+def benchmarks(jobs: str):
+    """jobs: comma-separated run@suite@name triples."""
+    triples = [j.split("@") for j in jobs.split(",")]
+    for (run, suite, name), result in zip(triples, bench.starmap(triples, return_exceptions=True)):
+        if isinstance(result, Exception): print(f"{name}: FAILED {type(result).__name__}: {str(result)[:300]}"); continue
+        target = ROOT / "runs" / name; subprocess.run([sys.executable, "-m", "modal", "volume", "get", "kev-runs", f"/bench/{name}", str(target.parent)], check=True)
+        print(f"{name}: acc {result['acc']:.3f} brier {result['brier']:.3f}")

@@ -26,10 +26,12 @@ def ece(conf, correct, bins=10):
 
 
 def resolve_run(run):
-    """Local run directory, or a Hub repo id like jaredpalmer/kev-0.5b (downloaded to the HF cache)."""
+    """Local run directory, or a Hub repo id like jaredpalmer/kev-4b, optionally pinned to a revision or tag with
+    `@` (jaredpalmer/kev-4b@qwen3); downloaded to the HF cache."""
     if os.path.isdir(run): return run
     from huggingface_hub import snapshot_download
-    return snapshot_download(run, allow_patterns=["*.json", "*.safetensors", "*.pt", "*.txt", "*.jinja"])
+    repo, _, revision = run.partition("@")
+    return snapshot_download(repo, revision=revision or None, allow_patterns=["*.json", "*.safetensors", "*.pt", "*.txt", "*.jinja"])
 
 
 def load(run, dev, dtype=None, merge=True, attn=None):

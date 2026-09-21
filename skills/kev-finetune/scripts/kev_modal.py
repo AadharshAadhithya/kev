@@ -29,7 +29,7 @@ import modal
 # Launch-time settings that the container must see identically: they travel in the image env (names only, never secret
 # values). The module is re-evaluated inside the container, and a Secret list or a served run that differs there either
 # fails the container ("Function has N dependencies but got M") or serves the wrong model.
-SETTINGS = {"KEV_APP_NAME": "kev-finetune", "KEV_REF": "f0ae8fb9af5762254974dcdba8c82cbf48587b2e", "KEV_SERVE_RUN": "jaredpalmer/kev-4b", "KEV_HF_SECRET": "", "KEV_SERVE_SECRET": ""}
+SETTINGS = {"KEV_APP_NAME": "kev-finetune", "KEV_REF": "524c357b53b4b140ac1261190f2b93ec576f5056", "KEV_SERVE_RUN": "jaredpalmer/kev-4b", "KEV_HF_SECRET": "", "KEV_SERVE_SECRET": ""}
 SETTINGS = {k: os.environ.get(k, v) for k, v in SETTINGS.items()}
 APP_NAME, KEV_REF, SERVE_RUN = SETTINGS["KEV_APP_NAME"], SETTINGS["KEV_REF"], SETTINGS["KEV_SERVE_RUN"]
 KEV_REPO = "https://github.com/jaredpalmer/kev.git"

@@ -85,6 +85,15 @@ def probabilities_at_temperature(row, temperature=1.0):
     return p / p.sum()
 
 
+def nll_at_temperature(row, temperature=1.0):
+    if "logits" in row:
+        probabilities_at_temperature(row, temperature)
+        z = np.asarray(row["logits"], dtype=float)
+        z = (z - z.max()) / temperature
+        return float(np.log(np.exp(z).sum()) - z[row["label"]])
+    return -math.log(max(float(probabilities_at_temperature(row, temperature)[row["label"]]), EPSILON))
+
+
 def metrics(rows, temperature=1.0):
     if not rows:
         raise ValueError("cannot score an empty population")
@@ -93,7 +102,7 @@ def metrics(rows, temperature=1.0):
         p = probabilities_at_temperature(row, temperature)
         y = row["label"]
         target = np.eye(len(p))[y]
-        nll.append(-math.log(max(float(p[y]), EPSILON)))
+        nll.append(nll_at_temperature(row, temperature))
         acc.append(int(p.argmax() == y)); conf.append(float(p.max()))
         brier.append(float(((p - target) ** 2).sum()))
         if row["type"] == "score":
@@ -211,10 +220,22 @@ def grouped_metrics(rows, key, temperature=1.0):
     return {name: metrics(group, temperature) for name, group in sorted(groups.items())}
 
 
-def fit_temperature(rows):
-    clean = [row for row in rows if row["variant"] == "clean"]
+def fit_temperature(rows, aggregation="macro"):
+    if aggregation not in ("micro", "macro"):
+        raise ValueError("invalid calibration aggregation")
+    clean = [row for row in rows if row["variant"] == "clean" and row["source"] != "unknowable"]
+    if not clean:
+        raise ValueError("cannot fit temperature without labelled calibration rows")
+    if any(row.get("inference_temperature", 1.0) != 1.0 for row in clean):
+        raise ValueError("fit temperature on raw logits, not previously calibrated outputs")
     candidates = np.exp(np.linspace(np.log(0.25), np.log(4), 81))
-    losses = [np.mean([m["nll"] for m in grouped_metrics(clean, "task", float(t)).values()]) for t in candidates]
+    weights = np.ones(len(clean))
+    if aggregation == "macro":
+        counts = defaultdict(int)
+        for row in clean:
+            counts[row["task"]] += 1
+        weights = np.asarray([1.0 / counts[row["task"]] for row in clean])
+    losses = [np.average([nll_at_temperature(r, float(t)) for r in clean], weights=weights) for t in candidates]
     return float(candidates[int(np.argmin(losses))])
 
 

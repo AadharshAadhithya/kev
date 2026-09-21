@@ -20,14 +20,22 @@ def permuted_copy(rec, rng):
     return out, perms
 
 
-def question_loss(z, q, dev, ord_w):
+def question_loss(z, q, dev, ord_w, label_smoothing=0.0, brier_w=0.0, focal_gamma=0.0):
     """Cross-entropy (or cross-entropy against a soft target when the question carries one), optionally plus the
     normalized ranked probability score for ordered levels."""
+    options = (label_smoothing, brier_w, focal_gamma)
+    if not all(math.isfinite(v) and v >= 0 for v in options) or label_smoothing > 1 or sum(v > 0 for v in options) > 1:
+        raise ValueError("choose at most one finite, nonnegative loss modifier; smoothing must be <= 1")
     if q.get("target") is not None:
         t = torch.tensor(q["target"], device=dev, dtype=z.dtype)
         return -(t * F.log_softmax(z, -1)).sum()
     y = torch.tensor([q["label"]], device=dev)
-    loss = F.cross_entropy(z[None], y)
+    loss = F.cross_entropy(z[None], y, label_smoothing=label_smoothing)
+    if brier_w:
+        target = F.one_hot(y[0], len(z)).to(z.dtype)
+        loss = loss + brier_w * (F.softmax(z, -1) - target).square().sum()
+    if focal_gamma:
+        loss = (1 - torch.exp(-loss)).pow(focal_gamma) * loss
     if q["qtype"] == "score" and ord_w > 0:
         p = F.softmax(z, -1)
         observed_cdf = (torch.arange(len(p) - 1, device=dev) >= q["label"]).to(p.dtype)
@@ -70,6 +78,9 @@ def main():
     ap.add_argument("--perm_kl", type=float, default=0.0, help="weight of symmetric KL between predictions under two option orders")
     ap.add_argument("--perm_frac", type=float, default=0.3, help="fraction of records that get the second permuted forward pass")
     ap.add_argument("--ord_w", type=float, default=0.0, help="weight of ranked probability score for Score questions")
+    ap.add_argument("--label_smoothing", type=float, default=0.0, help="hard-label CE smoothing; existing soft targets are unchanged")
+    ap.add_argument("--brier_w", type=float, default=0.0, help="weight of sum-squared probability error added to hard-label CE")
+    ap.add_argument("--focal_gamma", type=float, default=0.0, help="hard-label CE multiplier (1-p_y)^gamma; 0 is ordinary CE")
     ap.add_argument("--suite", help="frozen suite directory; train only on its training partition")
     ap.add_argument("--train_sources", default="", help="comma-separated subset of the suite's trainable sources (ablations); default all")
     ap.add_argument("--device", choices=["cpu", "mps", "cuda"], default=None)
@@ -107,6 +118,9 @@ def main():
         ap.error("--dtype bf16 requires --device cuda")
     if a.lr <= 0 or a.head_lr < 0 or a.weight_decay < 0 or min(a.ord_w, a.perm_kl, a.anchor_w) < 0 or not 0 <= a.perm_frac <= 1:
         ap.error("invalid learning rate or loss weights")
+    loss_options = (a.label_smoothing, a.brier_w, a.focal_gamma)
+    if not all(math.isfinite(v) and v >= 0 for v in loss_options) or a.label_smoothing > 1 or sum(v > 0 for v in loss_options) > 1:
+        ap.error("use at most one finite, nonnegative loss modifier; smoothing must be <= 1")
     if bool(a.anchor) != (a.anchor_w > 0):
         ap.error("--anchor and --anchor_w > 0 go together")
     anchors = json.loads(Path(a.anchor).read_text()).get("targets", {}) if a.anchor else {}
@@ -248,7 +262,8 @@ def main():
                 logits2_b = model.forward_batch([e for _, e, _ in perm_jobs]) if perm_jobs else []
             loss = 0.0
             for logits, rec, rid, src in zip(logits_b, recs, rec_ids, rec_sources):
-                ce = sum(question_loss(z.float(), q, dev, a.ord_w) for z, q in zip(logits, rec["questions"])) / len(logits)
+                ce = sum(question_loss(z.float(), q, dev, a.ord_w, a.label_smoothing, a.brier_w, a.focal_gamma)
+                         for z, q in zip(logits, rec["questions"])) / len(logits)
                 run["ce"] += ce.item(); loss = loss + ce
                 if anchors and rid in anchors and (anchor_sources is None or src in anchor_sources):
                     terms = [t for t in (anchor_loss(z.float(), q, anchors[rid].get(q["qid"]), dev) for z, q in zip(logits, rec["questions"])) if t is not None]

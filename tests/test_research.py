@@ -370,3 +370,85 @@ def test_risk_curve_area_has_explicit_tie_policy():
     assert area_under_risk_coverage([0.99, 0.9, 0.8], [True, True, False]) == pytest.approx(1 / 9)
     assert area_under_risk_coverage([0.99] * 10, [True] * 9 + [False]) == pytest.approx(0.1)
     assert area_under_risk_coverage([0.99] * 10, [False] + [True] * 9) == pytest.approx(0.1)
+
+
+@pytest.mark.parametrize("options", [{}, {"label_smoothing": 0.05}, {"brier_w": 0.5}, {"focal_gamma": 1.0}])
+def test_training_losses_match_definitions(options):
+    z = torch.tensor([0.4, -0.7, 1.2], requires_grad=True)
+    q = {"label": 1, "qtype": "choice"}
+    ce = torch.nn.functional.cross_entropy(z[None], torch.tensor([1]))
+    target = torch.nn.functional.one_hot(torch.tensor(1), 3).float()
+    expected = ce
+    if "label_smoothing" in options:
+        epsilon = options["label_smoothing"]
+        expected = -(((1 - epsilon) * target + epsilon / 3) * z.log_softmax(-1)).sum()
+    elif "brier_w" in options:
+        expected = ce + options["brier_w"] * (z.softmax(-1) - target).square().sum()
+    elif "focal_gamma" in options:
+        expected = (1 - z.softmax(-1)[1]) ** options["focal_gamma"] * ce
+    actual = question_loss(z, q, "cpu", 0, **options)
+    assert torch.allclose(actual, expected)
+    actual.backward()
+    assert torch.isfinite(z.grad).all()
+
+
+def test_brier_mixture_is_proper_and_soft_targets_unchanged():
+    distribution = torch.tensor([0.2, 0.3, 0.5])
+    logits = distribution.log().requires_grad_()
+    expected_loss = sum(p * question_loss(logits, {"label": i, "qtype": "choice"}, "cpu", 0, brier_w=0.5)
+                        for i, p in enumerate(distribution))
+    expected_loss.backward()
+    assert logits.grad.abs().max() < 1e-6
+    soft = {"label": 0, "qtype": "choice", "target": [1 / 3] * 3}
+    base = question_loss(logits, soft, "cpu", 0)
+    for options in ({"label_smoothing": 0.05}, {"brier_w": 0.5}, {"focal_gamma": 1.0}):
+        assert torch.equal(question_loss(logits, soft, "cpu", 0, **options), base)
+
+
+@pytest.mark.parametrize("bad", [{"label_smoothing": -0.1}, {"label_smoothing": 1.1}, {"brier_w": float("nan")},
+                                  {"focal_gamma": -1}, {"brier_w": 0.5, "focal_gamma": 1.0}])
+def test_loss_options_fail_before_training(bad):
+    with pytest.raises(ValueError):
+        question_loss(torch.zeros(3), {"label": 0, "qtype": "choice"}, "cpu", 0, **bad)
+
+
+def test_trial_accepts_one_registered_loss_change():
+    from kev.experiment import validated_trial
+    manifest = {"base_revisions": {"model": "pinned"}}
+    for flag, value in (("label_smoothing", 0.05), ("brier_w", 0.5), ("focal_gamma", 1.0)):
+        assert validated_trial({"base": "model", flag: value}, manifest)[flag] == value
+    with pytest.raises(ValueError):
+        validated_trial({"base": "model", "brier_w": 0.5, "focal_gamma": 1.0}, manifest)
+
+
+def test_temperature_fit_requires_raw_rows_and_uses_true_logit_nll():
+    from kev.benchmark import fit_temperature, nll_at_temperature
+    row = {"variant": "clean", "source": "fixture", "task": "fixture", "p": [1.0, 0.0],
+           "logits": [0.0, -100.0], "label": 1, "inference_temperature": 1.0}
+    assert nll_at_temperature(row, 2.0) == pytest.approx(50.0)
+    assert fit_temperature([row], aggregation="micro") == pytest.approx(4.0)
+    with pytest.raises(ValueError, match="raw logits"):
+        fit_temperature([{**row, "inference_temperature": 2.0}])
+
+
+def test_training_plan_matches_registered_screen():
+    import json
+    from pathlib import Path
+    from kev.experiment import load_plan
+    root = Path(__file__).resolve().parents[1]
+    protocol = json.loads((root / "experiments/calibration-audit-protocol.json").read_text())
+    trials = load_plan(root / protocol["data"]["decision_suite"], root / "experiments/calibration-screen-4b.json")
+    loss_keys = {"label_smoothing", "brier_w", "focal_gamma"}
+    assert len(trials) == len(protocol["screen"]["arms"]) == 4
+    assert all({k: v for k, v in t.items() if k not in loss_keys} == {k: v for k, v in trials[0].items() if k not in loss_keys} for t in trials)
+    assert trials[0]["init_from"] == protocol["parents"]["4b"]
+    for trial, arm in zip(trials, protocol["screen"]["arms"]):
+        assert all(trial[k] == arm[k] for k in loss_keys)
+
+
+def test_modal_compute_bound_includes_requested_memory_and_cpu():
+    from modal_app import TRIAL_CPU, TRIAL_MEMORY, compute_bound
+    expected = 3.95 + TRIAL_CPU * 0.04730 + TRIAL_MEMORY[1] / 1024 * 0.008
+    assert compute_bound("H100", 3600, 1) == pytest.approx(expected)
+    with pytest.raises(ValueError):
+        compute_bound("unknown", 3600, 1)

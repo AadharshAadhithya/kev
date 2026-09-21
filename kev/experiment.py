@@ -32,9 +32,11 @@ from kev.suite import digest, load_split, record_digest, write_json
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULTS = {"epochs": 1, "seed": 0, "lr": 0.0002, "lora": 16, "accum": 8, "batch": 1,
             "perm_kl": 0.0, "perm_frac": 0.3, "ord_w": 0.0,
-            "p_none": 0.1, "p_none_distract": 0.12, "p_distract": 0.15, "p_none_pair": 0.0, "synthetic_repeat": 1, "public_frac": 1.0, "head_lr": 0.0, "weight_decay": 0.01, "anchor_w": 0.0}
+            "p_none": 0.1, "p_none_distract": 0.12, "p_distract": 0.15, "p_none_pair": 0.0, "synthetic_repeat": 1, "public_frac": 1.0, "head_lr": 0.0, "weight_decay": 0.01, "anchor_w": 0.0,
+            "label_smoothing": 0.0, "brier_w": 0.0, "focal_gamma": 0.0}
 RANGES = {"epochs": (1, 5), "seed": (0, 10000), "lr": (1e-6, 0.001), "lora": (1, 64), "accum": (1, 64), "batch": (1, 64),
           "perm_kl": (0, 2), "perm_frac": (0, 1), "ord_w": (0, 2),
+          "label_smoothing": (0, 0.2), "brier_w": (0, 2), "focal_gamma": (0, 4),
           "p_none": (0, 0.4), "p_none_distract": (0, 0.4), "p_distract": (0, 0.4), "p_none_pair": (0, 1), "synthetic_repeat": (1, 6), "public_frac": (0.05, 1.0), "head_lr": (0, 0.01), "weight_decay": (0, 0.3), "anchor_w": (0, 5)}
 CHOICES = {"dtype": ("fp32", "bf16"), "checkpointing": (0, 1), "option_isolation": (0, 1), "special_embeddings": (0, 1), "head_dim": (128, 256, 512, 1024),
            "lora_targets": ("all", "dense", "attn", "qv"), "weights_dtype": ("fp32", "bf16")}
@@ -77,6 +79,8 @@ def validated_trial(value, manifest):
             raise ValueError(f"invalid {key}")
     if sum(result[k] for k in ("p_none", "p_none_distract", "p_distract")) > 1:
         raise ValueError("augmentation probabilities sum to more than one")
+    if sum(result[k] > 0 for k in ("label_smoothing", "brier_w", "focal_gamma")) > 1:
+        raise ValueError("a trial may change only one loss modifier")
     return result
 
 
@@ -207,13 +211,25 @@ def execute_trial(config, suite, output, expected_sources, device, existing=None
             raise subprocess.CalledProcessError(proc.returncode, args)
     if config.get("weights_dtype") == "bf16":
         os.environ["KEV_DTYPE"] = "bf16"      # a backbone trained in bf16 weights is evaluated the same way (fp32 would not fit and is not what was trained)
-    predictor = LocalPredictor(run, device)
+    predictor = LocalPredictor(run, device, temperature=1.0)
+    provenance["measured_checkpoint"] = {"requested": run, "resolved": str(predictor.run),
+                                          "head_sha256": digest(Path(predictor.run) / "head.pt"),
+                                          "adapter_sha256": digest(Path(predictor.run) / "adapter_model.safetensors"),
+                                          "inference_temperature": predictor.temperature}
+    write_json(output / "provenance.json", provenance)
     try:
-        if existing:
-            temperature = 1.0
+        calibration_records = load_split(suite, "calibration")
+        if calibration_records:
+            _, calibration_rows = evaluate_records(calibration_records, predictor, output / "calibration")
+            temperature = fit_temperature(calibration_rows, aggregation="micro")
+            calibration_fit = {"temperature": temperature, "aggregation": "micro", "objective": "raw-logit NLL",
+                               "split": "calibration", "rows_sha256": digest(output / "calibration/rows.json"),
+                               "suite_sha256": suite_hash, "n": sum(r["variant"] == "clean" for r in calibration_rows)}
+            write_json(output / "calibration/temperature.json", calibration_fit)
         else:
-            _, calibration_rows = evaluate_records(load_split(suite, "calibration"), predictor, output / "calibration")
-            temperature = fit_temperature(calibration_rows)
+            if not existing:
+                raise ValueError("training studies require a nonempty calibration partition")
+            temperature, calibration_fit = 1.0, {"temperature": 1.0, "split": None, "n": 0}
         records = load_split(suite, "development")
         heldout = tuple(json.loads((Path(suite) / "manifest.json").read_text()).get("holdout_sources", []))
         report, rows = evaluate_records(records, predictor, output / "development", temperature, heldout_sources=heldout)
@@ -229,7 +245,7 @@ def execute_trial(config, suite, output, expected_sources, device, existing=None
     if source_hashes() != expected_sources or digest(Path(suite) / "manifest.json") != suite_hash:
         raise ValueError("source or suite changed during the trial; result cannot be ranked")
     report["transfer"] = transfer
-    report.update(provenance=provenance, mechanism_checks=checks, gates=gate_report(report, checks),
+    report.update(provenance=provenance, mechanism_checks=checks, gates=gate_report(report, checks), calibration_fit=calibration_fit,
                   wall_seconds=time.perf_counter() - started, promotable=False, test_evaluated=False)
     if not existing:
         report["training_resources"] = json.loads((Path(run) / "training_metrics.json").read_text())

@@ -4,8 +4,10 @@
   "status": "registered before new training runs",
   "budget": {
     "workspace_metered_before_usd": 392.13507560,
-    "existing_authorization_usd": 500,
-    "additional_cap_usd": 60,
+    "existing_authorization_usd": 1000,
+    "additional_cap_usd": 600,
+    "initial_stage_cap_usd": 60,
+    "budget_amendment": "User raised the ceiling to $1000 before new training runs. Interpreted conservatively as total workspace spend, not $1000 additional. Experimental gates unchanged.",
     "reserve_includes": ["screen", "replications if justified", "fresh audit if justified", "build and storage headroom"],
     "new_credits_authorized": false,
     "automatic_retries": 0

@@ -22,7 +22,16 @@ from pathlib import Path
 
 import modal
 
-APP_NAME = "kev-research"
+APP_NAME = os.environ.get("KEV_APP_NAME", "kev-research")
+TRIAL_CPU, TRIAL_MEMORY = 4, (65536, 196608)
+GPU_HOURLY = {"H100": 3.95, "H200": 4.54, "B200": 6.25, "T4": 0.59}
+
+
+def compute_bound(gpu, timeout, trials):
+    if gpu not in GPU_HOURLY or timeout <= 0 or trials < 1:
+        raise ValueError("invalid GPU, timeout, or trial count")
+    return (GPU_HOURLY[gpu] + TRIAL_CPU * 0.04730 + TRIAL_MEMORY[1] / 1024 * 0.008) * timeout / 3600 * trials
+
 ROOT = Path(__file__).resolve().parent
 RUNS_MOUNT, HF_MOUNT = "/runs", "/hf"
 GPU = os.environ.get("KEV_GPU", "H100")   # H100 needs a payment method on the workspace; KEV_GPU=T4 for the free tier
@@ -64,7 +73,7 @@ def remote_source_hashes():
     return source_hashes()
 
 
-@app.function(image=image, gpu=GPU, cpu=4, memory=(65536, 196608), max_containers=8, retries=0, timeout=14400,   # a 35B-A3B bf16 checkpoint (70 GB) is staged through host memory while loading; the old 48 GB cap stalled the container
+@app.function(image=image, gpu=GPU, cpu=TRIAL_CPU, memory=TRIAL_MEMORY, max_containers=8, retries=0, timeout=14400,   # a 35B-A3B bf16 checkpoint (70 GB) is staged through host memory while loading; the old 48 GB cap stalled the container
               volumes={RUNS_MOUNT: runs_volume, HF_MOUNT: hf_cache}, secrets=secrets)
 def run_trial(study, index, label, config, suite, expected_sources, git_commit, existing=None, transfer=None):
     """One trial in one container. `existing` is a checkpoint path on the runs volume or a Hub id (legacy scoring)."""
@@ -213,8 +222,7 @@ def launch_detached(suite, plan_path, name, gpu, existing=(), transfer=None, bud
     if (ROOT / "runs" / name).exists(): raise FileExistsError("choose a new study name; existing results are immutable")
     if not 60 <= timeout <= 14400 or not 0 < budget <= 250: raise ValueError("timeout must be 60..14400 seconds and study budget <= $250")
     trials = load_plan(ROOT / suite, ROOT / plan_path) if plan_path else []
-    rates = {"H100": 3.95, "H200": 4.54, "B200": 6.25, "T4": .59}
-    upper = (rates[gpu] + 2 * .04730 + 48 * .008) * timeout / 3600 * (len(trials) + len(existing))
+    upper = compute_bound(gpu, timeout, len(trials) + len(existing))
     if upper > budget: raise ValueError(f"timeout-based compute bound ${upper:.2f} exceeds budget ${budget:.2f}")
     commit, sources = local_git_commit(), local_source_hashes()
     if subprocess.run(["git", "status", "--porcelain", "kev", "evals"], cwd=ROOT, capture_output=True, text=True).stdout.strip():
@@ -262,10 +270,7 @@ def launch(suite, plan_path, name, gpu, existing=(), transfer=None, budget=20.0,
     if not 60 <= timeout <= 14400 or not 0 < budget <= 250:   # overnight authorization: $500 total, tracked in PLAN.md
         raise ValueError("timeout must be 60..14400 seconds and study budget <= $250")
     trials = load_plan(ROOT / suite, ROOT / plan_path) if plan_path else []
-    rates = {"H100": 3.95, "H200": 4.54, "B200": 6.25, "T4": .59}
-    if gpu not in rates:
-        raise ValueError("no verified cost bound for this GPU")
-    upper = (rates[gpu] + 2 * .04730 + 48 * .008) * timeout / 3600 * (len(trials) + len(existing))
+    upper = compute_bound(gpu, timeout, len(trials) + len(existing))
     if upper > budget:
         raise ValueError(f"timeout-based compute bound ${upper:.2f} exceeds budget ${budget:.2f}")
     print(f"Compute admission bound ${upper:.2f}; excludes image build, startup, and storage; no automatic retries.", flush=True)

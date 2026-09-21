@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 TASKS = [("sciq", "SciQ"), ("qnli", "QNLI"), ("contrastive_authorization", "Policy: authorization"), ("composition_held_and_or", "Rule: (A or B) and C"),
          ("composition_held_or_not", "Rule: (A and B) or not C"), ("tweet_offensive", "TweetEval offensive"), ("paws", "PAWS"),
          ("composition_held_conditional", "Rule: if A then not B else C"), ("mmlu", "MMLU, 4-way"), ("contrastive_deadline", "Policy: deadline (3-level Score)"), ("emotion", "Emotion, 6-way")]
-MODELS = [("kev-0.5b", "runs/kev-05b-transfer-v4/report.json"), ("kev-8b-qwen3", "runs/v7-final/00-trial-0/result.json"), ("kev-0.8b", "runs/q35-08b/02-trial-2/result.json"),
+MODELS = [("kev-0.5b", "runs/kev-05b-transfer-v4/report.json"), ("kev-8b-qwen3", "runs/v7-final/00-trial-0/result.json"), ("kev-0.8b", "runs/night2-08b-du2/00-trial-0/result.json"),
           ("kev-4b", "runs/night2-4b-du/00-trial-0/result.json"), ("kev-9b", "runs/night2-9b-du/00-trial-0/result.json")]
 JEV_PATH = "runs/jev-transfer-v4/report.json"
 # capacity x recipe curve: (params in B, recipe, [transfer acc per seed], source trials)
@@ -27,7 +27,7 @@ CURVE = [(0.6, "default recipe", [0.598, 0.595, 0.605], "v4-06b-hardened"), (0.6
          (8.2, "default recipe", [0.765, 0.741], "v3-8b-s0 (transfer-v3 = same bytes)"), (8.2, "low lr", [0.774, 0.779, 0.774], "recipe-8b-r1/00, recipe-8b-r2/01, recipe-8b-s2"),
          (8.2, "low lr + random rule structures", [0.796, 0.774], "v7-final/00, v7-final/01"),
          (0.8, "Qwen3.5 base, same recipe", [0.622, 0.634, 0.643], "q35-08b"), (4.0, "Qwen3.5 base, same recipe", [0.788, 0.800, 0.794, 0.770], "q35-4b, q35-4b-s23"), (9.7, "Qwen3.5 base, same recipe", [0.802, 0.812], "q35-9b"),
-         (4.0, "+ dates/unknowable delta", [0.797], "night2-4b-du"), (9.7, "+ dates/unknowable delta", [0.822], "night2-9b-du")]
+         (0.8, "+ dates/unknowable delta", [0.652], "night2-08b-du2"), (4.0, "+ dates/unknowable delta", [0.797], "night2-4b-du"), (9.7, "+ dates/unknowable delta", [0.822], "night2-9b-du")]
 RECIPE_COLOR = {"default recipe": GRID, "low lr": KEV["kev-0.6b"], "low lr + random rule structures": KEV["kev-4b"], "Qwen3.5 base, same recipe": KEV["kev-9b"], "+ dates/unknowable delta": GREEN[700]}
 RECIPE_SHORT = {"default recipe": "default recipe", "low lr": "low lr", "low lr + random rule structures": "Qwen3, low lr +\nrandom rules", "Qwen3.5 base, same recipe": "Qwen3.5,\nsame recipe", "+ dates/unknowable delta": "+ dates/unknowable\ndelta (released)"}
 

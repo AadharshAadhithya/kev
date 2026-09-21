@@ -37,21 +37,21 @@
    }
   },
   "kev-0.8b": {
-   "path": "runs/q35-08b/02-trial-2/result.json",
-   "transfer_acc": 0.6432926829268293,
-   "transfer_brier": 0.5125584983305406,
+   "path": "runs/night2-08b-du2/00-trial-0/result.json",
+   "transfer_acc": 0.6524390243902439,
+   "transfer_brier": 0.49870669415283536,
    "tasks": {
     "composition_held_and_or": 0.65625,
-    "composition_held_conditional": 0.71875,
-    "composition_held_or_not": 0.625,
-    "contrastive_authorization": 0.9,
-    "contrastive_deadline": 0.275,
+    "composition_held_conditional": 0.59375,
+    "composition_held_or_not": 0.5625,
+    "contrastive_authorization": 0.975,
+    "contrastive_deadline": 0.375,
     "emotion": 0.5375,
-    "mmlu": 0.4125,
-    "paws": 0.5875,
-    "qnli": 0.825,
-    "sciq": 0.9,
-    "tweet_offensive": 0.625
+    "mmlu": 0.425,
+    "paws": 0.55,
+    "qnli": 0.85,
+    "sciq": 0.9125,
+    "tweet_offensive": 0.675
    }
   },
   "kev-4b": {
@@ -216,6 +216,14 @@
     0.812
    ],
    "q35-9b"
+  ],
+  [
+   0.8,
+   "+ dates/unknowable delta",
+   [
+    0.652
+   ],
+   "night2-08b-du2"
   ],
   [
    4.0,

@@ -4,8 +4,8 @@ This file is the living plan: where Kev stands, what runs next and the criteria 
 
 ## Where we stand (2026-09-20, evening)
 
-- **Family:** Kev-0.8B / 4B / 9B on Qwen3.5 bases, one recipe (`decision-v7`, LoRA r=16, lr 1e-4 / 5e-5 / 5e-5). Locked test, out of domain: 0.668 / 0.832 / **0.837**; Jev 0.857 on the development items. Qwen3 checkpoints published as the previous generation.
-- **Gap to Jev (Kev-9B, `transfer-v4` dev, 4.5 pp overall):** knowledge (MMLU 0.74 vs 0.90; MMLU-Pro 0.545 vs 0.84) — the untrained base scores the same, so this is base capacity; date arithmetic (`deadline` 0.72 vs 0.93) — any LoRA fine-tune on our format erodes the base's skill (0.82 → 0.72), while the readout is intact (giving the model the day count yields 0.93–1.0, issue #8); calibration — Brier 0.291 vs 0.211, **coverage at ≤ 5 % error 0.53 vs 0.70**, confident errors 7.5 % vs 3.7 %; robustness — assertion-style Noul instructions ("The customer sounds angry.") drove Kev-4B to 0.79 vs Jev 0.91 on scienthoon's tickets.
+- **Family:** Kev-0.8B / 4B / 9B on Qwen3.5 bases, one recipe (`decision-v7`, LoRA r=16, lr 1e-4 / 5e-5 / 5e-5) plus the 2026-09-21 dates + unknowable delta. Locked test, out of domain: 0.684 / 0.837 / **0.852**; Jev 0.857 on the development items. Pre-delta weights at Hub tag `v7-base`; Qwen3 checkpoints published as the previous generation.
+- **Gap to Jev (pre-delta Kev-9B, `transfer-v4` dev, 4.5 pp overall; 3.5 pp after the delta):** knowledge (MMLU 0.74 vs 0.90; MMLU-Pro 0.545 vs 0.84) — the untrained base scores the same, so this is base capacity; date arithmetic (`deadline` 0.72 vs 0.93) — any LoRA fine-tune on our format erodes the base's skill (0.82 → 0.72), while the readout is intact (giving the model the day count yields 0.93–1.0, issue #8); calibration — Brier 0.291 vs 0.211, **coverage at ≤ 5 % error 0.53 vs 0.70**, confident errors 7.5 % vs 3.7 %; robustness — assertion-style Noul instructions ("The customer sounds angry.") drove Kev-4B to 0.79 vs Jev 0.91 on scienthoon's tickets.
 - **Tools now available:** `--init_from` delta fine-tunes from a released checkpoint (minutes, not hours); `--data` JSONL for custom records; `transfer-v9` (MMLU-Pro, buried, unknowable) and the SemIf / scienthoon external suites; coverage-at-error-budget and unknowable metrics in `kev.benchmark`.
 - **Budget:** ~$475 of the $500 overnight authorization spent (family, Qwen3.5 port, night 2).
 
@@ -45,13 +45,12 @@ Spend tonight ≈ $105 (probes $14, deltas 12 × ~$1.5, dense $5, benches ~$15, 
 | 6 | Combined deltas, **locked test** (one read each): 9B + dates + unknowable **0.852** OOD (+1.8 pp [+0.8, +2.9] over Kev-9B's 0.837), Brier 0.237, deadline 0.88, pairs 0.81, coverage@5 % 0.62 (from 0.66); 9B + all 0.851; 4B + dates + unknowable 0.837 (+1.0 [−0.1, +2.1]), Brier 0.255, coverage 0.68; 4B + all 0.828 (neutral). | **Promotion candidates: the dates + unknowable deltas at both sizes**, published as Hub branch `night2-du` (main untouched, awaiting sign-off). Costs to state in the cards: coverage@5 % −4 pp at 9B, scienthoon ECE +3 pp, MMLU-Pro −3 pp at 9B. |
 | 7 | ekzhang's 1,000-question MMLU-Pro sample: Kev-9B **0.511**, Kev-4B 0.468, Kev-8B (Qwen3) 0.488 (8 questions over the 384-token state limit counted wrong). Jev 0.829; untrained one-token Qwen3.6-35B-A3B 0.588; his $5 SFT ≈ 0.71. | Reporting. Knowledge is base-bound; the 3.6 trial is the only lever. GPQA-diamond is gated — needs the account to accept terms. |
 
-### Decisions waiting for sign-off (morning of 2026-09-21)
+### Decisions taken (2026-09-21, morning, signed off)
 
-1. **Promote the dates + unknowable deltas** to the main Hub revisions of `kev-9b` and `kev-4b` (currently on branch `night2-du`). Locked test: 9B 0.837 → **0.852** (+1.8 [+0.8, +2.9]), Brier 0.243 → 0.237, deadline 0.72 → 0.88, pairs 0.75 → 0.81; 4B 0.832 → 0.837 (+1.0 [−0.1, +2.1]), Brier 0.266 → 0.255. Costs to print in the cards: coverage@5 % 0.66 → 0.62 at 9B, scienthoon ECE +3 pp, MMLU-Pro −3 pp at 9B, confident errors 5.5 % → 6.6 % at 9B. Recommended: yes, both.
-2. **Report a calibrated row** (single T = 2.0, fitted in-distribution) in cards and README, and document `KEV_TEMPERATURE`. Recommended: yes.
-3. **Ship the `date_facts` preprocessor as opt-in** (`KEV_DATE_FACTS=1`); with the promoted 9B it takes `deadline` to 0.90–0.93. Recommended: yes, documented as preprocessing, never folded into the model's own numbers.
-4. Kev-0.8B: no delta was run at 0.8B tonight; a dates + unknowable delta is ~$1 if wanted.
-5. The Qwen3.6-35B-A3B checkpoint: keep as a research artifact, do not publish.
+1. **Promoted the dates + unknowable deltas** to the main Hub revisions of `kev-9b`, `kev-4b` and `kev-0.8b` (the 0.8B delta ran in the morning: locked test 0.668 → 0.684, +2.2 pp [−0.8, +5.5], Brier 0.473 → 0.460). Pre-delta weights at tag `v7-base`; release tarballs `*-v7-base.tar.gz`. Cards state the costs (coverage@5 % −4 pp at 9B, scienthoon ECE +3 pp, MMLU-Pro −3 pp at 9B).
+2. **Calibrated row** (single T = 2.0; 2.2 for the 0.8B) in cards and README; `KEV_TEMPERATURE` documented.
+3. **`date_facts` preprocessor** shipped opt-in (`KEV_DATE_FACTS=1`), documented as preprocessing with separate numbers.
+4. The Qwen3.6-35B-A3B checkpoint stays a research artifact.
 
 ## Open questions
 

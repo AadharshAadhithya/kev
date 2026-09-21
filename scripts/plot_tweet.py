@@ -18,13 +18,13 @@ from chartstyle import HOLLOW, JEV, KEV, body, display, heading, hbars, rule, st
 ROOT = Path(__file__).resolve().parents[1]
 MODELS = [("kev-9b", "Qwen3.5-9B", "runs/night2-9b-du/00-trial-0/result.json"),
           ("kev-4b", "Qwen3.5-4B", "runs/night2-4b-du/00-trial-0/result.json"),
-          ("kev-0.8b", "Qwen3.5-0.8B", "runs/q35-08b/02-trial-2/result.json")]
+          ("kev-0.8b", "Qwen3.5-0.8B", "runs/night2-08b-du2/00-trial-0/result.json")]
 PROTOTYPE = ("kev-0.5b", "Qwen2.5-0.5B, prototype", "runs/kev-05b-transfer-v4/report.json")
 BASES = [("Qwen3.5-9B", "untrained base", "runs/probes/qwen35-9b-base-base-transfer-v4/report.json"),
          ("Qwen3.5-4B instruct", "untrained, SemIf prompt", "runs/probes/qwen35-4b-semif-transfer-v4/report.json")]
 LOCKED = [("kev-9b", "runs/locked/kev-9b-night2-du-ungated/summary.json"),
           ("kev-4b", "runs/locked/kev-4b-night2-du-ungated/summary.json"),
-          ("kev-0.8b", "runs/locked/kev-08b-q35-ungated/summary.json")]
+          ("kev-0.8b", "runs/locked/kev-08b-night2-du-ungated/summary.json")]
 JEV_T = "runs/jev-transfer-v4/report.json"
 
 

@@ -100,4 +100,4 @@ KEV ON QWEN3.6-35B-A3B, lr 2e-5 (01:50): dev .869, transfer .819 (+0.7 vs Kev-9B
   deadline .95 (base .88, Jev .93!) — the post-trained base's date skill survived at lr 2e-5. mmlu .80 (base .85 -> eroded 5; Jev .90). tweet .71 (-7), emotion .54, or_not .78 (-10).
   => Kev-9B level, not Jev level; 9B+du (.822 dev / .852 locked) is at least as good and 8x cheaper to serve. Wait for lr 5e-5 trial before the verdict. 136 min train, 72 GB peak.
 
-FINAL 35B (02:20): lr 5e-5 transfer .823 / lr 2e-5 .819; v9 MMLU-Pro .605 (9B .545, Jev .84); unknowable share .25 (worse). Verdict: not shipped; = 9B+du level at 8x memory. All written to PLAN.md. Night done except sign-off decisions. Total tonight ~$105.
+FINAL 35B (02:20): lr 5e-5 transfer .823 / lr 2e-5 .819; v9 MMLU-Pro .550 (9B .545, Jev .84 — no MMLU-Pro gain at all); unknowable share .14 (worse). Verdict: not shipped; = 9B+du level at 8x memory. All written to PLAN.md. Night done except sign-off decisions. Total tonight ~$105.

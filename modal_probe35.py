@@ -84,3 +84,35 @@ def benchmarks(jobs: str):
         if isinstance(result, Exception): print(f"{name}: FAILED {type(result).__name__}: {str(result)[:300]}"); continue
         target = ROOT / "runs" / name; subprocess.run([sys.executable, "-m", "modal", "volume", "get", "kev-runs", f"/bench/{name}", str(target.parent)], check=True)
         print(f"{name}: acc {result['acc']:.3f} brier {result['brier']:.3f}")
+
+
+@app.function(image=image, gpu=os.environ.get("KEV_PROBE_GPU", "H200"), cpu=2, memory=(32768, 131072), retries=0, timeout=2400,
+              volumes={"/runs": runs_volume, "/root/.cache/huggingface": hf_cache}, secrets=secrets)
+def smoke_train(base, revision):
+    """Load a base through DecisionModel with the Kev LoRA config, report the adapter size and which modules it hit, run one
+    training step on a real record with gradient checkpointing, and report peak memory. For deciding whether a base fits."""
+    import os, time, torch
+    os.environ["PYTHONPATH"] = "/root"
+    from kev.model import DecisionModel, load_tokenizer
+    from kev.data import materialize
+    from kev.suite import load_split
+    t0 = time.time(); tok = load_tokenizer(base, revision=revision)
+    m = DecisionModel(base, tok, "cuda", dtype=torch.bfloat16, lora=16, revision=revision)
+    m.lm.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False}); m.lm.config.use_cache = False; m.train()
+    trainable = [(n, p.numel()) for n, p in m.lm.named_parameters() if p.requires_grad]
+    hit = sorted({n.split(".lora_")[0].split(".")[-1] for n, _ in trainable})
+    expert_hits = sum(k for n, k in trainable if ".experts." in n)
+    recs = [materialize(r) for r in load_split("/root/evals/v7/decision-v7", "development")[:2]]
+    encs = [m.encode(tok, r, strict=True) for r in recs]
+    torch.cuda.reset_peak_memory_stats(); t1 = time.time()
+    with torch.autocast("cuda", dtype=torch.bfloat16):
+        logits = m.forward_batch(encs)
+    loss = sum(torch.nn.functional.cross_entropy(z.float()[None], torch.tensor([q["label"]], device="cuda")) for zs, r in zip(logits, recs) for z, q in zip(zs, r["questions"]))
+    loss.backward(); torch.cuda.synchronize()
+    return {"base": base, "hybrid": m.hybrid, "load_seconds": round(t1 - t0), "step_seconds": round(time.time() - t1, 1), "trainable_params_M": round(sum(k for _, k in trainable) / 1e6, 1),
+            "lora_module_names": hit, "routed_expert_lora_params": expert_hits, "peak_gb": round(torch.cuda.max_memory_allocated() / 1e9, 1), "weights_gb": round(sum(p.numel() * p.element_size() for p in m.lm.parameters()) / 1e9, 1), "loss": round(loss.item(), 3)}
+
+
+@app.local_entrypoint()
+def smoke(base: str, revision: str):
+    print(json.dumps(smoke_train.remote(base, revision), indent=1))

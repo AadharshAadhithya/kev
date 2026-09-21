@@ -38,3 +38,23 @@ TRIAL 2a RESULT (temperature, no GPU) — 21:05
 - night2-4b-dense failed (argparse choices lacked dense); relaunched as night2-4b-dense2 after fix
 - GPQA-diamond is gated (auto-approve on click); needs Jared to accept terms at hf.co/datasets/Idavidrein/gpqa before we can freeze it.
 - serve: KEV_TEMPERATURE added (opt-in). Cards to get a 'calibrated (T=2.0)' row.
+
+DELTAS, FIRST READ (21:20) — transfer-v4 dev, paired vs released
+- all six finished deltas are within ±0.7 pp of their parent (CIs include 0): no regression from delta fine-tuning with replay 2000 @ lr 2e-5. Good: the delta mechanism is safe.
+- dates: deadline raw 9B .72->.80, 4B .55->.60 (no preprocessor yet). conf-err up (.075->.090 at 9B) — watch.
+- unknowable: 4B cov@5% .54->.57 (+3, criterion +5), 9B .53->.48 (worse!). Need v9 unknowable share.
+- assertion: transfer neutral; need scienthoon angry.
+- 19 target benches launched (runs/bench-night2.log): *-v9 (unknowable/mmlu_pro), *-sci (angry), *-v4df (deadline with --date_facts) + released 9B/4B with --date_facts as the control.
+- 9B 'all' delta + dense ablation still training.
+
+QWEN3.6-35B-A3B (instruct) — asked 21:30. Same qwen3_5_moe arch as the base I probed. Gate for a trial: instruct zero-shot >= 0.76 on transfer-v4 (4B-instruct semif 0.747; 35B-base plain 0.720). Smoke: LoRA must not hit routed experts; H200 memory.
+Launched: runs/smoke-36.log, runs/probe-36.log (plain), runs/probe-36-semif.log.
+
+DELTAS vs CRITERIA (21:40)
+- #3 dates: 9B raw .72->.80, WITH date_facts .90 (crit >=.85 PASS); overall +0.6pp; cerr .075->.090 (worse, watch). 4B+dates .82 w/ pp (fail), 4B+all .85 (pass, raw .55 unchanged, overall -0.3).
+  Preprocessor alone on released: 9B .72->.75, 4B .55->.68. Training to bind the fact is what makes it work — issue #8 hypothesis confirmed both ways.
+- #2b unknowable: share>=.9 9B .05->.00, 4B .19->.00; mean max-p .72->.46 with controls unchanged (.97). Behaviour learned exactly. But cov@5% on v4: 9B .53->.48, 4B .54->.57 -> coverage criterion FAILS. Partial pass.
+- #4 assertion: 4B .794->.821 (fail <.85); 4B+all .859 PASS; 9B .911->.924. SIDE EFFECT: assertion-only delta raises unknowable overconfidence (9B .05->.25, 4B .19->.35) — statement-form Noul teaches "commit". Combined 'all' cancels it (.00).
+- #6 all (4B): v4 -0.3pp (ok), deadline .85 w/ pp, unk .00, angry .859; regressions: scienthoon queue .928->.900, ECE .086->.126, mmlu_pro .500->.480, cov@5% .54->.51. 9B all: still training.
+- #7 ekzhang 1000 MMLU-Pro: Kev-9B 0.511, Kev-4B 0.468, Kev-8B(Qwen3) 0.488 (8 items >384 tok counted wrong). Jev .829, untrained OpenJev .588, Eric SFT ~.71. Knowledge column is base-bound — consistent with everything else.
+NEXT: wait 9B-all + dense; locked reads for 4B-all and 9B-all (candidates); decide adoption; then 3.6 gate.

@@ -7,13 +7,13 @@
 4. isolation: can question B read a secret placed in sibling question A? (must not) / in state (should)
 5. latency + equality: packed N questions vs N separate calls
 """
-import argparse, json, math, os, random, time, string
+import argparse, json, math, random, time, string
 from collections import defaultdict
 import numpy as np
 import torch
 import torch.nn.functional as F
+from .checkpoint import Checkpoint, LoadOptions
 from .data import build, augment, materialize, DISTRACTORS
-from .model import DecisionModel, load_tokenizer, encode
 
 
 def ece(conf, correct, bins=10):
@@ -23,56 +23,6 @@ def ece(conf, correct, bins=10):
         m = (conf >= lo) & (conf < hi) if hi < 1 else (conf >= lo) & (conf <= hi)
         if m.any(): e += m.mean() * abs(correct[m].mean() - conf[m].mean())
     return float(e)
-
-
-def resolve_run(run):
-    """Local run directory, or a Hub repo id like jaredpalmer/kev-4b, optionally pinned to a revision or tag with
-    `@` (jaredpalmer/kev-4b@qwen3); downloaded to the HF cache."""
-    if os.path.isdir(run): return run
-    from huggingface_hub import snapshot_download
-    repo, _, revision = run.partition("@")
-    return snapshot_download(repo, revision=revision or None, allow_patterns=["*.json", "*.safetensors", "*.pt", "*.txt", "*.jinja"])
-
-
-def load(run, dev, dtype=None, merge=True, attn=None):
-    """dtype: None = fp32 (exact; what every reported number uses). KEV_DTYPE=bf16 or dtype=torch.bfloat16 halves memory
-    for serving large backbones; probabilities then differ from the fp32 numbers in the third decimal.
-
-    merge (default): fold the LoRA into the base weights in fp32 before any cast. Exact in fp32 (max |dp| 0 measured),
-    and in bf16 it is both faster (~15%) and closer to the fp32 numbers than running the unmerged adapter in bf16
-    (kev-4b, 24 dev records: max |dp| 0.017 vs 0.029, 0 vs 1 argmax flips). KEV_MERGE=0 keeps the adapter separate.
-    attn: attention backend; None = the model default (SDPA on CUDA, eager elsewhere). KEV_ATTN=sdpa enables SDPA on MPS
-    (measured parity with eager; a few percent faster)."""
-    import os
-    run = resolve_run(run)
-    meta = torch.load(f"{run}/head.pt", map_location="cpu")
-    dtype = dtype or {"bf16": torch.bfloat16, "fp16": torch.float16}.get(os.environ.get("KEV_DTYPE", ""), torch.float32)
-    if meta.get("weights_dtype") == "bf16":
-        # trained with a bf16 backbone (--weights_dtype bf16, e.g. the 35B-A3B MoE whose fused experts need bf16): load it the same
-        # way, and keep the fp32 adapter unmerged rather than folding it into bf16 weights. fp32 would double the memory and is not
-        # what was trained.
-        dtype, merge = torch.bfloat16, False
-    import json as _json
-    adapter_cfg = _json.loads(open(f"{run}/adapter_config.json").read())
-    merge = merge and os.environ.get("KEV_MERGE", "1") != "0" and not adapter_cfg.get("trainable_token_indices")   # token-trained adapters stay unmerged
-    attn = attn or os.environ.get("KEV_ATTN") or None
-    tok = load_tokenizer(meta["base"], revision=meta.get("base_revision"))
-    m = DecisionModel(meta["base"], tok, dev, lora=None, revision=meta.get("base_revision"), head_dim=meta.get("head_dim", 256),
-                      option_isolation=meta.get("option_isolation", False), dtype=torch.float32 if merge else dtype, attn=attn)
-    from peft import PeftModel
-    m.lm = PeftModel.from_pretrained(m.lm, run).to(dev)   # trainable token embeddings, if any, are inside the adapter
-    scale = float(os.environ.get("KEV_LORA_SCALE", "1"))
-    if scale != 1:   # WiSE-FT-style interpolation between the base (0) and the fine-tuned weights (1), at inference, no retraining
-        for module in m.lm.modules():
-            if hasattr(module, "scaling") and isinstance(module.scaling, dict):
-                for k in module.scaling: module.scaling[k] *= scale
-        m.lora_scale = scale
-    if merge: m.lm = m.lm.merge_and_unload()               # in fp32: exact
-    if dtype != torch.float32: m.lm = m.lm.to(dtype)
-    m.head.load_state_dict(meta["head"]); m.eval()
-    # calibration: the checkpoint's fitted temperature applies by default; KEV_TEMPERATURE overrides it (1.0 = raw logits)
-    m.head.temperature = float(os.environ["KEV_TEMPERATURE"]) if os.environ.get("KEV_TEMPERATURE") else float(meta.get("temperature", 1.0))
-    return tok, m
 
 
 def _probs(tok, model, req):
@@ -250,14 +200,14 @@ def main():
     dev = "mps" if torch.backends.mps.is_available() else "cpu"
     rng = random.Random(a.seed)
     reqs = build(a.n_per_source, "test", a.seed)
-    meta = torch.load(f"{a.run}/head.pt", map_location="cpu")
-    out = {"run": a.run, "holdout_sources": meta.get("holdout", [])}
+    ck = Checkpoint(a.run)
+    out = {"run": a.run, "holdout_sources": ck.meta.holdout}
     if a.baseline:
-        out["baseline_zero_shot_base"] = baseline_letter_logits(meta["base"], reqs, dev, random.Random(a.seed)); print(json.dumps(out, indent=1), flush=True)
+        out["baseline_zero_shot_base"] = baseline_letter_logits(ck.meta.base, reqs, dev, random.Random(a.seed)); print(json.dumps(out, indent=1), flush=True)
     if a.baseline_instruct:
         out["baseline_zero_shot_instruct"] = baseline_letter_logits(a.baseline_instruct, reqs, dev, random.Random(a.seed), chat=True); print(json.dumps(out["baseline_zero_shot_instruct"], indent=1), flush=True)
     if dev == "mps": torch.mps.empty_cache()
-    tok, model = load(a.run, dev)
+    tok, model = ck.load(dev, LoadOptions.from_env())
     for name, fn in [("accuracy_calibration", lambda: test_accuracy(tok, model, reqs, random.Random(a.seed))),
                      ("temperature_scaling", lambda: test_temperature(tok, model, reqs, random.Random(a.seed))),
                      ("permutation", lambda: test_permutation(tok, model, reqs[:150], rng)),

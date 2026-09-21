@@ -8,9 +8,9 @@ from pathlib import Path
 import numpy as np
 import torch
 
+from kev.checkpoint import Checkpoint, LoadOptions
 from kev.data import materialize
-from kev.evaluate import ece, load, resolve_run
-from kev.model import encode
+from kev.evaluate import ece
 from kev.suite import digest, load_split, record_digest, write_json
 
 EPSILON = 1e-9
@@ -344,17 +344,17 @@ def sync(device):
 
 
 class LocalPredictor:
-    def __init__(self, run, device, temperature=None):
-        self.run = resolve_run(run)
+    def __init__(self, run, device, opts=LoadOptions()):
+        """opts.temperature=None scores with the temperature the checkpoint carries; 1.0 scores raw logits."""
+        if opts.temperature is not None and not (math.isfinite(opts.temperature) and opts.temperature > 0):
+            raise ValueError("temperature must be finite and positive")
+        checkpoint = Checkpoint(run)
+        self.run = checkpoint.path
         if device == "cuda":
             # evaluation is fp32-exact: TF32 (10-bit mantissa) moves probabilities by ~1e-3, the isolation gate's tolerance
             torch.backends.cuda.matmul.allow_tf32 = False; torch.backends.cudnn.allow_tf32 = False
             torch.backends.cuda.enable_flash_sdp(False); torch.backends.cuda.enable_mem_efficient_sdp(False)
-        self.tok, self.model = load(self.run, device)
-        if temperature is not None:
-            if not math.isfinite(temperature) or temperature <= 0:
-                raise ValueError("temperature must be finite and positive")
-            self.model.head.temperature = temperature
+        self.tok, self.model = checkpoint.load(device, opts)
         self.temperature = self.model.head.temperature
         self.device = device
 
@@ -478,7 +478,7 @@ def main():
         from kev.api import with_date_facts
         records = [{**r, "state": with_date_facts(r["state"])} for r in records]
     import os
-    predictor = RemotePredictor(a.remote, a.remote_model, os.environ.get("KEV_REMOTE_API_KEY", "local")) if a.remote else LocalPredictor(a.run, a.device)
+    predictor = RemotePredictor(a.remote, a.remote_model, os.environ.get("KEV_REMOTE_API_KEY", "local")) if a.remote else LocalPredictor(a.run, a.device, LoadOptions.from_env())
     report, _ = evaluate_records(records, predictor, a.out, heldout_sources=tuple(heldout), skip_overlong=bool(a.data))
     report.update(suite_sha256=source_hash, data=a.data, date_facts=a.date_facts, run=a.run or a.remote, split=split,
                   calibration_applied=predictor.temperature != 1.0 if not a.remote else None,

@@ -3,6 +3,7 @@ from pathlib import Path
 from collections import Counter
 import torch
 import torch.nn.functional as F
+from .checkpoint import Checkpoint, Meta, write_meta
 from .data import EVAL_ONLY, build, augment, load_records, materialize, none_pair, source_seed
 from .suite import digest, load_split, write_json
 from .model import MAX_BRANCH, MAX_STATE, DecisionModel, load_tokenizer, encode
@@ -149,32 +150,15 @@ def main():
     if a.checkpointing:
         model.lm.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
     model.lm.config.use_cache = False
+    # what this run will save as head.pt; also the architecture a warm start must match
+    meta = Meta(base=a.base, base_revision=revision, lora=a.lora, head_dim=a.head_dim, option_isolation=bool(a.option_isolation),
+                special_embeddings=bool(a.special_embeddings), weights_dtype=a.weights_dtype)
     init_source = None
     if a.init_from:
         # delta mode (PR #9, Radexito): start from an already trained adapter + pointer head instead of the base model, so a
-        # fine-tune on new data keeps what the released checkpoint knows. Compatibility is checked field by field BEFORE
-        # loading, because peft loads matching keys silently and a half-loaded adapter still trains and still reports a loss.
-        from peft import get_peft_model_state_dict, load_peft_weights, set_peft_model_state_dict
-        from .evaluate import resolve_run
-        src = resolve_run(a.init_from)
-        meta = torch.load(f"{src}/head.pt", map_location="cpu")
-        checks = [("base", meta.get("base"), a.base), ("base_revision", meta.get("base_revision"), revision), ("lora", int(meta.get("lora", 0)), a.lora),
-                  ("head_dim", int(meta.get("head_dim", 256)), a.head_dim), ("option_isolation", bool(meta.get("option_isolation", False)), bool(a.option_isolation)),
-                  ("special_embeddings", bool(meta.get("special_embeddings", False)), bool(a.special_embeddings))]
-        for field, theirs, ours in checks:
-            if theirs != ours and not (field == "base_revision" and (theirs is None or ours is None)):
-                raise ValueError(f"--init_from {src}: {field} is {theirs!r} there and {ours!r} here")
-        weights = load_peft_weights(src, device="cpu")
-        mine = set(get_peft_model_state_dict(model.lm))
-        unexpected, missing = sorted(set(weights) - mine), sorted(mine - set(weights))
-        if unexpected:
-            raise ValueError(f"--init_from {src} carries {len(unexpected)} adapter tensors this model does not have (e.g. {unexpected[:2]}); check --lora_targets / --lora against its adapter_config.json")
-        if missing:
-            raise ValueError(f"--init_from {src} does not cover {len(missing)} of this model's adapter tensors (e.g. {missing[:2]}); check --lora_targets")
-        set_peft_model_state_dict(model.lm, weights)
-        model.head.load_state_dict(meta["head"])
-        init_source = {"init_from": a.init_from, "resolved": str(src), "adapter_sha256": digest(Path(src) / "adapter_model.safetensors"), "head_sha256": digest(Path(src) / "head.pt")}
-        print(f"delta: warm start from {src}: {len(weights)} adapter tensors and the pointer head loaded", flush=True)
+        # fine-tune on new data keeps what the released checkpoint knows
+        init_source = Checkpoint(a.init_from).warm_start(model, meta)
+        print(f"delta: warm start from {init_source['resolved']}: {init_source['adapter_tensors']} adapter tensors and the pointer head loaded", flush=True)
     print(f"device={dev} trainable params={sum(p.numel() for p in model.trainable_parameters())/1e6:.1f}M", flush=True)
 
     holdout = manifest["holdout_sources"] if manifest else [s for s in a.holdout.split(",") if s]
@@ -292,9 +276,8 @@ def main():
                     run = Counter()
     os.makedirs(a.out, exist_ok=True)
     model.lm.save_pretrained(a.out)
-    torch.save({"head": model.head.state_dict(), "base": a.base, "base_revision": revision, "lora": a.lora, "head_dim": a.head_dim,
-                "option_isolation": bool(a.option_isolation), "special_embeddings": bool(a.special_embeddings), "weights_dtype": a.weights_dtype,
-                "holdout": holdout, "args": vars(a), "suite_sha256": suite_hash, "init_source": init_source}, f"{a.out}/head.pt")
+    meta.head, meta.holdout, meta.extra = model.head.state_dict(), holdout, {"args": vars(a), "suite_sha256": suite_hash, "init_source": init_source}
+    write_meta(a.out, meta)
     tok.save_pretrained(a.out)
     write_json(out_dir / "training_metrics.json", {"wall_seconds": time.time() - t0, "records_seen": seen,
                "requested_records": a.epochs * len(reqs), "truncated_records": 0, "rejected_records": 0,

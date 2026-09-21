@@ -6,12 +6,12 @@ from collections import Counter, defaultdict
 from pathlib import Path
 
 import numpy as np
-import torch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from kev.benchmark import metrics, paired_bootstrap, probabilities_at_temperature, risk_coverage_curve
+from kev.checkpoint import read_meta
 from kev.suite import digest, load_split, write_json
 
 RUNS = {
@@ -110,8 +110,7 @@ def main():
         path = ROOT / "runs" / run
         rows_path = path / "transfer/rows.json"
         rows = read_rows(rows_path)
-        meta = torch.load(path / "checkpoint/head.pt", map_location="cpu", weights_only=True)
-        temperature = float(meta.get("temperature", 1.0))
+        temperature = read_meta(path / "checkpoint").temperature
         cal = tempered(rows, temperature)
         report["models"][name] = {"rows": str(rows_path.relative_to(ROOT)), "rows_sha256": digest(rows_path),
                                   "head_sha256": digest(path / "checkpoint/head.pt"), "temperature": temperature,

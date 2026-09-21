@@ -10,10 +10,10 @@ import argparse, json, sys
 from pathlib import Path
 
 import numpy as np
-import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from kev.benchmark import metrics  # noqa: E402
+from kev.checkpoint import read_meta, write_meta  # noqa: E402
 
 GRID = np.exp(np.linspace(np.log(0.25), np.log(4), 121))
 
@@ -33,9 +33,9 @@ def main():
     for name, rows in (("development", dev), *((("transfer", [r for r in json.load(open(a.transfer)) if r["variant"] == "clean"]),) if a.transfer else ())):
         raw, cal = metrics(rows), metrics(rows, T)
         print(f"{name:12} T={T:.2f}  acc {raw['acc']:.3f} -> {cal['acc']:.3f} | brier {raw['brier']:.3f} -> {cal['brier']:.3f} | ece {raw['ece']:.3f} -> {cal['ece']:.3f} | conf-err {raw['confident_error_rate']:.3f} -> {cal['confident_error_rate']:.3f} | cov@5% {raw['coverage_at_5pct_error']:.2f} -> {cal['coverage_at_5pct_error']:.2f}")
-    path = Path(a.run) / "head.pt"; meta = torch.load(path, map_location="cpu")
-    meta["temperature"] = T; meta["temperature_fit"] = {"rows": a.rows, "n": len(dev), "method": "min NLL over a 121-point log grid 0.25..4"}
-    torch.save(meta, path); print(f"wrote temperature {T:.2f} to {path}")
+    meta = read_meta(a.run)
+    meta.temperature = T; meta.extra["temperature_fit"] = {"rows": a.rows, "n": len(dev), "method": "min NLL over a 121-point log grid 0.25..4"}
+    write_meta(a.run, meta); print(f"wrote temperature {T:.2f} to {a.run}/head.pt")
 
 
 if __name__ == "__main__":

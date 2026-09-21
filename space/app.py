@@ -1,9 +1,10 @@
 """Kev on Hugging Face Spaces (Gradio, ZeroGPU).
 
 One document (the state) and a set of typed questions in, a probability per option out, in one forward pass. No text is
-generated. Loads Kev-4B and Kev-0.8B (jaredpalmer/kev-4b, jaredpalmer/kev-0.8b) the way kev.evaluate.load does: LoRA
-merged into the base in fp32, pointer head on top. kev/model.py and kev/api.py are copied from the repo at publish time
-(scripts/publish_space.sh), so the Space runs the same encoder, mask and API code as kev.serve.
+generated. Loads Kev-4B and Kev-0.8B (jaredpalmer/kev-4b, jaredpalmer/kev-0.8b) through kev.checkpoint, exactly as
+kev.serve does: LoRA merged into the base in fp32, pointer head on top. kev/model.py, kev/api.py and kev/checkpoint.py
+are copied from the repo at publish time (scripts/publish_space.sh), so the Space runs the same encoder, mask, loader and
+API code as kev.serve.
 """
 import os
 
@@ -15,42 +16,31 @@ import html, json, random, time  # noqa: E402
 
 import gradio as gr  # noqa: E402
 import torch  # noqa: E402
-from huggingface_hub import snapshot_download  # noqa: E402
-from peft import PeftModel  # noqa: E402
 from pydantic import ValidationError  # noqa: E402
-from transformers import AutoTokenizer  # noqa: E402
 
 from kev.api import SystemOneRequest, output_tokens, render, to_answers, to_record, with_date_facts  # noqa: E402
-from kev.model import DecisionModel  # noqa: E402
+from kev.checkpoint import Checkpoint, LoadOptions  # noqa: E402
 from presets import PRESETS  # noqa: E402
 
 MODELS = {"Kev-4B": "jaredpalmer/kev-4b", "Kev-0.8B": "jaredpalmer/kev-0.8b"}
 DEFAULT_MODEL = "Kev-4B"
-TEMPERATURES = {}                        # per model: the temperature fitted on its development rows, read from head.pt (scripts/calibrate_checkpoint.py)
 INFER_MAX_STATE, INFER_MAX_BRANCH = 8192, 8192   # serving limits, as in kev.serve (training used 384/1024)
 
 
 # ------------------------------------------------------------------ load
-# Everything happens on CPU in fp32 (the exact path every reported number uses), then the finished module moves to
-# "cuda" once at module scope, which is what ZeroGPU expects.
+# The shared loader runs on CPU in fp32 (the exact path every reported number uses: LoRA merged in fp32, pointer head on
+# top), then the finished module moves to "cuda" once at module scope, which is what ZeroGPU expects. The head is loaded
+# raw (T=1); the Calibrated toggle sets the checkpoint's fitted temperature per request.
 
 def load(repo):
-    run = snapshot_download(repo, allow_patterns=["*.json", "*.safetensors", "*.pt", "*.txt"])
-    try: meta = torch.load(f"{run}/head.pt", map_location="cpu", weights_only=True)
-    except Exception: meta = torch.load(f"{run}/head.pt", map_location="cpu", weights_only=False)
-    tok = AutoTokenizer.from_pretrained(meta["base"], revision=meta.get("base_revision"))
-    m = DecisionModel(meta["base"], tok, "cpu", lora=None, revision=meta.get("base_revision"), attn="sdpa",
-                      head_dim=meta.get("head_dim", 256), option_isolation=bool(meta.get("option_isolation", False)), dtype=torch.float32)
-    m.lm = PeftModel.from_pretrained(m.lm, run, torch_device="cpu").merge_and_unload()   # exact in fp32; ZeroGPU fakes cuda at module scope
-    m.head.load_state_dict(meta["head"]); m.eval()
-    m.head.temperature = 1.0                 # the Space applies the checkpoint's temperature itself (toggle below), so the head runs raw
-    TEMPERATURES[repo] = float(meta.get("temperature", 1.0))
+    ck = Checkpoint(repo)
+    tok, m = ck.load("cpu", LoadOptions(attn="sdpa", temperature=1.0))
     m.device = "cuda"; m.to("cuda")
-    print(f"[kev] {repo}: base={meta['base']}@{meta.get('base_revision')} hybrid={m.hybrid} temperature={TEMPERATURES[repo]:.2f}", flush=True)
-    return tok, m
+    print(f"[kev] {repo}: base={ck.meta.base}@{ck.meta.base_revision} hybrid={m.hybrid} temperature={ck.meta.temperature:.2f}", flush=True)
+    return tok, m, ck.meta.temperature
 
 
-LOADED = {name: load(repo) for name, repo in MODELS.items()}
+LOADED = {name: load(repo) for name, repo in MODELS.items()}   # name -> (tokenizer, model, fitted temperature)
 
 
 # ------------------------------------------------------------------ inference
@@ -75,32 +65,29 @@ def build_request(state_text, questions_json):
         raise gr.Error(f"Invalid question at `{'.'.join(str(x) for x in first.get('loc', ()))}`: {first.get('msg')}") from None
 
 
-def probs(name, req, temperature):
+def probs(name, req, calibrated):
     """One request through one model. Returns (probabilities per question, per-question metadata, token count, ms).
-    temperature: True = the checkpoint's fitted value, False/1.0 = raw, or a float."""
-    tok, model = LOADED[name]
-    if temperature is True: temperature = TEMPERATURES.get(MODELS[name], 1.0)
-    elif temperature is False: temperature = 1.0
+    calibrated: apply the temperature the checkpoint carries (the pointer head divides its logits by it); else raw."""
+    tok, model, fitted = LOADED[name]
+    model.head.temperature = fitted if calibrated else 1.0   # argmax unchanged either way; requests run one at a time (Gradio queue)
     rec, meta = to_record(req)
     try: enc = model.encode(tok, rec, max_state=INFER_MAX_STATE, max_branch=INFER_MAX_BRANCH)
     except ValueError as e: raise gr.Error(str(e)) from None
     torch.cuda.synchronize(); t0 = time.perf_counter()
     ps = model.probs(enc)
     torch.cuda.synchronize(); ms = (time.perf_counter() - t0) * 1000
-    if temperature != 1.0:   # same as scaling the pointer logits by 1/T; argmax unchanged
-        ps = [(lambda q: q / q.sum())(p.clamp_min(1e-9) ** (1.0 / temperature)) for p in ps]
     return [p.tolist() for p in ps], meta, len(enc["ids"]), ms
 
 
-def systemone(name, req, temperature):
+def systemone(name, req, calibrated):
     """The /v1/systemone response kev.serve would return for this request."""
     tok = LOADED[name][0]
-    ps, meta, n_tokens, ms = probs(name, req, temperature)
+    ps, meta, n_tokens, ms = probs(name, req, calibrated)
     answers = to_answers(ps, meta)
     return {"model": MODELS[name], "answers": answers, "usage": {"input_tokens": n_tokens, "output_tokens": output_tokens(tok, answers)}, "latency_ms": round(ms, 1)}
 
 
-def stability(name, req, temperature, n_perm):
+def stability(name, req, calibrated, n_perm):
     """Re-run the first Choice question with 2+ options under shuffled option orders (kev.serve /v1/systemone/permute)."""
     target = next((qid for qid, q in req.questions.items() if q.type == "choice" and len(q.criteria) >= 2), None)
     if target is None: return "_No Choice question with two or more options to permute._"
@@ -109,7 +96,7 @@ def stability(name, req, temperature, n_perm):
         order = list(keys)
         if i > 0: rng.shuffle(order)
         one = SystemOneRequest(state=req.state, model=req.model, questions={target: q.model_copy(update={"criteria": {k: q.criteria[k] for k in order}})})
-        ps, meta, _, _ = probs(name, one, temperature)
+        ps, meta, _, _ = probs(name, one, calibrated)
         a = to_answers(ps, meta)[target]
         runs.append((order, a["choice"], a["probabilities"]))
     spread = {k: max(r[2][k] for r in runs) - min(r[2][k] for r in runs) for k in keys}
@@ -189,11 +176,11 @@ def decide(state_text, questions_json, model_choice=DEFAULT_MODEL, calibrated=Fa
     """
     req = build_request(state_text, questions_json)
     if date_facts: req = req.model_copy(update={"state": with_date_facts(req.state)})
-    T = bool(calibrated)
+    calibrated = bool(calibrated)
     names = list(MODELS) if model_choice == "Both" else [model_choice]
-    responses = {name: systemone(name, req, T) for name in names}
+    responses = {name: systemone(name, req, calibrated) for name in names}
     rendered = "".join(render_answers(name, req, r) for name, r in responses.items())
-    report = "\n\n".join(stability(name, req, T, int(n_perm or 4)) for name in names) if check_stability else ""
+    report = "\n\n".join(stability(name, req, calibrated, int(n_perm or 4)) for name in names) if check_stability else ""
     raw = responses[names[0]] if len(names) == 1 else responses
     return rendered, raw, report
 

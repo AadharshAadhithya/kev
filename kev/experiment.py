@@ -27,6 +27,7 @@ from pathlib import Path
 import torch
 
 from kev.benchmark import LocalPredictor, default_device, evaluate_records, fit_temperature, paired_bootstrap
+from kev.checkpoint import LoadOptions
 from kev.suite import digest, load_split, record_digest, write_json
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -209,9 +210,9 @@ def execute_trial(config, suite, output, expected_sources, device, existing=None
                 if line.startswith(("ep", "saved", "device", "ablation")) or "Error" in line: print(line.rstrip(), flush=True)
         if proc.returncode:
             raise subprocess.CalledProcessError(proc.returncode, args)
-    if (config or {}).get("weights_dtype") == "bf16":   # config is None on --resume
-        os.environ["KEV_DTYPE"] = "bf16"      # a backbone trained in bf16 weights is evaluated the same way (fp32 would not fit and is not what was trained)
-    predictor = LocalPredictor(run, device, temperature=1.0)
+    # raw logits: the trial fits its own temperature on the calibration partition below. A backbone trained in bf16 weights
+    # (weights_dtype) is loaded in bf16 by the checkpoint itself.
+    predictor = LocalPredictor(run, device, LoadOptions(temperature=1.0))
     provenance["measured_checkpoint"] = {"requested": run, "resolved": str(predictor.run),
                                           "head_sha256": digest(Path(predictor.run) / "head.pt"),
                                           "adapter_sha256": digest(Path(predictor.run) / "adapter_model.safetensors"),

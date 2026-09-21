@@ -136,6 +136,23 @@ def test_soft_targets_and_date_facts():
     assert with_date_facts({"case": "one date: May 1, 2026"}) == {"case": "one date: May 1, 2026"}
 
 
+def test_checkpoint_meta_round_trip_and_defaults(tmp_path):
+    """head.pt has one schema (kev.checkpoint.Meta): old files get the same defaults everywhere, unknown keys survive a
+    read-modify-write, and LoadOptions.from_env is the only place the KEV_* variables are read."""
+    import torch
+    from kev.checkpoint import LoadOptions, Meta, read_meta, write_meta
+    old = {"head": {"w": torch.zeros(1)}, "base": "Qwen/Qwen2.5-0.5B", "lora": 16, "args": {"lr": 1}, "suite_sha256": "abc"}
+    m = Meta.from_dict(old)
+    assert (m.head_dim, m.option_isolation, m.temperature, m.holdout, m.weights_dtype) == (256, False, 1.0, [], "fp32")
+    assert m.extra == {"args": {"lr": 1}, "suite_sha256": "abc"}
+    m.temperature = 2.3; m.extra["temperature_fit"] = {"n": 10}
+    write_meta(tmp_path, m); back = read_meta(tmp_path)
+    assert back.temperature == 2.3 and back.extra["args"] == {"lr": 1} and back.extra["temperature_fit"] == {"n": 10} and back.lora == 16
+    assert LoadOptions.from_env({}) == LoadOptions()
+    opts = LoadOptions.from_env({"KEV_DTYPE": "bf16", "KEV_MERGE": "0", "KEV_ATTN": "sdpa", "KEV_TEMPERATURE": "1.0", "KEV_LORA_SCALE": "0.5"})
+    assert opts == LoadOptions(dtype=torch.bfloat16, merge=False, attn="sdpa", lora_scale=0.5, temperature=1.0)
+
+
 def test_head_temperature_scales_logits_at_eval_only():
     """The pointer head divides logits by its temperature in eval mode only; argmax is unchanged; training sees T=1."""
     import torch

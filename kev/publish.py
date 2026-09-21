@@ -10,8 +10,8 @@ Uploads: adapter, head.pt, tokenizer files, eval.json, training log (if found), 
 with the repo id and run name filled in. Requires `hf auth login`.
 """
 import argparse, json, os, re, shutil, tempfile
-import torch
 from huggingface_hub import HfApi
+from .checkpoint import read_meta
 
 FILES = ["adapter_config.json", "adapter_model.safetensors", "head.pt", "tokenizer.json", "tokenizer_config.json",
          "vocab.json", "merges.txt", "added_tokens.json", "special_tokens_map.json", "eval.json"]
@@ -28,8 +28,7 @@ def main():
     ap.add_argument("--revision", help="upload to this branch instead of main (created if missing); for candidates that must not replace the released weights")
     a = ap.parse_args()
 
-    meta = torch.load(f"{a.run}/head.pt", map_location="cpu")
-    base, run_name = meta["base"], os.path.basename(a.run.rstrip("/"))
+    base, run_name = read_meta(a.run).base, os.path.basename(a.run.rstrip("/"))
     api = HfApi()
     api.create_repo(a.repo, repo_type="model", exist_ok=True, private=a.private)
 

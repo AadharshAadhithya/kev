@@ -48,9 +48,9 @@ See README.md (deep dive) and docs/model-cards/ (one card per checkpoint: recipe
   Collection: huggingface.co/collections/jaredpalmer/kev-6aad9d0ea49f2589665e07cd. `--run` in serve/evaluate accepts a Hub id.
 - HF Space (public demo, ZeroGPU): huggingface.co/spaces/jaredpalmer/kev. Source in `space/` (Gradio 6 `app.py`, `presets.py` mirrors the
   playground presets, `README.md` frontmatter `models:`/`datasets:` is what links the Space from the model and dataset pages). Publish with
-  `scripts/publish_space.sh [repo] [message]`: it stages `space/` + `kev/{__init__,model,api}.py` into one `hf upload --type space` commit,
+  `scripts/publish_space.sh [repo] [message]`: it stages `space/` + `kev/{__init__,model,api,checkpoint}.py` into one `hf upload --type space` commit,
   so the vendored modules never drift from the repo (a stale vendored `model.py` is how the hugging-apps Space broke on Qwen3.5). Any
-  change to `kev/model.py` or `kev/api.py` that affects serving should be republished. ZeroGPU rules: `import spaces` first, load on CPU in
+  change to `kev/model.py`, `kev/api.py` or `kev/checkpoint.py` that affects serving should be republished. ZeroGPU rules: `import spaces` first, load on CPU in
   fp32 (`PeftModel.from_pretrained(..., torch_device="cpu")`, otherwise peft picks the faked cuda device and crashes), merge, then
   `.to("cuda")` once at module scope; a restart reloads both models (~3 min). Check with `hf spaces logs jaredpalmer/kev` and the
   gradio_client `/decide` endpoint; the Space is also in the Kev collection and needs PRO to exist.
@@ -73,6 +73,7 @@ See README.md (deep dive) and docs/model-cards/ (one card per checkpoint: recipe
 - `kev/data.py`      dataset -> typed records, permutation / none-of-the-above / distractor augmentation
 - `kev/model.py`     encode(), branch_mask(), PointerHead, DecisionModel
 - `kev/train.py`     LoRA fine-tune, batch size 1 with grad accumulation (variable-length custom masks)
+- `kev/checkpoint.py` Checkpoint (resolve run dir or Hub id, `head.pt` schema = `Meta`, load with `LoadOptions`, `warm_start` for deltas)
 - `kev/evaluate.py`  acc/ECE, permutation stability, IIA shift, isolation probe, packed-vs-separate
 - `kev/plot.py`      loss curve(s) from train logs + accuracy-vs-baselines bars from eval.json
 - `kev/api.py`       TypeSafe request/response models; Noul/Choice/Score -> pointer options; confidence formulas
@@ -88,7 +89,7 @@ See README.md (deep dive) and docs/model-cards/ (one card per checkpoint: recipe
   option/branch delimiter tokens (the fast tokenizer ignores `split_special_tokens`).
 - Training data is built as TypeSafe-shaped requests and goes through `api.to_record()` (`data.materialize`),
   so train and serve text are identical.
-- Serving path (`kev.evaluate.load` + `kev.serve`): LoRA merged in fp32 then cast (`KEV_MERGE=0` to keep unmerged), `KEV_ATTN=sdpa` default on MPS,
+- Serving path (`kev.checkpoint.Checkpoint.load` + `kev.serve`; `LoadOptions.from_env()` reads the `KEV_*` variables at CLI entry points only): LoRA merged in fp32 then cast (`KEV_MERGE=0` to keep unmerged), `KEV_ATTN=sdpa` default on MPS,
   `KEV_SHAPE_BUCKET=64` on MPS, state-prefix KV LRU (`KEV_PREFIX_CACHE=4`, `KEV_PREFIX_MIN_TOKENS=384`). Any change here must keep the parity
   tests in tests/test_v3.py (merged vs unmerged, prefix vs full pass, bucket padding) passing; report numbers with the fp32 unmerged path.
 

@@ -110,6 +110,7 @@ def run_locked_test(trial_path, name, suites, git_commit, redo_interrupted=False
     """Read the locked test partitions ONCE for a promoted trial. Writes /runs/locked/<name>/... ; refuses to rerun."""
     import json
     from kev.benchmark import LocalPredictor, evaluate_records
+    from kev.checkpoint import LoadOptions
     from kev.suite import digest, load_split, write_json
     os.environ["KEV_GIT_COMMIT"] = git_commit
     trial = Path(RUNS_MOUNT) / trial_path
@@ -136,7 +137,7 @@ def run_locked_test(trial_path, name, suites, git_commit, redo_interrupted=False
     if not result["gates"]["passed"] and not name.endswith("-ungated"):
         raise RuntimeError("trial did not pass its gates; name the read '<name>-ungated' to record an exploratory read")
     temperature = result.get("temperature", 1.0)
-    predictor = LocalPredictor(str(trial / "checkpoint"), "cuda")
+    predictor = LocalPredictor(str(trial / "checkpoint"), "cuda", LoadOptions(temperature=1.0))   # raw logits; the trial's fitted temperature is applied by evaluate_records below
     summary = summary or {"trial": trial_path, "trial_result_sha256": digest(trial / "result.json"), "temperature": temperature, "git_commit": git_commit, "suites": {}}
     try:
         for label, suite in suites.items():

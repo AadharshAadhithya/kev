@@ -279,13 +279,13 @@ def test_anchor_trial_validation():
 
 def test_merged_load_matches_unmerged_exactly_in_fp32():
     import torch
-    from kev.evaluate import load
+    from kev.checkpoint import LoadOptions, load
     from kev.data import materialize
     from kev.suite import load_split
     run = "runs/smoke-hl/00-trial-0/checkpoint"
     if not __import__("os").path.exists(f"{run}/head.pt"): pytest.skip("smoke checkpoint not present")
     recs = [materialize(r) for r in load_split("evals/smoke-v1", "development")[:3]]
-    tok, a = load(run, "cpu", merge=False); _, b = load(run, "cpu", merge=True)
+    tok, a = load(run, "cpu", LoadOptions(merge=False)); _, b = load(run, "cpu", LoadOptions(merge=True))
     with torch.no_grad():
         for r in recs:
             pa, pb = torch.cat(a.probs(a.encode(tok, r))), torch.cat(b.probs(b.encode(tok, r)))
@@ -294,7 +294,7 @@ def test_merged_load_matches_unmerged_exactly_in_fp32():
 
 def test_prefix_cache_matches_full_pass():
     import torch
-    from kev.evaluate import load
+    from kev.checkpoint import LoadOptions, load
     from kev.data import materialize
     from kev.suite import load_split
     run = "runs/smoke-hl/00-trial-0/checkpoint"
@@ -316,7 +316,7 @@ def test_prefix_cache_matches_full_pass():
 
 def test_shape_bucket_padding_is_exact_in_fp32():
     import torch
-    from kev.evaluate import load
+    from kev.checkpoint import LoadOptions, load
     from kev.data import materialize
     from kev.suite import load_split
     run = "runs/smoke-hl/00-trial-0/checkpoint"

@@ -2,15 +2,15 @@
 
 Run: uv run --extra serve python -m kev.serve --run runs/kev --port 8008
 """
-import argparse, json, os, random, re, threading, time
+import argparse, json, os, random, threading, time
+from dataclasses import replace
 import torch
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from .api import SystemOneRequest, to_record, to_answers, output_tokens, with_date_facts
+from .checkpoint import Checkpoint, LoadOptions, is_hub_id
 from .data import DISTRACTORS, NONE
-from .evaluate import load
-from .model import encode
 
 # inference limits (training used 384/640); per-branch cap mirrors Jev's ~32k, bounded by the base model window
 INFER_MAX_STATE, INFER_MAX_BRANCH = 8192, 8192
@@ -180,18 +180,16 @@ def main():
     ap.add_argument("--fallback", default="runs/smoke")
     ap.add_argument("--port", type=int, default=8008)
     a = ap.parse_args()
-    from .evaluate import resolve_run
-    is_hub_id = re.fullmatch(r"[\w.-]+/[\w.-]+", a.run) and not os.path.isdir(a.run)
-    run = a.run if is_hub_id or os.path.exists(f"{a.run}/head.pt") else a.fallback
+    run = a.run if is_hub_id(a.run) or os.path.exists(f"{a.run}/head.pt") else a.fallback
     if run != a.run: print(f"{a.run} not found, falling back to {run}")
-    label = run                       # what /v1/models reports: the Hub id or run path as given, not the resolved cache path
-    run = resolve_run(run)
     dev = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
-    meta = torch.load(f"{run}/head.pt", map_location="cpu")
-    if dev == "mps" and not os.environ.get("KEV_ATTN"): os.environ["KEV_ATTN"] = "sdpa"   # serving default on Apple GPUs (parity measured)
-    tok, model = load(run, dev)
-    STATE.update(run=label, tok=tok, model=model, dev=dev, base=meta["base"], lora=meta["lora"])
-    print(f"serving {label} ({run}) on {dev} :{a.port}")
+    opts = LoadOptions.from_env()
+    if dev == "mps" and opts.attn is None: opts = replace(opts, attn="sdpa")   # serving default on Apple GPUs (parity measured)
+    ck = Checkpoint(run)
+    tok, model = ck.load(dev, opts)
+    # /v1/models reports the Hub id or run path as given, not the resolved cache path
+    STATE.update(run=ck.requested, tok=tok, model=model, dev=dev, base=ck.meta.base, lora=ck.meta.lora)
+    print(f"serving {ck.requested} ({ck.path}) on {dev} :{a.port}")
     import uvicorn
     uvicorn.run(app, host="127.0.0.1", port=a.port)
 

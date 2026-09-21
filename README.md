@@ -125,13 +125,20 @@ Start with Kev-4B. Use Kev-9B when accuracy and calibration matter more than mem
 | Model | Base | Accuracy: Trained Sources | Accuracy: New Sources | Brier: New Sources | Model Card |
 |---|---|---|---|---|---|
 | [Kev-0.8B](https://huggingface.co/jaredpalmer/kev-0.8b) | Qwen3.5-0.8B-Base | 0.829 / 0.827 | 0.643 / 0.668 | 0.513 / 0.473 | [Details](docs/model-cards/kev-0.8b.md) |
-| [Kev-4B](https://huggingface.co/jaredpalmer/kev-4b) | Qwen3.5-4B-Base | 0.877 / 0.870 | 0.794 / 0.832 | 0.316 / 0.266 | [Details](docs/model-cards/kev-4b.md) |
-| [Kev-9B](https://huggingface.co/jaredpalmer/kev-9b) | Qwen3.5-9B-Base | 0.876 / 0.873 | **0.812 / 0.837** | **0.291 / 0.243** | [Details](docs/model-cards/kev-9b.md) |
+| [Kev-4B](https://huggingface.co/jaredpalmer/kev-4b) | Qwen3.5-4B-Base | 0.872 / 0.871 | 0.797 / 0.837 | 0.299 / 0.255 | [Details](docs/model-cards/kev-4b.md) |
+| [Kev-9B](https://huggingface.co/jaredpalmer/kev-9b) | Qwen3.5-9B-Base | 0.872 / 0.874 | **0.822 / 0.852** | **0.286 / 0.237** | [Details](docs/model-cards/kev-9b.md) |
 | Jev | Hosted | 0.845 / – | 0.857 / – | 0.211 / – | – |
 
 Each cell is **development / test**. "Trained sources" means held-out examples from the datasets used to train Kev. "New sources" means datasets and policy rule types Kev wasn't trained on. Every model was evaluated on the same development sets (`decision-v7`, `transfer-v4`) and the same test sets, which were read once per released checkpoint, after model selection. Lower Brier is better.
 
-Kev-9B trails Jev by about 4.5 points on the new-source development set. We don't know which datasets Jev was trained on, so this isn't a controlled comparison of the two architectures.
+Kev-9B trails Jev by 3.5 points on the new-source development set (0.822 vs 0.857) and scores 0.852 on the test set, which Jev hasn't been run on. We don't know which datasets Jev was trained on, so this isn't a controlled comparison of the two architectures.
+
+Kev-4B and Kev-9B were updated on 2026-09-21 with a short second training pass on generated examples: policy cases with explicit day counts, and cases whose deciding evidence was removed, trained toward a uniform answer. On the test set this moved Kev-9B from 0.837 to 0.852 (95% CI +0.8 to +2.9 points) and Kev-4B from 0.832 to 0.837. The previous weights are at revision `v7-base`. Details and costs are in the model cards and [PLAN.md](PLAN.md).
+
+Two optional settings change the probabilities without changing any answer:
+
+- `KEV_TEMPERATURE=2.0` scales the probabilities by a single temperature fitted on the in-distribution development set. On new sources it cuts Kev-9B's calibration error from 0.106 to 0.050 and its confident errors (wrong answers with probability ≥ 0.9) from 8.7% to 4.4%, about Jev's 3.7%.
+- `KEV_DATE_FACTS=1` appends the number of days between any two absolute dates found in the state ("June 26, 2026 is 8 days before July 4, 2026"). Kev can't subtract dates reliably but it can use a stated day count: on the deadline policy questions Kev-9B goes from 0.80 to 0.90 (Jev 0.93). The numbers in the table above use neither setting.
 
 ![Accuracy by source for Kev and Jev](docs/kev-family.png)
 
@@ -322,8 +329,8 @@ These commands use development data. Test data requires `--allow-test`. The benc
 
 ## Limitations
 
-- Probabilities aren't well calibrated on new sources. On the new-source development set, Kev-4B assigns at least 0.9 probability to a wrong answer on 8.2% of questions (Kev-9B: 7.5%). Test it on your own data before choosing a probability threshold.
-- Fine-tuning can make the base model worse at individual tasks. Date arithmetic is the clearest case: the untrained Qwen3.5-9B base gets 0.82 on the `deadline` policy questions and Kev-9B gets 0.72, because training erodes the skill ([issue #8](https://github.com/jaredpalmer/kev/issues/8), [PLAN_Qwen35.md](PLAN_Qwen35.md)). Knowledge questions (MMLU 0.74 vs Jev 0.90) are the other large gap.
+- Raw probabilities are over-confident on new sources: Kev-9B assigns at least 0.9 probability to a wrong answer on 8.7% of questions (4.4% with `KEV_TEMPERATURE=2.0`). Test it on your own data before choosing a probability threshold.
+- Fine-tuning can make the base model worse at individual tasks. Date arithmetic is the clearest case: the untrained Qwen3.5-9B base gets 0.82 on the `deadline` policy questions and the first Kev-9B got 0.72 ([issue #8](https://github.com/jaredpalmer/kev/issues/8)). Training on examples that state the day count, plus `KEV_DATE_FACTS=1`, recovers it (0.90). Knowledge questions (MMLU 0.74 vs Jev 0.90; MMLU-Pro 0.52 vs 0.84) are the remaining large gap, and they're set by the base model: a Kev trained on the 35B-A3B mixture-of-experts base didn't move them ([PLAN.md](PLAN.md)).
 - The current models are slow on Apple Silicon (see Serving Performance) and need `transformers >= 5.17`.
 - Changing option order can change an answer. Question isolation doesn't prevent this.
 - Training uses at most 384 state tokens and 1,024 tokens for the state plus one question. Serving allows 8,192 tokens for the state plus one question; longer context wasn't covered by training.

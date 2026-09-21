@@ -55,34 +55,34 @@
    }
   },
   "kev-4b": {
-   "path": "runs/q35-4b-s23/00-trial-0/result.json",
-   "transfer_acc": 0.7942073170731707,
-   "transfer_brier": 0.3159265371065754,
+   "path": "runs/night2-4b-du/00-trial-0/result.json",
+   "transfer_acc": 0.7972560975609756,
+   "transfer_brier": 0.29894443692978717,
    "tasks": {
     "composition_held_and_or": 0.90625,
     "composition_held_conditional": 1.0,
     "composition_held_or_not": 0.875,
     "contrastive_authorization": 1.0,
-    "contrastive_deadline": 0.55,
-    "emotion": 0.5375,
+    "contrastive_deadline": 0.6,
+    "emotion": 0.5625,
     "mmlu": 0.7,
     "paws": 0.7375,
-    "qnli": 0.925,
-    "sciq": 0.9875,
+    "qnli": 0.9125,
+    "sciq": 0.975,
     "tweet_offensive": 0.7375
    }
   },
   "kev-9b": {
-   "path": "runs/q35-9b/01-trial-1/result.json",
-   "transfer_acc": 0.8125,
-   "transfer_brier": 0.2906168410765693,
+   "path": "runs/night2-9b-du/00-trial-0/result.json",
+   "transfer_acc": 0.8216463414634146,
+   "transfer_brier": 0.28559177791910795,
    "tasks": {
-    "composition_held_and_or": 0.84375,
+    "composition_held_and_or": 0.90625,
     "composition_held_conditional": 0.90625,
     "composition_held_or_not": 0.875,
     "contrastive_authorization": 1.0,
-    "contrastive_deadline": 0.725,
-    "emotion": 0.5875,
+    "contrastive_deadline": 0.8,
+    "emotion": 0.6,
     "mmlu": 0.7375,
     "paws": 0.7625,
     "qnli": 0.925,
@@ -216,6 +216,22 @@
     0.812
    ],
    "q35-9b"
+  ],
+  [
+   4.0,
+   "+ dates/unknowable delta",
+   [
+    0.797
+   ],
+   "night2-4b-du"
+  ],
+  [
+   9.7,
+   "+ dates/unknowable delta",
+   [
+    0.822
+   ],
+   "night2-9b-du"
   ]
  ]
 }

@@ -19,7 +19,8 @@ app = modal.App("kev-probe35")
 image = (
     modal.Image.debian_slim(python_version="3.12")
     .uv_pip_install("torch==2.8.0", "transformers>=5.17,<6", "peft>=0.18", "accelerate", "datasets", "numpy", "scikit-learn",
-                    "huggingface_hub", "pydantic", "flash-linear-attention", "triton")
+                    "huggingface_hub", "pydantic", "flash-linear-attention")
+    .uv_pip_install("triton>=3.7.1")     # second step: torch 2.8 pins triton 3.4 in one resolve; fla refuses its gated chunk backward on Hopper below 3.7.1 (fla#640)
     .add_local_dir(ROOT / "kev", "/root/kev")
     .add_local_dir(ROOT / "evals", "/root/evals")
     .add_local_dir(ROOT / "scripts", "/root/scripts")
@@ -109,7 +110,13 @@ def smoke_train(base, revision):
         logits = m.forward_batch(encs)
     loss = sum(torch.nn.functional.cross_entropy(z.float()[None], torch.tensor([q["label"]], device="cuda")) for zs, r in zip(logits, recs) for z, q in zip(zs, r["questions"]))
     loss.backward(); torch.cuda.synchronize()
-    return {"base": base, "hybrid": m.hybrid, "load_seconds": round(t1 - t0), "step_seconds": round(time.time() - t1, 1), "trainable_params_M": round(sum(k for _, k in trainable) / 1e6, 1),
+    steady = []
+    for k in range(3):                       # steady-state step time (the first step pays Triton compilation)
+        m.lm.zero_grad(set_to_none=True); m.head.zero_grad(set_to_none=True); ts = time.time()
+        with torch.autocast("cuda", dtype=torch.bfloat16): lg = m.forward_batch(encs)
+        l2 = sum(torch.nn.functional.cross_entropy(z.float()[None], torch.tensor([q["label"]], device="cuda")) for zs, r in zip(lg, recs) for z, q in zip(zs, r["questions"]))
+        l2.backward(); torch.cuda.synchronize(); steady.append(round(time.time() - ts, 2))
+    return {"steady_step_seconds_2_records": steady, "questions_per_record": [len(r["questions"]) for r in recs],"base": base, "hybrid": m.hybrid, "load_seconds": round(t1 - t0), "step_seconds": round(time.time() - t1, 1), "trainable_params_M": round(sum(k for _, k in trainable) / 1e6, 1),
             "lora_module_names": hit, "routed_expert_lora_params": expert_hits, "peak_gb": round(torch.cuda.max_memory_allocated() / 1e9, 1), "weights_gb": round(sum(p.numel() * p.element_size() for p in m.lm.parameters()) / 1e9, 1), "loss": round(loss.item(), 3)}
 
 

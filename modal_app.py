@@ -213,7 +213,7 @@ def launch_detached(suite, plan_path, name, gpu, existing=(), transfer=None, bud
     if (ROOT / "runs" / name).exists(): raise FileExistsError("choose a new study name; existing results are immutable")
     if not 60 <= timeout <= 14400 or not 0 < budget <= 250: raise ValueError("timeout must be 60..14400 seconds and study budget <= $250")
     trials = load_plan(ROOT / suite, ROOT / plan_path) if plan_path else []
-    rates = {"H100": 3.95, "T4": .59}
+    rates = {"H100": 3.95, "H200": 4.54, "B200": 6.25, "T4": .59}
     upper = (rates[gpu] + 2 * .04730 + 48 * .008) * timeout / 3600 * (len(trials) + len(existing))
     if upper > budget: raise ValueError(f"timeout-based compute bound ${upper:.2f} exceeds budget ${budget:.2f}")
     commit, sources = local_git_commit(), local_source_hashes()
@@ -262,7 +262,7 @@ def launch(suite, plan_path, name, gpu, existing=(), transfer=None, budget=20.0,
     if not 60 <= timeout <= 14400 or not 0 < budget <= 250:   # overnight authorization: $500 total, tracked in PLAN.md
         raise ValueError("timeout must be 60..14400 seconds and study budget <= $250")
     trials = load_plan(ROOT / suite, ROOT / plan_path) if plan_path else []
-    rates = {"H100": 3.95, "T4": .59}
+    rates = {"H100": 3.95, "H200": 4.54, "B200": 6.25, "T4": .59}
     if gpu not in rates:
         raise ValueError("no verified cost bound for this GPU")
     upper = (rates[gpu] + 2 * .04730 + 48 * .008) * timeout / 3600 * (len(trials) + len(existing))

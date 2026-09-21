@@ -68,7 +68,8 @@ def bench(run, suite, name):
     out = Path("/runs/bench") / name
     if out.exists(): raise FileExistsError(f"bench {name} exists")
     try:
-        subprocess.run([sys.executable, "-m", "kev.benchmark", "--run", run, "--suite", f"/root/{suite}", "--out", str(out), "--device", "cuda"], check=True, cwd="/root", env={**os.environ, "PYTHONPATH": "/root"})
+        source = ["--data", f"/root/{suite}"] if suite.endswith(".jsonl") else ["--suite", f"/root/{suite}"]     # a .jsonl is a --data file (kev.data.load_records)
+        subprocess.run([sys.executable, "-m", "kev.benchmark", "--run", run, *source, "--out", str(out), "--device", "cuda"], check=True, cwd="/root", env={**os.environ, "PYTHONPATH": "/root"})
     finally:
         runs_volume.commit(); hf_cache.commit()
     return json.loads((out / "report.json").read_text())["clean"]

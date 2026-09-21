@@ -73,3 +73,11 @@ COMBINED DELTAS (22:00)
 - Rules: dates PASS, assertion PASS (4B via all), unknowable PARTIAL (confidence yes, coverage no). Coverage criterion fails everywhere -> by the letter, no replacement of released checkpoints tonight. Proposal for Jared: publish the 'all' deltas as experimental Hub revisions (tag night2), keep released main; decide after the 3.6 result.
 - Locked reads launched for both 'all' deltas (ungated names) for the morning decision.
 - Open question: why does unknowable training lower cov@5% on v4 (no unknowable items there)? Hypothesis: it flattens confidence on hard-but-knowable items too -> fewer items above the acceptance threshold at 5% error. Check: acc-vs-coverage curve.
+- Coverage answer: the 'all' delta made models slightly MORE confident on knowable items (share>=.9 .75->.78) with a few new p=1.00 errors on tweet_offensive/paws (noul tasks) -> those sit at the top of the ranking and cut cov@5%. Attributable to the assertion data (statement-form noul teaches commitment; assertion-only also raised unknowable overconfidence). Launched dates+unknowable deltas (night2-9b-du, night2-4b-du) as the cleaner candidate.
+
+LOCKED READS OF 'all' DELTAS (22:05)
+- 9B+all: OOD .837 -> .851 (+1.8 [+0.8, +2.9], CI excludes 0!), deadline raw .72 -> .90, pairs .75 -> .83, in-dist .873 -> .872, brier same, cov@5% .66 -> .65, cerr .055 -> .070. 0.851 is 0.6 pp under Jev's dev number.
+- 4B+all: neutral everywhere (-0.2 [-0.9, +0.6]).
+=> 9B+all is a real improvement on the confirmatory read; the coverage cost seen on dev (.53->.46) does not appear on the test (.66->.65). Candidate for promotion as Kev-9B main revision (with the du variant as the alternative if it keeps deadline and avoids the assertion-driven confident errors).
+
+#5 DENSE ABLATION (22:10): 4B seed 1, LoRA on attn+MLP only (DeltaNet frozen, 22.5M vs 33.8M params): dev .877 (same), transfer .800 -> .780 (-2.2 [-5.3, +0.9]), deadline .53 -> .53 (base .68). Freezing the recurrent layers does NOT preserve date arithmetic; erosion goes through attention/MLP adaptation too. Not a candidate. Open question stays open (layer-wise ablation is the next probe, not tonight).

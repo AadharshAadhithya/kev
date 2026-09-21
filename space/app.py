@@ -264,8 +264,8 @@ CSS = """
 #controls .form { gap: 0; }
 #controls-top { align-items: end; gap: 16px; }
 #controls-options { align-items: center; gap: 8px 28px; flex-wrap: wrap; }
-#controls-options > .block { flex: 0 0 auto !important; width: auto !important; min-width: 0 !important; }
-#controls-options > .block:last-child { width: 140px !important; }
+#controls-options > .block { flex: 0 0 auto !important; width: auto !important; min-width: 0 !important; margin: 0 !important; }
+#controls-options > .block:last-child { width: 140px !important; margin-left: auto !important; }   /* order count sits under the button */
 #controls-options label { margin: 0; }
 #decide-btn { min-height: 44px; }
 #examples .gallery { gap: 8px; }

@@ -1,6 +1,6 @@
 # Research plan
 
-This file is the living plan: where Kev stands, what runs next and the criteria decided before the runs, and open questions. Completed plans stay as records ([`PLAN_Qwen35.md`](PLAN_Qwen35.md), the Qwen3.5 port, done 2026-09-20). Everything older is kept below under **History**, dated.
+This file is the living plan: where Kev stands, what runs next and the criteria decided before the runs, and open questions. Completed plans stay as records ([`PLAN_Qwen35.md`](PLAN_Qwen35.md), the Qwen3.5 port, done 2026-09-20). The next proposal is [`PLAN_27b.md`](PLAN_27b.md) (Qwen3.8-27B, question-side LoRA, long documents; written 2026-09-21 after reviewing Solomon). Everything older is kept below under **History**, dated.
 
 ## Where we stand (2026-09-20, evening)
 

@@ -70,6 +70,8 @@ def load(run, dev, dtype=None, merge=True, attn=None):
     if merge: m.lm = m.lm.merge_and_unload()               # in fp32: exact
     if dtype != torch.float32: m.lm = m.lm.to(dtype)
     m.head.load_state_dict(meta["head"]); m.eval()
+    # calibration: the checkpoint's fitted temperature applies by default; KEV_TEMPERATURE overrides it (1.0 = raw logits)
+    m.head.temperature = float(os.environ["KEV_TEMPERATURE"]) if os.environ.get("KEV_TEMPERATURE") else float(meta.get("temperature", 1.0))
     return tok, m
 
 

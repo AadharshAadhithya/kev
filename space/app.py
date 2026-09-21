@@ -26,7 +26,7 @@ from presets import PRESETS  # noqa: E402
 
 MODELS = {"Kev-4B": "jaredpalmer/kev-4b", "Kev-0.8B": "jaredpalmer/kev-0.8b"}
 DEFAULT_MODEL = "Kev-4B"
-CALIBRATION_T = 2.0                      # fitted in-distribution for the Qwen3.5 family (scripts/temperature_groups.py); KEV_TEMPERATURE in kev.serve
+TEMPERATURES = {}                        # per model: the temperature fitted on its development rows, read from head.pt (scripts/calibrate_checkpoint.py)
 INFER_MAX_STATE, INFER_MAX_BRANCH = 8192, 8192   # serving limits, as in kev.serve (training used 384/1024)
 
 
@@ -43,8 +43,10 @@ def load(repo):
                       head_dim=meta.get("head_dim", 256), option_isolation=bool(meta.get("option_isolation", False)), dtype=torch.float32)
     m.lm = PeftModel.from_pretrained(m.lm, run, torch_device="cpu").merge_and_unload()   # exact in fp32; ZeroGPU fakes cuda at module scope
     m.head.load_state_dict(meta["head"]); m.eval()
+    m.head.temperature = 1.0                 # the Space applies the checkpoint's temperature itself (toggle below), so the head runs raw
+    TEMPERATURES[repo] = float(meta.get("temperature", 1.0))
     m.device = "cuda"; m.to("cuda")
-    print(f"[kev] {repo}: base={meta['base']}@{meta.get('base_revision')} hybrid={m.hybrid}", flush=True)
+    print(f"[kev] {repo}: base={meta['base']}@{meta.get('base_revision')} hybrid={m.hybrid} temperature={TEMPERATURES[repo]:.2f}", flush=True)
     return tok, m
 
 
@@ -74,8 +76,11 @@ def build_request(state_text, questions_json):
 
 
 def probs(name, req, temperature):
-    """One request through one model. Returns (probabilities per question, per-question metadata, token count, ms)."""
+    """One request through one model. Returns (probabilities per question, per-question metadata, token count, ms).
+    temperature: True = the checkpoint's fitted value, False/1.0 = raw, or a float."""
     tok, model = LOADED[name]
+    if temperature is True: temperature = TEMPERATURES.get(MODELS[name], 1.0)
+    elif temperature is False: temperature = 1.0
     rec, meta = to_record(req)
     try: enc = model.encode(tok, rec, max_state=INFER_MAX_STATE, max_branch=INFER_MAX_BRANCH)
     except ValueError as e: raise gr.Error(str(e)) from None
@@ -174,7 +179,7 @@ def decide(state_text, questions_json, model_choice=DEFAULT_MODEL, calibrated=Fa
             {"type": "noul", "instructions": str, "criteria": {"true": str, "false": str}} (criteria optional),
             {"type": "score", "instructions": str, "criteria": [level0, level1, ...]}.
         model_choice: "Kev-4B" (recommended), "Kev-0.8B", or "Both" to compare them on the same request.
-        calibrated: apply the temperature (T=2.0) fitted for the Qwen3.5 Kev family. Argmax is unchanged.
+        calibrated: apply the temperature fitted for the chosen checkpoint (stored in its head.pt; about 2.1–2.4). Argmax is unchanged.
         date_facts: append the day count between every pair of absolute dates in the state before the model reads it.
         check_stability: also re-run the first Choice question under shuffled option orders.
         n_perm: how many option orders to try when check_stability is on.
@@ -184,7 +189,7 @@ def decide(state_text, questions_json, model_choice=DEFAULT_MODEL, calibrated=Fa
     """
     req = build_request(state_text, questions_json)
     if date_facts: req = req.model_copy(update={"state": with_date_facts(req.state)})
-    T = CALIBRATION_T if calibrated else 1.0
+    T = bool(calibrated)
     names = list(MODELS) if model_choice == "Both" else [model_choice]
     responses = {name: systemone(name, req, T) for name in names}
     rendered = "".join(render_answers(name, req, r) for name, r in responses.items())
@@ -245,8 +250,9 @@ FOOTER = ("Raw probabilities are not perfectly calibrated out of domain (Kev-4B:
           "Measure on your own inputs before relying on the numbers. Example inputs are the repo's playground presets. "
           "Apache-2.0.")
 
-OPTIONS_HELP = """- **Calibrated (T = 2.0)**: one temperature fitted on the in-distribution development set for the Qwen3.5 family. Same as
-  `KEV_TEMPERATURE=2.0` in `kev.serve`. The argmax is unchanged; out-of-domain ECE on Kev-4B goes from 0.12 to 0.05.
+OPTIONS_HELP = """- **Calibrated**: one temperature per checkpoint, fitted on its in-distribution development set and stored in `head.pt`
+  (Kev-4B 2.14, Kev-0.8B 2.41). This is what `kev.serve` does by default; `KEV_TEMPERATURE=1.0` gives the raw logits. The argmax is
+  unchanged; out-of-domain ECE on Kev-4B goes from 0.12 to 0.04.
 - **date_facts**: Kev cannot subtract dates by itself. This appends the day count between every pair of absolute dates in the
   state before the model reads it (`KEV_DATE_FACTS=1`). The *Return window* example is wrong without it and right with it.
 - **Option-order check**: re-run the first Choice question under *n* shuffled option orders and report whether the argmax flips

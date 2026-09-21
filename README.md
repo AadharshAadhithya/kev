@@ -136,10 +136,9 @@ Kev-9B trails Jev by 3.5 points on the new-source development set (0.822 vs 0.85
 
 All three models were updated on 2026-09-21 with a short second training pass on generated examples: policy cases with explicit day counts, and cases whose deciding evidence was removed, trained toward a uniform answer. On the test set this moved Kev-9B from 0.837 to 0.852 (95% CI +0.8 to +2.9 points), Kev-4B from 0.832 to 0.837, and Kev-0.8B from 0.668 to 0.684. The previous weights are at revision `v7-base`. Details and costs are in the model cards and [PLAN.md](PLAN.md).
 
-Two optional settings change the probabilities without changing any answer:
+Probabilities are calibrated by default. Each checkpoint stores a temperature (about 2.1–2.4) fitted on its in-distribution development set, and the pointer head applies it when the model is loaded. It never changes an answer: on new sources Kev-9B's calibration error goes from 0.106 to 0.042 and its confident errors (wrong answers with probability ≥ 0.9) from 8.7% to 4.0%, about Jev's 3.7%, with accuracy identical. Set `KEV_TEMPERATURE=1.0` for the raw logits. The accuracy numbers in the table are the same either way; the Brier numbers are for the raw logits.
 
-- `KEV_TEMPERATURE=2.0` scales the probabilities by a single temperature fitted on the in-distribution development set. On new sources it cuts Kev-9B's calibration error from 0.106 to 0.050 and its confident errors (wrong answers with probability ≥ 0.9) from 8.7% to 4.4%, about Jev's 3.7%.
-- `KEV_DATE_FACTS=1` appends the number of days between any two absolute dates found in the state ("June 26, 2026 is 8 days before July 4, 2026"). Kev can't subtract dates reliably but it can use a stated day count: on the deadline policy questions Kev-9B goes from 0.80 to 0.90 (Jev 0.93). The numbers in the table above use neither setting.
+One optional setting: `KEV_DATE_FACTS=1` appends the number of days between any two absolute dates found in the state ("June 26, 2026 is 8 days before July 4, 2026"). Kev can't subtract dates reliably but it can use a stated day count: on the deadline policy questions Kev-9B goes from 0.80 to 0.90 (Jev 0.93). The table above doesn't use it.
 
 ![Accuracy by source for Kev and Jev](docs/kev-family.png)
 
@@ -330,7 +329,7 @@ These commands use development data. Test data requires `--allow-test`. The benc
 
 ## Limitations
 
-- Raw probabilities are over-confident on new sources: Kev-9B assigns at least 0.9 probability to a wrong answer on 8.7% of questions (4.4% with `KEV_TEMPERATURE=2.0`). Test it on your own data before choosing a probability threshold.
+- Calibration is by a single temperature fitted in distribution. As served, Kev-9B assigns at least 0.9 probability to a wrong answer on 4.0% of new-source questions (Jev 3.7%); a fixed temperature can't reorder confidences, so the share of decisions you can automate at a 5% error budget (0.45–0.57) is still below Jev's 0.70. Test it on your own data before choosing a probability threshold.
 - Fine-tuning can make the base model worse at individual tasks. Date arithmetic is the clearest case: the untrained Qwen3.5-9B base gets 0.82 on the `deadline` policy questions and the first Kev-9B got 0.72 ([issue #8](https://github.com/jaredpalmer/kev/issues/8)). Training on examples that state the day count, plus `KEV_DATE_FACTS=1`, recovers it (0.90). Knowledge questions (MMLU 0.74 vs Jev 0.90; MMLU-Pro 0.52 vs 0.84) are the remaining large gap, and they're set by the base model: a Kev trained on the 35B-A3B mixture-of-experts base didn't move them ([PLAN.md](PLAN.md)).
 - The current models are slow on Apple Silicon (see Serving Performance) and need `transformers >= 5.17`.
 - Changing option order can change an answer. Question isolation doesn't prevent this.

@@ -59,14 +59,14 @@ Kev-9B is a **decision model**: one document (the *state*) and a set of typed qu
 
 ## Results (same frozen items for every row)
 
-| | Kev-8B (Qwen3) | Kev-9B before the delta (`v7-base`) | **Kev-9B** | Kev-9B, calibrated (T = 2.0) | Jev |
+| | Kev-8B (Qwen3) | Kev-9B before the delta (`v7-base`) | **Kev-9B, raw logits** | **Kev-9B as served (T = 2.30)** | Jev |
 |---|---|---|---|---|---|
 | in-distribution accuracy (decision-v7 dev, 1,204 records) | 0.863 | 0.876 | 0.872 | 0.872 | 0.845 |
 | out-of-domain accuracy (transfer-v4 dev, 764 records) | 0.796 | 0.812 | **0.822** | 0.822 | 0.857 |
-| out-of-domain Brier | 0.337 | 0.291 | 0.286 | **0.265** | 0.211 |
-| out-of-domain ECE | 0.121 | 0.105 | 0.106 | **0.050** | 0.049 |
-| confident errors out of domain (p ≥ 0.9 and wrong) | 9.9% | 7.5% | 8.7% | **4.4%** | 3.7% |
-| coverage at ≤ 5% error (share of decisions automatable) | 0.45 | 0.53 | 0.47 | 0.47 | 0.70 |
+| out-of-domain Brier | 0.337 | 0.291 | 0.286 | **0.264** | 0.211 |
+| out-of-domain ECE | 0.121 | 0.105 | 0.106 | **0.042** | 0.049 |
+| confident errors out of domain (p ≥ 0.9 and wrong) | 9.9% | 7.5% | 8.7% | **4.0%** | 3.7% |
+| coverage at ≤ 5% error (share of decisions automatable) | 0.45 | 0.53 | 0.47 | 0.45 | 0.70 |
 | held-out policy structures, both siblings correct | 0.69 | 0.80 | **0.83** | 0.83 | 0.86 |
 | unknowable items answered at ≥ 0.9 (lower is better; transfer-v9) | 0.26 | 0.05 | **0.00** | 0.00 | 0.09 |
 | **locked test**, out-of-domain accuracy / Brier | 0.780 / 0.327 | 0.837 / 0.243 | **0.852 / 0.237** | – | – |
@@ -74,7 +74,7 @@ Kev-9B is a **decision model**: one document (the *state*) and a set of typed qu
 
 Per-source out-of-domain accuracy (Kev-9B / Jev): QNLI 0.93 / 0.93, SciQ 0.96 / 0.99, TweetEval-offensive 0.78 / 0.81, PAWS 0.76 / 0.79, MMLU 0.74 / 0.90, Emotion 0.60 / 0.59, deadline (3-level date arithmetic) 0.80 / 0.93 — **0.90 with the `date_facts` preprocessor** (below), (A or B) and C 0.91 / 0.91, (A and B) or not C 0.88 / 0.97, if A then not B else C 0.91 / 0.78.
 
-**Calibrated row.** A single temperature T = 2.0 fitted on the in-distribution development rows and applied out of domain (`scripts/temperature_groups.py`). It leaves accuracy and the confidence ranking unchanged and brings ECE and confident errors to Jev's level; it is applied only when you ask for it (`KEV_TEMPERATURE=2.0` in `kev.serve`). Per-(type, option-count) temperatures were tested and are worse out of domain.
+**Calibration is built in.** `head.pt` carries a temperature (T = 2.30) fitted on this checkpoint's in-distribution development rows by minimising negative log-likelihood ([`scripts/calibrate_checkpoint.py`](https://github.com/jaredpalmer/kev/blob/main/scripts/calibrate_checkpoint.py)); the pointer head divides its logits by it at inference. Every loader — `kev.serve`, `kev.benchmark`, the Space, anyone's harness — gets the calibrated probabilities by default. It never changes an answer: the argmax is identical, so accuracy is the same in both columns; confidences are re-ordered only slightly across questions with different option counts, which is why coverage moves by a point or two. `KEV_TEMPERATURE=1.0` restores the raw logits; the raw column is what the training produced. Per-(type, option-count) temperatures were tested and are worse out of domain. The fit uses no out-of-domain or test data.
 
 **`date_facts` preprocessor.** Kev, like every Kev before it, cannot subtract dates reliably (the untrained base can; LoRA training erodes it). It can use a stated day count. `KEV_DATE_FACTS=1` appends one sentence per pair of absolute dates found in the state ("June 26, 2026 is 8 days before July 4, 2026"); this checkpoint was trained on such renderings, so with it `deadline` goes from 0.80 to 0.90 and overall out-of-domain accuracy from 0.822 to 0.828. It is preprocessing, reported separately, never folded into the model's own numbers.
 
@@ -97,7 +97,7 @@ Per-source out-of-domain accuracy (Kev-9B / Jev): QNLI 0.93 / 0.93, SciQ 0.96 / 
 - Requires `transformers >= 5.17` (the `qwen3_5` architecture) and `peft >= 0.21`.
 - Knowledge (MMLU 0.74 vs Jev 0.90; MMLU-Pro 0.515 vs 0.840) is the remaining gap and is set by the base: the untrained Qwen3.5-9B scores the same, and a Kev on the 35B-A3B MoE did not move MMLU-Pro either (`PLAN.md`, night-2 results).
 - Date arithmetic without the preprocessor: `deadline` 0.80 (Jev 0.93). With `KEV_DATE_FACTS=1`: 0.90.
-- Raw probabilities are over-confident out of domain (ECE 0.106); `KEV_TEMPERATURE=2.0` fixes most of it (ECE 0.050) without changing any answer. Coverage at a 5% error budget is 0.47–0.62 against Jev's 0.70.
+- The raw logits are over-confident out of domain; the built-in temperature (T = 2.30) fixes most of it without changing any answer. `KEV_TEMPERATURE=1.0` gives the raw values. Coverage at a 5% error budget is 0.47–0.62 against Jev's 0.70.
 - 9B bf16 needs ~19 GB of GPU memory for serving; training took 91 min on one H100 (peak 39.5 GB).
 
 ## Training
@@ -112,7 +112,7 @@ Development partitions select models; the locked test partition is read at most 
 
 ```bash
 uv run --extra serve python -m kev.serve --run jaredpalmer/kev-9b --port 8008      # KEV_DTYPE=bf16 on a 32 GB Mac; slow on MPS, see limits
-KEV_TEMPERATURE=2.0 KEV_DATE_FACTS=1 uv run --extra serve python -m kev.serve --run jaredpalmer/kev-9b --port 8008   # calibrated probabilities + date preprocessing
+KEV_DATE_FACTS=1 uv run --extra serve python -m kev.serve --run jaredpalmer/kev-9b --port 8008   # + date preprocessing; KEV_TEMPERATURE=1.0 for raw logits
 ```
 
 Any TypeSafe-compatible client works: `TypeSafeClient(api_key="local", base_url="http://127.0.0.1:8008", model="kev-latest")`.

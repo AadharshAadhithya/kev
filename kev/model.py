@@ -124,9 +124,14 @@ class PointerHead(nn.Module):
         super().__init__()
         self.q, self.k = nn.Linear(d, dp), nn.Linear(d, dp)
         self.scale = 1 / math.sqrt(dp)
+        # calibration: logits are divided by this at inference (eval mode) only. 1.0 = raw. A checkpoint carries the value fitted on
+        # its in-distribution development rows (scripts/calibrate_checkpoint.py -> head.pt["temperature"]); training always sees T=1 so
+        # a fitted value stays meaningful, and the argmax is unchanged by construction.
+        self.temperature = 1.0
 
     def forward(self, h_decide, h_opts):  # [d], [K,d] -> logits [K]
-        return (self.k(h_opts) @ self.q(h_decide)) * self.scale
+        z = (self.k(h_opts) @ self.q(h_decide)) * self.scale
+        return z if self.training or self.temperature == 1.0 else z / self.temperature
 
 
 class DecisionModel(nn.Module):

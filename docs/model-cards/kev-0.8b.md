@@ -64,7 +64,7 @@ Kev-0.8B is a **decision model**: one document (the *state*) and a set of typed 
 | held-out policy structures, both siblings correct | 0.08 | **0.42** | 0.78 | 0.83 | 0.86 |
 | option-order flip rate | 0.07 | 0.08 | 0.08 | 0.03 | 0.00 |
 | none-option present, accuracy | 0.80 | 0.83 | 0.92 | 0.90 | – |
-| calibrated (T = 2.2, fitted in-distribution): Brier / ECE / confident errors | – | 0.433 / 0.062 / 0.8% | | | |
+| as served (built-in T = 2.41): Brier / ECE / confident errors | – | 0.430 / 0.054 / 0.3% | | | |
 
 Per-source out-of-domain accuracy (Kev-0.8B / Jev): QNLI 0.85 / 0.93, SciQ 0.91 / 0.99, TweetEval-offensive 0.68 / 0.81, PAWS 0.55 / 0.79, MMLU 0.42 / 0.90, Emotion 0.54 / 0.59, authorization 0.97 / 1.00, deadline (3-level date arithmetic) 0.38 / 0.93, (A or B) and C 0.66 / 0.91, (A and B) or not C 0.56 / 0.97, if A then not B else C 0.59 / 0.78.
 
@@ -78,7 +78,7 @@ Paired against Kev-0.6B on the same items (record-clustered bootstrap), before t
 - **Slow on a Mac for its size.** The DeltaNet kernels have no MPS implementation; a five-question request takes ~0.33 s in bf16 on an M5 (Kev-0.6B: 0.12 s). On CUDA with `flash-linear-attention` it is fast.
 - Requires `transformers >= 5.17` and `peft >= 0.21`.
 - Ordinal hedging on date arithmetic (`deadline` 0.38): collapses to the middle level. `KEV_DATE_FACTS=1` (day counts appended to the state) helps the larger models more than this one.
-- Confident-error rate out of domain is 9.9% raw; `KEV_TEMPERATURE=2.2` brings it to 0.8% and ECE from 0.179 to 0.062 without changing any answer. Probabilities are usable in-domain; treat them as advisory elsewhere.
+- Confident-error rate out of domain is 9.9% for the raw logits; the built-in temperature (T = 2.41, fitted on the in-distribution development rows and stored in `head.pt`) brings it to 0.3% and ECE from 0.179 to 0.054 without changing any answer. `KEV_TEMPERATURE=1.0` gives the raw values. Probabilities are usable in-domain; treat them as advisory elsewhere.
 
 ## Training
 

@@ -48,7 +48,7 @@ Spend tonight ≈ $105 (probes $14, deltas 12 × ~$1.5, dense $5, benches ~$15, 
 ### Decisions taken (2026-09-21, morning, signed off)
 
 1. **Promoted the dates + unknowable deltas** to the main Hub revisions of `kev-9b`, `kev-4b` and `kev-0.8b` (the 0.8B delta ran in the morning: locked test 0.668 → 0.684, +2.2 pp [−0.8, +5.5], Brier 0.473 → 0.460). Pre-delta weights at tag `v7-base`; release tarballs `*-v7-base.tar.gz`. Cards state the costs (coverage@5 % −4 pp at 9B, scienthoon ECE +3 pp, MMLU-Pro −3 pp at 9B).
-2. **Calibrated row** (single T = 2.0; 2.2 for the 0.8B) in cards and README; `KEV_TEMPERATURE` documented.
+2. **Calibration built into the checkpoints** (2026-09-21, later the same day): `head.pt` carries a temperature fitted on the trial's development rows (9B 2.30, 4B 2.14, 0.8B 2.41) and the pointer head applies it in eval mode, so every loader serves calibrated probabilities by default; `KEV_TEMPERATURE=1.0` gives raw logits. Out-of-domain ECE 0.106 → 0.042 (9B), confident errors 8.7 % → 4.0 % (Jev 3.7 %); accuracy unchanged. Coverage at ≤ 5 % error is not moved by a temperature — that needs training-side calibration (`PLAN_27b.md` §5).
 3. **`date_facts` preprocessor** shipped opt-in (`KEV_DATE_FACTS=1`), documented as preprocessing with separate numbers.
 4. The Qwen3.6-35B-A3B checkpoint stays a research artifact.
 

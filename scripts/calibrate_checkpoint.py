@@ -1,0 +1,42 @@
+"""Fit one temperature on a checkpoint's in-distribution development rows and write it into head.pt, so every loader
+(kev.serve, kev.benchmark, the Space, third-party harnesses) serves calibrated probabilities by default.
+
+    uv run python scripts/calibrate_checkpoint.py --run runs/night2-9b-du/00-trial-0/checkpoint --rows runs/night2-9b-du/00-trial-0/development/rows.json [--transfer runs/.../transfer/rows.json]
+
+Fitting on the development partition only (never on transfer or test); the optional --transfer rows are reported, not fitted.
+Argmax never changes; accuracy is identical before and after. KEV_TEMPERATURE=1.0 restores raw logits at load time.
+"""
+import argparse, json, sys
+from pathlib import Path
+
+import numpy as np
+import torch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from kev.benchmark import metrics  # noqa: E402
+
+GRID = np.exp(np.linspace(np.log(0.25), np.log(4), 121))
+
+
+def fit(rows):
+    return float(GRID[int(np.argmin([metrics(rows, float(t))["nll"] for t in GRID]))])
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--run", required=True); ap.add_argument("--rows", required=True, help="in-distribution development rows.json (fit set)")
+    ap.add_argument("--transfer", help="out-of-domain rows.json, reported before/after (never fitted)")
+    ap.add_argument("--temperature", type=float, help="skip fitting and write this value")
+    a = ap.parse_args()
+    dev = [r for r in json.load(open(a.rows)) if r["variant"] == "clean"]
+    T = a.temperature or fit(dev)
+    for name, rows in (("development", dev), *((("transfer", [r for r in json.load(open(a.transfer)) if r["variant"] == "clean"]),) if a.transfer else ())):
+        raw, cal = metrics(rows), metrics(rows, T)
+        print(f"{name:12} T={T:.2f}  acc {raw['acc']:.3f} -> {cal['acc']:.3f} | brier {raw['brier']:.3f} -> {cal['brier']:.3f} | ece {raw['ece']:.3f} -> {cal['ece']:.3f} | conf-err {raw['confident_error_rate']:.3f} -> {cal['confident_error_rate']:.3f} | cov@5% {raw['coverage_at_5pct_error']:.2f} -> {cal['coverage_at_5pct_error']:.2f}")
+    path = Path(a.run) / "head.pt"; meta = torch.load(path, map_location="cpu")
+    meta["temperature"] = T; meta["temperature_fit"] = {"rows": a.rows, "n": len(dev), "method": "min NLL over a 121-point log grid 0.25..4"}
+    torch.save(meta, path); print(f"wrote temperature {T:.2f} to {path}")
+
+
+if __name__ == "__main__":
+    main()

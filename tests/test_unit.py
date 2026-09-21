@@ -134,3 +134,14 @@ def test_soft_targets_and_date_facts():
     assert abs(question_loss(z, rec["questions"][0], "cpu", 0.0).item() - (-(torch.log_softmax(z, -1) / 3).sum()).item()) < 1e-6
     assert date_facts("Due July 4, 2026. Received June 26, 2026. Shipped 2026-07-01.") == "June 26, 2026 is 8 days before July 4, 2026. 2026-07-01 is 3 days before July 4, 2026. 2026-07-01 is 5 days after June 26, 2026."
     assert with_date_facts({"case": "one date: May 1, 2026"}) == {"case": "one date: May 1, 2026"}
+
+
+def test_head_temperature_scales_logits_at_eval_only():
+    """The pointer head divides logits by its temperature in eval mode only; argmax is unchanged; training sees T=1."""
+    import torch
+    from kev.model import PointerHead
+    torch.manual_seed(0); head = PointerHead(16, dp=8); hd, ho = torch.randn(16), torch.randn(3, 16)
+    head.train(); raw_train = head(hd, ho)
+    head.eval(); raw = head(hd, ho); head.temperature = 2.0; cal = head(hd, ho)
+    assert torch.allclose(raw_train, raw) and torch.allclose(cal, raw / 2.0) and cal.argmax() == raw.argmax()
+    head.train(); assert torch.allclose(head(hd, ho), raw), "training must not be tempered"

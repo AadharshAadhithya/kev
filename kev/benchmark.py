@@ -332,6 +332,7 @@ def summarize(rows, temperature=1.0, heldout_sources=("mnli", "sst5")):
                               "aurc": "right-step integral over whole confidence groups",
                               "confident_error_rate": "high-confidence errors divided by all questions",
                               "error_rate_at_0_9": "errors divided by questions accepted at p_max >= 0.9",
+                              "nll": "exact from logits when recorded; otherwise from floored probabilities",
                               "nll_floor": EPSILON, "renormalize_returned_probabilities": True,
                               "raw_sums_outside_1e_5": sum(abs(r["raw_probability_sum"] - 1) > 1e-5 for r in rows),
                               "returned_zeros": sum(r["zero_count"] for r in rows)}}

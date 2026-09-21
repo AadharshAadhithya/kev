@@ -209,7 +209,7 @@ def execute_trial(config, suite, output, expected_sources, device, existing=None
                 if line.startswith(("ep", "saved", "device", "ablation")) or "Error" in line: print(line.rstrip(), flush=True)
         if proc.returncode:
             raise subprocess.CalledProcessError(proc.returncode, args)
-    if config.get("weights_dtype") == "bf16":
+    if (config or {}).get("weights_dtype") == "bf16":   # config is None on --resume
         os.environ["KEV_DTYPE"] = "bf16"      # a backbone trained in bf16 weights is evaluated the same way (fp32 would not fit and is not what was trained)
     predictor = LocalPredictor(run, device, temperature=1.0)
     provenance["measured_checkpoint"] = {"requested": run, "resolved": str(predictor.run),

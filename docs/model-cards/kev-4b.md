@@ -54,6 +54,7 @@ Kev-4B is a **decision model**: one document (the *state*) and a set of typed qu
 **The recommended Kev.** The best accuracy per byte: out of domain 0.797 on the development partition and **0.837 on the locked test**, Brier 0.255 on the test, held-out rule pairs 0.77–0.78. This checkpoint is the `decision-v7` recipe (trial `q35-4b-s23/00-trial-0`, seed 2, selected on development accuracy) followed by a 9-minute **delta fine-tune** (`--init_from`, lr 2e-5, one epoch) on 1,425 additional records — date-bearing policy cases rendered with explicit day counts, and evidence-free cases with uniform targets — mixed with 2,000 replayed training records. Against the pre-delta checkpoint on the locked test: +1.0 pp [−0.1, +2.1], Brier 0.266 → 0.255, `deadline` 0.65 → 0.75.
 
 - Hub: `jaredpalmer/kev-4b` (this repo; trial `night2-4b-du/00-trial-0`). The pre-delta checkpoint is at revision `v7-base`; the Qwen3 generation at `qwen3` ([its card](kev-4b-qwen3.md)).
+- Demo: [huggingface.co/spaces/jaredpalmer/kev](https://huggingface.co/spaces/jaredpalmer/kev) runs Kev-4B and Kev-0.8B on ZeroGPU with the same encoder and API code as `kev.serve`.
 - Code, suites, every trial with hashes and paired bootstraps: [github.com/jaredpalmer/kev](https://github.com/jaredpalmer/kev) — `PLAN_Qwen35.md` (the port and this experiment), `PLAN.md`, `runs/leaderboard.md`
 
 ## Results (same frozen items for every row)

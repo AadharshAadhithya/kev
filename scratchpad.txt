@@ -101,3 +101,11 @@ KEV ON QWEN3.6-35B-A3B, lr 2e-5 (01:50): dev .869, transfer .819 (+0.7 vs Kev-9B
   => Kev-9B level, not Jev level; 9B+du (.822 dev / .852 locked) is at least as good and 8x cheaper to serve. Wait for lr 5e-5 trial before the verdict. 136 min train, 72 GB peak.
 
 FINAL 35B (02:20): lr 5e-5 transfer .823 / lr 2e-5 .819; v9 MMLU-Pro .550 (9B .545, Jev .84 — no MMLU-Pro gain at all); unknowable share .14 (worse). Verdict: not shipped; = 9B+du level at 8x memory. All written to PLAN.md. Night done except sign-off decisions. Total tonight ~$105.
+
+SOLOMON / BONSAI / QWEN3.8-27B RESEARCH (2026-09-21 morning)
+- Solomon (DoccyHealth): LoRA r=64 fp32 (870 MB) + trained linear heads over final-norm hidden, letter-logit readout, on Qwen3.8-27B (post-trained dense hybrid: 64 layers, 48 DeltaNet + 16 attn, 262k ctx, 54 GB bf16). QUESTION-SIDE LoRA: adapter OFF on the document prefill, ON from the question branch. Reserved options ("not stated"/"conflicting"), four-state boolean, multi-label, evidence relevance head (3 sentence pointers), page images. Training: 200 real gov docs, AI labels (Qwen3.8-2.4T via OpenRouter), base-anchor KL, synthetic generators, replay.
+  Numbers: real-doc test 88.0% vs Jev 86.0% (802 Qs / 54 docs, AI labels, CI of v1.1-v1.0 includes 0). MMLU+MMLU-Pro 800: 72.9% vs base 71.8% vs Jev 87.1% -> knowledge = base, same as ours. Per-type temperatures did not help held-out (ours: single T did).
+  Archer: next ckpt "Jev calibration parity on MMLU"; 8-bit ~30 GB.
+- Bonsai 2 27B (PrismML): ternary Qwen3.8-27B, 5.9 GB, 98.2% retention, WebGPU demo. Serving-side idea for a laptop Kev-27B (LoRA side-path on ternary base), not a training base.
+- Qwen3.8-27B is our DecisionModel's architecture already (qwen3_5_text). Fits H200 (54 GB + LoRA); H100 80 GB tight.
+IDEAS RANKED: (1) question-side LoRA ablation at 4B/9B — may fix the base-skill erosion AND makes prefix cache adapter-agnostic; (2) Kev-27B probe+trial on H200; (3) long-context real-document track (our MAX_STATE=384 is the real product gap vs Solomon/Jev); (4) evidence pointers from <decide> attention over state tokens (zero training); (5) multi-label + explicit not-stated output.

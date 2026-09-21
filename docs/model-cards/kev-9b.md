@@ -54,6 +54,7 @@ Kev-9B is a **decision model**: one document (the *state*) and a set of typed qu
 **The most accurate Kev.** Out of domain it scores 0.822 on the development partition and **0.852 on the locked test** (Jev: 0.857 on the development items), with the lowest Brier of any Kev (0.237 on the test) and held-out rule pairs at 0.81–0.83. This checkpoint is the `decision-v7` recipe (trial `q35-9b/01-trial-1`, seed 1, selected on development accuracy) followed by a 15-minute **delta fine-tune** (`--init_from`, lr 2e-5, one epoch) on 1,425 additional records — date-bearing policy cases rendered with explicit day counts, and evidence-free cases with uniform targets — mixed with 2,000 replayed training records. Against the pre-delta checkpoint on the locked test: +1.8 pp [+0.8, +2.9], Brier 0.243 → 0.237, `deadline` 0.72 → 0.88.
 
 - Hub: `jaredpalmer/kev-9b` (this repo; trial `night2-9b-du/00-trial-0`). The pre-delta checkpoint is at revision `v7-base`.
+- Demo: [huggingface.co/spaces/jaredpalmer/kev](https://huggingface.co/spaces/jaredpalmer/kev) runs Kev-4B and Kev-0.8B on ZeroGPU with the same encoder and API code as `kev.serve`.
 - Code, suites, every trial with hashes and paired bootstraps: [github.com/jaredpalmer/kev](https://github.com/jaredpalmer/kev) — `PLAN_Qwen35.md` (the port and this experiment), `PLAN.md`, `runs/leaderboard.md`
 
 ## Results (same frozen items for every row)

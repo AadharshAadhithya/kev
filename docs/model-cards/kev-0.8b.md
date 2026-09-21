@@ -49,6 +49,7 @@ Kev-0.8B is a **decision model**: one document (the *state*) and a set of typed 
 **The small member of the Kev family.** Same data and recipe as the 0.6B it replaces, on the Qwen3.5 base: in-distribution 0.825 (Kev-0.6B 0.801), out of domain 0.652 (0.620), and it is the first small Kev that learns any rule composition (held-out pairs 0.42 vs 0.08). Three seeds of the base recipe: transfer 0.622 / 0.634 / **0.643**; this checkpoint is seed 2 (selected on development accuracy) followed by a 9-minute **delta fine-tune** on 1,425 generated records (date-bearing policy cases with explicit day counts; evidence-free cases with uniform targets) mixed with 2,000 replayed training records — the same delta as Kev-4B and Kev-9B. Locked test against the pre-delta checkpoint: out of domain 0.668 → **0.684** (+2.2 pp [−0.8, +5.5]), Brier 0.473 → 0.460. Out of domain it is still a sub-1B model: use Kev-4B for accuracy; use this one where memory rules the 4B out, and measure on your own data.
 
 - Hub: `jaredpalmer/kev-0.8b` (this repo; trial `night2-08b-du2/00-trial-0`). The pre-delta checkpoint is at revision `v7-base`.
+- Demo: [huggingface.co/spaces/jaredpalmer/kev](https://huggingface.co/spaces/jaredpalmer/kev) runs Kev-4B and Kev-0.8B on ZeroGPU with the same encoder and API code as `kev.serve`.
 - Code, suites, results, and the full research log: [github.com/jaredpalmer/kev](https://github.com/jaredpalmer/kev) — `PLAN_Qwen35.md`, `PLAN.md`, `runs/leaderboard.md`
 
 ## Results (same frozen items for every row)

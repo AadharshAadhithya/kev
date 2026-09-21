@@ -45,6 +45,14 @@ See README.md (deep dive) and docs/model-cards/ (one card per checkpoint: recipe
 - Publish: `uv run python -m kev.publish --run runs/<run> --repo jaredpalmer/kev-<size> --card docs/model-cards/<name>.md` (needs `hf auth login`). Repos are named by
   base model size (Kev-0.5B = Qwen2.5-0.5B); versions within a size are Hub tags (`hf repos tag create jaredpalmer/kev-0.5b vX.Y`).
   Collection: huggingface.co/collections/jaredpalmer/kev-6aad9d0ea49f2589665e07cd. `--run` in serve/evaluate accepts a Hub id.
+- HF Space (public demo, ZeroGPU): huggingface.co/spaces/jaredpalmer/kev. Source in `space/` (Gradio 6 `app.py`, `presets.py` mirrors the
+  playground presets, `README.md` frontmatter `models:`/`datasets:` is what links the Space from the model and dataset pages). Publish with
+  `scripts/publish_space.sh [repo] [message]`: it stages `space/` + `kev/{__init__,model,api}.py` into one `hf upload --type space` commit,
+  so the vendored modules never drift from the repo (a stale vendored `model.py` is how the hugging-apps Space broke on Qwen3.5). Any
+  change to `kev/model.py` or `kev/api.py` that affects serving should be republished. ZeroGPU rules: `import spaces` first, load on CPU in
+  fp32 (`PeftModel.from_pretrained(..., torch_device="cpu")`, otherwise peft picks the faked cuda device and crashes), merge, then
+  `.to("cuda")` once at module scope; a restart reloads both models (~3 min). Check with `hf spaces logs jaredpalmer/kev` and the
+  gradio_client `/decide` endpoint; the Space is also in the Kev collection and needs PRO to exist.
 - Serve: `uv run --extra serve python -m kev.serve --run runs/kev --port 8008` (falls back to runs/smoke)
   - TypeSafe-compatible: `POST /v1/systemone`, `GET /v1/models` (no auth). Playground routes under `/api/*`.
   - SDK: `TypeSafeClient(api_key="local", base_url="http://127.0.0.1:8008", model="kev-latest")`

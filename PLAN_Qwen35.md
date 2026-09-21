@@ -1,5 +1,7 @@
 # Plan: move Kev to the Qwen3.5 base family
 
+> **Status: completed 2026-09-20.** The plan below was executed in full; §10 records the results. The Qwen3.5 family (Kev-0.8B / 4B / 9B) shipped the same day. The living plan is [`PLAN.md`](PLAN.md).
+
 Status: **proposal for review**, 2026-09-20. Nothing here has been started except the probe in section 2. Numbers are on the same frozen items as every other number in this repository ([`evals/v4/transfer-v4`](evals/v4/transfer-v4/manifest.json), development partition, 764 records); untrained bases are read zero-shot from next-token letter logits with [`scripts/base_mmlu_probe.py`](scripts/base_mmlu_probe.py), the same probe used for every untrained row in the README.
 
 ## 1. What "latest Qwen base" means, checked

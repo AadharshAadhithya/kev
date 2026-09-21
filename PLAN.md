@@ -1,5 +1,43 @@
 # Research plan
 
+This file is the living plan: where Kev stands, what runs next and the criteria decided before the runs, and open questions. Completed plans stay as records ([`PLAN_Qwen35.md`](PLAN_Qwen35.md), the Qwen3.5 port, done 2026-09-20). Everything older is kept below under **History**, dated.
+
+## Where we stand (2026-09-20, evening)
+
+- **Family:** Kev-0.8B / 4B / 9B on Qwen3.5 bases, one recipe (`decision-v7`, LoRA r=16, lr 1e-4 / 5e-5 / 5e-5). Locked test, out of domain: 0.668 / 0.832 / **0.837**; Jev 0.857 on the development items. Qwen3 checkpoints published as the previous generation.
+- **Gap to Jev (Kev-9B, `transfer-v4` dev, 4.5 pp overall):** knowledge (MMLU 0.74 vs 0.90; MMLU-Pro 0.545 vs 0.84) — the untrained base scores the same, so this is base capacity; date arithmetic (`deadline` 0.72 vs 0.93) — any LoRA fine-tune on our format erodes the base's skill (0.82 → 0.72), while the readout is intact (giving the model the day count yields 0.93–1.0, issue #8); calibration — Brier 0.291 vs 0.211, **coverage at ≤ 5 % error 0.53 vs 0.70**, confident errors 7.5 % vs 3.7 %; robustness — assertion-style Noul instructions ("The customer sounds angry.") drove Kev-4B to 0.79 vs Jev 0.91 on scienthoon's tickets.
+- **Tools now available:** `--init_from` delta fine-tunes from a released checkpoint (minutes, not hours); `--data` JSONL for custom records; `transfer-v9` (MMLU-Pro, buried, unknowable) and the SemIf / scienthoon external suites; coverage-at-error-budget and unknowable metrics in `kev.benchmark`.
+- **Budget:** ~$370 of the $500 overnight authorization spent (family + Qwen3.5 port); ~$130 remains for tonight.
+
+## Tonight's autoresearch (2026-09-20 → 21)
+
+Ordered by expected value. Each trial is either a **delta** (warm start from the released checkpoint, new records mixed with a replay sample of `decision-v7`, lr 2e-5, 1 epoch) or a **probe** (no training). Selection on development partitions only; one locked read per adopted candidate.
+
+| # | question | run | cost | adopt if (pre-registered) |
+|---|---|---|---|---|
+| 1 | Does a bigger MoE base fix the knowledge column? | Zero-shot probe of `Qwen3.5-35B-A3B-Base` on `transfer-v4` + `v9` (H200) | $6 | **Proceed to a Kev-35B-A3B trial** only if MMLU-Pro ≥ 0.70 and overall ≥ the 9B base's 0.729. |
+| 2 | Can calibration be bought without accuracy? (a) per-(type, K) temperature fitted on dev; (b) unknowable records with **uniform targets** as a delta from Kev-9B / Kev-4B | (a) $0, (b) 2 deltas ~$8 | Adopt if coverage@5 % error improves ≥ +5 pp on `transfer-v4` dev with accuracy within 1 pp of the released checkpoint; for (b) also unknowable share ≥ 0.9 falls (4B: 0.19 → ≤ 0.10). Temperature is reported as a separate row, never folded into raw numbers. |
+| 3 | Date arithmetic by construction (issue #8): date-bearing families rendered with relational day counts and a `date_facts` field; opt-in `date_facts` request preprocessor | 2 deltas ~$8 | Adopt the renderings if `deadline` ≥ 0.85 **with** the preprocessor and raw `deadline` does not fall, accuracy elsewhere within 1 pp. Report raw and preprocessed separately. |
+| 4 | Assertion-style Noul instructions | 1 delta each at 9B / 4B ~$8 | Adopt if scienthoon `angry` ≥ 0.85 at 4B with `transfer-v4` within 1 pp. |
+| 5 | Where does the eroded arithmetic live? Retention ablation: 4B from scratch, LoRA on attention + MLP only (DeltaNet projections frozen) | 1 trial $5 | Informational; if `deadline` ≥ 0.65 raw, DeltaNet-frozen becomes a candidate recipe for a follow-up. |
+| 6 | Combined delta (2b + 3 + 4) from Kev-9B and Kev-4B | 2 deltas ~$10 | Same rules as its parts; this is the promotion candidate if the parts pass. |
+| 7 | Third-party comparability: Kev-9B / 4B on ekzhang's 1,000-question MMLU-Pro sample (seed 42); GPQA-diamond as an eval-only source if the dataset is accessible | $3 | Reporting only. |
+| 8 | If #1 passes: Kev-35B-A3B, `decision-v7`, lr 5e-5, LoRA on attention + DeltaNet + shared expert, routed experts frozen, H200/B200 | ~$40 | Ship as a hosted tier only if `transfer-v4` dev ≥ Kev-9B + 2 pp **and** MMLU-Pro ≥ 0.70; one locked read. |
+
+Rules: accuracy comparisons are record-clustered paired bootstraps on the same items; "within 1 pp" means the point estimate. Deltas replace a released checkpoint only after the locked read confirms no regression there. Every adopted change is written into the model cards with the criteria outcome, met or not.
+
+Deferred, in order: MLX serving for the hybrid on Mac (the release's one regression: 0.78 s vs 0.17 s at 4B); multilingual slices; high-cardinality column; GGUF/browser path.
+
+## Open questions
+
+- Why does LoRA fine-tuning on classification-shaped data erase multi-step latent computation (dates) while leaving recall (MMLU) intact? Trial 5 is the first probe; a follow-up is layer-wise LoRA ablation.
+- Is the 9B → 35B-A3B step a knowledge gain only, or does the MoE also change calibration and rule composition? Trial 1 and, if it passes, trial 8.
+- Does the unknowable-record training transfer to *unseen* kinds of missing evidence (scienthoon's org-rule priority is the external test)?
+
+---
+
+# History
+
 ## Current decision
 
 Use **Qwen3-0.6B-Base as the research baseline**. Keep the released Qwen2.5 checkpoint as a historical reference, not as an equally funded development track. Preserve the MacBook training path; run the controlled studies on Modal H100s.

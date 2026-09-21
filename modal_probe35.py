@@ -7,6 +7,7 @@ Writes benchmark-compatible rows/report to the kev-runs volume under /probes/<na
 Same readout as scripts/base_mmlu_probe.py: next-token letter logits over the rendered options, no training.
 """
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -28,7 +29,7 @@ runs_volume = modal.Volume.from_name("kev-runs", create_if_missing=True)
 secrets = [modal.Secret.from_name("huggingface-secret")]
 
 
-@app.function(image=image, gpu="H100", cpu=2, memory=(32768, 65536), retries=0, timeout=3600,
+@app.function(image=image, gpu=os.environ.get("KEV_PROBE_GPU", "H100"), cpu=2, memory=(32768, 131072), retries=0, timeout=3600,
               volumes={"/runs": runs_volume, "/root/.cache/huggingface": hf_cache}, secrets=secrets)
 def probe(base, suite, name, tasks="all", prompt="plain", split="development", revision=None, adapter=None):
     import os
@@ -59,7 +60,7 @@ def main(bases: str, suite: str = "evals/v4/transfer-v4", tasks: str = "all", pr
         print(f"{name}: acc {result['acc']:.3f} brier {result['brier']:.3f} conf-err {result['confident_error_rate']:.3f}")
 
 
-@app.function(image=image, gpu="H100", cpu=2, memory=(32768, 65536), retries=0, timeout=3600,
+@app.function(image=image, gpu=os.environ.get("KEV_PROBE_GPU", "H100"), cpu=2, memory=(32768, 131072), retries=0, timeout=3600,
               volumes={"/runs": runs_volume, "/root/.cache/huggingface": hf_cache}, secrets=secrets)
 def bench(run, suite, name):
     """kev.benchmark for a Hub checkpoint on any local suite directory (mounted at run time), written to /runs/bench/<name>."""

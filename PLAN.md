@@ -28,6 +28,22 @@ Rules: accuracy comparisons are record-clustered paired bootstraps on the same i
 
 Deferred, in order: MLX serving for the hybrid on Mac (the release's one regression: 0.78 s vs 0.17 s at 4B); multilingual slices; high-cardinality column; GGUF/browser path.
 
+## Results so far (2026-09-21, 23:00; the Qwen3.6-35B-A3B trials are still running)
+
+Spend tonight ≈ $85 (probes $14, deltas 12 × ~$1.5, dense $5, benches ~$12, locked reads $6, two failed 35B launches $8, 35B trials ~$25 running). Working notes: `scratchpad.txt`.
+
+| # | result | verdict |
+|---|---|---|
+| 1 | **Qwen3.5-35B-A3B-Base** zero-shot: `transfer-v4` 0.720 (9B base 0.729), MMLU 0.82, **MMLU-Pro 0.590**, deadline 0.75, rules worse. | Gate failed (needed MMLU-Pro ≥ 0.70). No base-MoE trial. |
+| 1′ | **Qwen3.6-35B-A3B (post-trained)** zero-shot with the SemIf prompt: **0.812** = trained Kev-9B; MMLU 0.85, deadline 0.88, emotion 0.62; rules weak (0.62 / 0.56). Plain prompt 0.726. | Gate passed (≥ 0.76). Two trials (lr 5e-5, 2e-5, `--weights_dtype bf16`, routed experts frozen, 21 M LoRA params) running on H200s. |
+| 2a | Single temperature T ≈ 2.0 fitted in-distribution **does** transfer OOD on the Qwen3.5 family: Kev-9B Brier 0.291 → 0.267, ECE 0.105 → 0.039, confident errors 7.5 % → 3.2 % (Jev 3.7 %), accuracy and coverage unchanged. Per-(type, K) temperatures are worse (OOD Score items have a K the in-distribution fit never saw; per-group scaling scrambles the cross-group confidence ranking). | Adopt as a reported **calibrated row**; `KEV_TEMPERATURE` in `kev.serve`. The coverage criterion was ill-posed for a global T (monotone). Grouped T rejected. |
+| 2b | Unknowable records with uniform targets (delta): share of evidence-free items answered at ≥ 0.9 → **0.00** at both sizes (from 0.05 / 0.19), controls unchanged. Coverage@5 % on `transfer-v4` dev: 9B 0.53 → 0.48, 4B 0.54 → 0.57. | Confidence criterion passed decisively; coverage criterion failed at 9B. Partial. |
+| 3 | Date renderings (delta) + `date_facts` preprocessor: deadline 9B 0.72 → 0.80 raw → **0.90 with the preprocessor**; 4B 0.55 → 0.60 → 0.82 (0.85 in the combined delta). The preprocessor alone on the released models: 0.75 / 0.68 — training to *bind* the fact is what makes it work. | **Passed** (≥ 0.85 with preprocessor, raw not lower, accuracy within 1 pp). |
+| 4 | Assertion-style Noul (delta): scienthoon `angry` 4B 0.794 → 0.821 alone, 0.859 in the combined delta; 9B 0.911 → 0.924. Side effect: raises confidence on evidence-free items (unknowable share 0.05 → 0.25 at 9B) and adds a few p = 1.00 errors on Noul tasks (tweet, PAWS) that cut coverage. | Passed only in combination; the combination's coverage cost is partly this. |
+| 5 | Dense ablation (LoRA on attention + MLP only, DeltaNet frozen, 4B seed 1): deadline **0.53 → 0.53**, transfer 0.800 → 0.780. | Freezing the recurrent layers does not preserve date arithmetic. Not a candidate. |
+| 6 | Combined deltas, **locked test** (one read each): 9B + dates + unknowable **0.852** OOD (+1.8 pp [+0.8, +2.9] over Kev-9B's 0.837), Brier 0.237, deadline 0.88, pairs 0.81, coverage@5 % 0.62 (from 0.66); 9B + all 0.851; 4B + dates + unknowable 0.837 (+1.0 [−0.1, +2.1]), Brier 0.255, coverage 0.68; 4B + all 0.828 (neutral). | **Promotion candidates: the dates + unknowable deltas at both sizes**, published as Hub branch `night2-du` (main untouched, awaiting sign-off). Costs to state in the cards: coverage@5 % −4 pp at 9B, scienthoon ECE +3 pp, MMLU-Pro −3 pp at 9B. |
+| 7 | ekzhang's 1,000-question MMLU-Pro sample: Kev-9B **0.511**, Kev-4B 0.468, Kev-8B (Qwen3) 0.488 (8 questions over the 384-token state limit counted wrong). Jev 0.829; untrained one-token Qwen3.6-35B-A3B 0.588; his $5 SFT ≈ 0.71. | Reporting. Knowledge is base-bound; the 3.6 trial is the only lever. GPQA-diamond is gated — needs the account to accept terms. |
+
 ## Open questions
 
 - Why does LoRA fine-tuning on classification-shaped data erase multi-step latent computation (dates) while leaving recall (MMLU) intact? Trial 5 is the first probe; a follow-up is layer-wise LoRA ablation.

@@ -35,3 +35,4 @@ TRIAL 2a RESULT (temperature, no GPU) — 21:05
 - grouped (type,K) T is WORSE OOD: OOD score items are K3 but in-dist score is K5 -> group unmatched -> T=1; and per-group scaling scrambles the cross-group confidence ranking (cov@1% .34->.08). Laya's grouping does not transfer here. Do not adopt.
 - score-type OOD (deadline, 3-level) is where confident errors live: 9B conf-err 20%, 4B 40%, 0.8B 60%. Temperature can't fix it (T fitted on K5 doesn't apply). Date-facts delta is the fix.
 - ACTION: report "calibrated (single T=2.0, fitted in-distribution)" as a separate row in cards/README; add KEV_TEMPERATURE to kev.serve (opt-in) — after the deltas land.
+- night2-4b-dense failed (argparse choices lacked dense); relaunched as night2-4b-dense2 after fix

@@ -2,6 +2,21 @@
 
 Status: **proposal, 2026-09-21.** Nothing here has been started. Written after reading [DoccyHealth/Solomon](https://huggingface.co/DoccyHealth/Solomon) (card and code), [Bonsai 2 27B](https://x.com/PrismML/status/2100692248480596348), Archer Hume's release thread ([1](https://x.com/4rcherhume/status/2101888238357237798), [2](https://x.com/4rcherhume/status/2101965358047596823)), and the night-2 results in [`PLAN.md`](PLAN.md). Budget assumption: Modal credits up to $10k; this plan uses ~$3–4k and says where each dollar goes. Every number below is either ours (linked to a result file) or theirs (linked to the card). Working notes: [`scratchpad.txt`](scratchpad.txt).
 
+## Review addendum (after the calibration audit)
+
+This remains a **proposal, not an active large-model run**. The controlled loss screen in [`PLAN.md`](PLAN.md#round-3-screening-result--stopped-at-the-registered-gate) produced no qualifying candidate; it does not justify scaling that recipe. The current authorization is **$1,000 total**, not the hypothetical $10,000 credit grant or the full budget below.
+
+Corrections to assumptions in the original proposal:
+- Temperature preserves within-question argmax but can reorder confidence across multiclass questions. Selective coverage needs tie-aware metrics and a full-statistic clustered bootstrap; use the audited implementation and fresh final-panel protocol.
+- Similar knowledge scores across the recipes tried do not prove that no training can improve knowledge retrieval or reasoning. Base capacity is a hypothesis, not an identified hard ceiling.
+- Question-side LoRA may preserve an unmodified prefix, but computation after the question can still change. Cache sharing requires identical base weights, tokenizer, prefix encoding and precision. Implementation size and performance need measurement, not a line-count promise.
+- Attention heatmaps are diagnostic signals, not verified evidence or causal explanations. Evidence pointers need independent labels and sufficiency/removal checks.
+- Reserved outcomes and multi-label outputs require trained semantics and evaluation, not just adding API fields.
+- A ternary backbone is not inherently untrainable: adapter training depends on the available differentiable runtime. Bonsai compatibility, retention, memory and latency must be probed rather than assumed.
+- Historical test partitions exposed during repeated model selection are regression sets now. Do not use them as fresh confirmatory evidence, and do not transfer Solomon's accuracy/memory claims to Kev without measurement.
+
+The staged questions below are still useful, but their timing, dollar and accuracy forecasts are unverified planning assumptions. A new run needs an explicit protocol and a measured memory/throughput check before its budget is committed.
+
 ## 1. What we learned from Solomon, and what it changes
 
 Solomon is a LoRA (r=64, fp32, 870 MB) plus trained linear heads on **`Qwen/Qwen3.8-27B`** ([card, "How it works"](https://huggingface.co/DoccyHealth/Solomon#how-it-works)). The base is a post-trained dense hybrid — 64 layers, 48 Gated DeltaNet + 16 attention, 262k context, natively multimodal ([config](https://huggingface.co/Qwen/Qwen3.8-27B/blob/main/config.json): `qwen3_5_text`). That is the architecture `DecisionModel` already runs ([`kev/model.py`](kev/model.py), `hybrid=True`, row-batched branches). 54 GB in bf16.

@@ -89,6 +89,26 @@ A qualifying recipe is evaluated once against its pinned parent and matching CE 
 
 Modal reports **$392.14 metered** at registration; this supersedes the previous unverified $475 estimate. The user subsequently authorized **$1,000 total**, before any new training runs. Keep the initial stage within **$60**; reserve further spending only for evidence-backed follow-ups, with a conservative $600 additional ceiling and a fresh billing check before each stage. Experimental gates are unchanged by the budget increase. Bound launches using the actual requested CPU, memory and GPU limits; do not redeploy `kev-research`, cancel other jobs, overwrite outputs, move release tags, or publish checkpoints. The possible $10,000 credit grant is not authorized spend. The larger-model work in [`PLAN_27b.md`](PLAN_27b.md) remains gated.
 
+### Round 3 screening result — stopped at the registered gate
+
+All five jobs completed under [`calibration-screen-4b-s11-r2`](runs/calibration-screen-4b-s11-r2/results.jsonl). Each trained arm used exactly **3,899 records including augmentations, 429 optimizer steps, and 639,399 forward tokens** from the same 3,425-record corpus. The initial startup failed before training because the optional HF-secret dependency was declared differently locally and remotely; its five calls were cancelled with explicit approval, the environment was corrected, and the failed attempt is [recorded separately](runs/calibration-screen-startup/report.json). The production app was not redeployed.
+
+[Full comparison and paired intervals](runs/calibration-screen-review-v1/report.json), [concise outcome](runs/calibration-screen-review-v1/summary.json), [risk–coverage curves](runs/calibration-screen-review-v1/risk-coverage-final.png), and [`scripts/review_calibration_screen.py`](scripts/review_calibration_screen.py). All values below are on the same 656 clean development questions, after fitting each checkpoint's temperature on the same independent calibration partition using raw logits. No test labels were used for fitting or selection. The generic runner's legacy NLL-based candidate flag is not this protocol's promotion gate; the authoritative screen selected no candidate.
+
+| arm | accuracy | coverage at ≤5% empirical error | AURC ↓ | Brier ↓ | ECE ↓ |
+|---|---|---|---|---|---|
+| unchanged Kev-4B, recalibrated | 0.7973 | **0.5762** | **0.0580** | **0.2653** | 0.0478 |
+| CE continuation control | 0.7973 | 0.5320 | 0.0625 | 0.2737 | 0.0519 |
+| label smoothing, epsilon 0.05 | 0.8018 | 0.0061 | 0.1001 | 0.2879 | 0.0671 |
+| CE + Brier, weight 0.5 | 0.7973 | 0.5259 | 0.0628 | 0.2744 | 0.0561 |
+| focal, gamma 1 | 0.7988 | 0.5015 | 0.0606 | 0.2678 | **0.0433** |
+
+**Decision: no candidate advances.** Focal improves ECE slightly but not selective coverage or AURC. Smoothing slightly improves accuracy while harming ranking: AURC difference versus parent +0.0422 [95% CI +0.0228, +0.0651]. CE continuation also worsens selective performance, confirming why the matched control was necessary. These are results for one seed, one epoch and one setting per loss; they do not show that these losses fail universally.
+
+As registered, **no replication, fresh threshold-calibration read, final-test read, publication, or larger-model run** follows this negative screen. The 1,260-record final panel remains unscored and available for a future preregistered candidate. The reasonable next question is a targeted data/capability experiment (for example, controlled role-binding counterexamples from permitted training sources), not an expanded loss grid or automatic relabelling of PAWS. It needs its own registration before spending.
+
+Observed workspace metering rose from $392.14 to **$403.87** during this pass (about **$11.73**, subject to billing lag and workspace attribution). The authorized ceiling is $1,000, not a target to spend. The successful screen's conservative function-execution admission bound was $18.92, excluding startup/storage. No historical benchmark file or published checkpoint was overwritten.
+
 ### Superseded initial round-3 proposal (retained for the research record)
 
 The draft below predates the metric/failure audit. Its causal claims, teacher identity, budget and timing estimates, temperature-ordering argument, and test-selection procedure are superseded by the registered execution protocol above; they are not instructions for this run.

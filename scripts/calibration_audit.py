@@ -27,6 +27,7 @@ def read_rows(path):
 
 def tempered(rows, temperature):
     return [{**r, "p": probabilities_at_temperature(r, temperature).tolist(),
+             "inference_temperature": r.get("inference_temperature", 1.0) * temperature,
              **({"logits": (np.asarray(r["logits"]) / temperature).tolist()} if "logits" in r else {})} for r in rows]
 
 

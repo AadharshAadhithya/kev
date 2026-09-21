@@ -471,3 +471,27 @@ def test_screen_requires_beating_continuation_control_not_just_parent():
             "accuracy_delta_vs_each_min": -0.01, "aurc_delta_vs_each_max": 0, "per_source_accuracy_delta_min": -0.05}
     checks = screen_checks(result(0.6), {"parent": result(0.5), "ce-control": result(0.59)}, rule)
     assert checks["coverage_vs_parent"] and not checks["coverage_vs_ce-control"]
+
+
+def test_final_audit_partition_remains_bound_to_registration():
+    import json
+    from pathlib import Path
+    from kev.suite import digest, load_split
+    root = Path(__file__).resolve().parents[1]
+    protocol = json.loads((root / "experiments/calibration-audit-protocol.json").read_text())
+    suite = root / protocol["data"]["development_suite"]
+    assert digest(suite / "test.jsonl") == protocol["data"]["fresh_test_sha256"]
+    assert digest(suite / "calibration.jsonl") == protocol["data"]["fresh_threshold_sha256"]
+    with pytest.raises(ValueError, match="locked test"):
+        load_split(suite, "test")
+
+
+def test_tempered_replay_records_effective_temperature():
+    from scripts.calibration_audit import tempered
+    from kev.benchmark import fit_temperature
+    raw = {"variant": "clean", "source": "fixture", "task": "fixture", "p": [0.9, 0.1],
+           "logits": [2.197224577, 0.0], "label": 0, "inference_temperature": 1.0}
+    rows = tempered([raw], 2.0)
+    assert raw["inference_temperature"] == 1.0 and rows[0]["inference_temperature"] == 2.0
+    with pytest.raises(ValueError, match="raw logits"):
+        fit_temperature(rows)

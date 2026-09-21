@@ -92,5 +92,15 @@ See README.md (deep dive) and docs/model-cards/ (one card per checkpoint: recipe
   `KEV_SHAPE_BUCKET=64` on MPS, state-prefix KV LRU (`KEV_PREFIX_CACHE=4`, `KEV_PREFIX_MIN_TOKENS=384`). Any change here must keep the parity
   tests in tests/test_v3.py (merged vs unmerged, prefix vs full pass, bucket padding) passing; report numbers with the fp32 unmerged path.
 
+## Calibration Research
+
+- Metric version 2 accepts whole equal-confidence groups. `paired_bootstrap(..., aggregation="micro")` recomputes non-additive coverage/AURC for each paired record-group resample; default `macro` is equal task weight.
+- `confident_error_rate` divides confident errors by all questions. `error_rate_at_0_9` divides by accepted questions. The empirical coverage-at-error envelope is not an unseen-data guarantee; freeze thresholds on a separate calibration set.
+- Local benchmarks save logits and effective inference temperature. Research studies explicitly score raw logits, fit on the calibration partition for both parent and candidate, and report raw/recalibrated metrics separately. Temperature can reorder confidence across multiclass questions, even at fixed option count.
+- Registered screen: `experiments/calibration-audit-protocol.json`; `scripts/review_calibration_screen.py --study <name> --out runs/<new-review>` verifies matched updates/tokens and gates against both unchanged parent and CE continuation.
+- `evals/round3/transfer-r3/test.jsonl` is a fresh final panel, not a search set. The first loss screen found no qualifying candidate, so it remains unscored. Select and record a candidate before evaluating it; do not reuse previously inspected test partitions as untouched confirmation.
+- Isolate research deployments with `KEV_APP_NAME=kev-calibration-audit`. `worker_environment` propagates app/GPU/secret-name settings to prevent Modal dependency-count startup failures; secret values stay in Modal Secrets.
+- Verify live spend/rates with `uv run modal billing summary --json` and `uv run modal billing rates --json`. Training admission uses the actual configured CPU and maximum host memory, not the old 2-CPU/48-GiB assumptions. Initial cancelled startup calls and successful jobs are recorded separately.
+
 ## Writing
 - Use simple technical English. For README tone, use Jared's older Formik, TSDX, Razzle, and Backpack READMEs as references: explain the developer's problem, address the reader directly, and show code early. Avoid slogans, canned contrasts, and repeated claims. Keep detailed experiment history in PLAN.md and the model cards rather than repeating it in the README.

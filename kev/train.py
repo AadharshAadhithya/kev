@@ -21,7 +21,11 @@ def permuted_copy(rec, rng):
 
 
 def question_loss(z, q, dev, ord_w):
-    """Cross-entropy, optionally plus the normalized ranked probability score for ordered levels."""
+    """Cross-entropy (or cross-entropy against a soft target when the question carries one), optionally plus the
+    normalized ranked probability score for ordered levels."""
+    if q.get("target") is not None:
+        t = torch.tensor(q["target"], device=dev, dtype=z.dtype)
+        return -(t * F.log_softmax(z, -1)).sum()
     y = torch.tensor([q["label"]], device=dev)
     loss = F.cross_entropy(z[None], y)
     if q["qtype"] == "score" and ord_w > 0:
@@ -87,7 +91,8 @@ def main():
     ap.add_argument("--anchor_w", type=float, default=0.0, help="weight of KL(base || model) toward the frozen base model's zero-shot distribution, per anchored question")
     ap.add_argument("--anchor_sources", default="", help="comma-separated sources to anchor (default: every record with a target)")
     ap.add_argument("--out", default="runs/kev")
-    ap.add_argument("--data", default="", help="your own labelled requests, one JSON object per line (see kev.data.load_records); an alternative to --suite for fine-tuning")
+    ap.add_argument("--data", default="", help="your own labelled requests, one JSON object per line (see kev.data.load_records); an alternative to --suite for fine-tuning, or combined with --suite and --replay")
+    ap.add_argument("--replay", type=int, default=0, help="with --data and --suite: mix in this many records sampled (by --seed) from the suite's training partition, so a delta fine-tune does not forget the released recipe")
     ap.add_argument("--init_from", default="", help="delta mode: warm-start LoRA and the pointer head from an existing run "
                                                    "(local directory or hub id) instead of starting from the base model; keeps the "
                                                    "released model's in-domain skill while adapting to a new domain")
@@ -134,7 +139,6 @@ def main():
         # loading, because peft loads matching keys silently and a half-loaded adapter still trains and still reports a loss.
         from peft import get_peft_model_state_dict, load_peft_weights, set_peft_model_state_dict
         from .evaluate import resolve_run
-        from .suite import digest
         src = resolve_run(a.init_from)
         meta = torch.load(f"{src}/head.pt", map_location="cpu")
         checks = [("base", meta.get("base"), a.base), ("base_revision", meta.get("base_revision"), revision), ("lora", int(meta.get("lora", 0)), a.lora),
@@ -157,9 +161,15 @@ def main():
     print(f"device={dev} trainable params={sum(p.numel() for p in model.trainable_parameters())/1e6:.1f}M", flush=True)
 
     holdout = manifest["holdout_sources"] if manifest else [s for s in a.holdout.split(",") if s]
-    if a.data and a.suite: ap.error("give --data or --suite, not both")
-    reqs = load_records(a.data) if a.data else load_split(a.suite, "train") if manifest else build(a.n_per_source, "train", a.seed, exclude=holdout)
-    if not manifest:
+    if a.replay and not (a.data and a.suite): ap.error("--replay needs both --data and --suite")
+    if a.data:
+        reqs = load_records(a.data)
+        if a.replay:
+            pool = load_split(a.suite, "train"); replay = random.Random(f"replay:{a.seed}").sample(pool, min(a.replay, len(pool)))
+            print(f"replay: {len(replay)} of {len(pool)} suite training records mixed with {len(reqs)} from {a.data}", flush=True); reqs = reqs + replay
+    else:
+        reqs = load_split(a.suite, "train") if manifest else build(a.n_per_source, "train", a.seed, exclude=holdout)
+    if not manifest or a.data:
         # frozen suites are filtered to the training context when they are frozen (kev.suite.select_unique); records built
         # on the fly here are not, so apply the same rule instead of letting the strict encoder abort the run (issue #5)
         kept = [r for r in reqs if fits_context(tok, r)]
@@ -180,7 +190,11 @@ def main():
         print(f"ablation: training on {sorted(wanted)} -> {len(reqs)} records", flush=True)
     if manifest:
         from .study_v3 import validate_training
-        validate_training(reqs, manifest)
+        # --data records are the user's own (validated by load_records; never an eval-only source by construction of their
+        # names); the suite's rules apply to the replay sample and to suite-only runs
+        validate_training([r for r in reqs if not a.data or not r["_meta"]["source"].startswith(("custom", "night2_"))], manifest)
+        if a.data and any(r["_meta"]["source"] in set(EVAL_ONLY) | set(manifest.get("eval_only_sources", [])) for r in reqs):
+            raise ValueError("--data contains an eval-only source")
     SYNTHETIC = ("legacy_policy", "compositional", "contrastive")
     if a.public_frac < 1:
         mix_rng = random.Random(source_seed(a.seed, "public_frac"))

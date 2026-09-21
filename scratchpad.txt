@@ -1,0 +1,31 @@
+scratchpad — night of 2026-09-20 → 21 (autoresearch round 2). Working notes, not a record; PLAN.md is the record.
+
+DONE
+- 35B-A3B probe: v4 0.720 (9B 0.729), MMLU 0.82 (0.74), MMLU-Pro 0.590 (0.540), deadline 0.75 (0.82), rules worse. GATE FAILED -> no trial F. Eric's +12 came from SFT on the instruct 3.6 model; base readout only +5 over 9B.
+
+RUNNING
+- local smoke of --data + --replay + soft targets (0.6B, cpu) — was mid-run when interrupted; rerun quickly before deploy.
+
+PREP STATUS
+- done: date_facts annotator (kev.api), KEV_DATE_FACTS in serve, --date_facts in benchmark, soft targets (data.materialize/train.question_loss),
+  --replay, lora_targets=dense, experiment allowlist (data/replay/init_from), evals/night2/{dates,unknowable,assertion}.jsonl + manifest.
+- todo before launch: (1) finish smoke; (2) unit tests for soft target + replay + date_facts; (3) modal deploy; (4) plans in experiments/night2-*.json.
+
+LAUNCH LIST (each trial = one H100 container; deltas ~10–20 min)
+  A  night2-9b-deltas: init_from jaredpalmer/kev-9b, lr 2e-5, 1 epoch, replay 2000
+       a1 dates.jsonl   a2 unknowable.jsonl   a3 assertion.jsonl   a4 all three (concat file: evals/night2/all.jsonl)
+  B  night2-4b-deltas: same four from jaredpalmer/kev-4b
+  C  night2-4b-dense: from scratch, lora_targets=dense (retention ablation), v7 recipe seed 1
+  D  eric-mmlupro: Kev-9B/4B on ekzhang's 1000 sample — need his manifest (evals/runs are gitignored in his repo -> results/mmlu-pro-2026-09-18 has manifest?) check.
+  E  per-(type,K) temperature: offline on dev rows (no GPU).
+  F  (dropped: probe gate failed)
+
+GOTCHAS LEARNED TONIGHT
+- modal deploy while trials run: wait for in-flight trials to finish; source-hash guard refuses launches if kev/*.py differ from the deployed app.
+- `modal run file.py` without ::entrypoint fails when the file has >1 local_entrypoint.
+- Probe report: per-source summary must not use top-level keys that collide with report blocks ("unknowable") — fixed, namespaced under "sources".
+- Kev-8B bf16 locally + Chrome = swap death; run big evals on Modal (modal_probe35.py::benchmarks).
+- Jev gateway key: create via `vercel ai-gateway keys create` (no --scope), capture into env only.
+
+EVAL FOR DELTAS (per trial, same items): transfer-v4 dev (acc, brier, cov@5%, deadline, pairs); transfer-v9 dev (unknowable share>=0.9, mmlu_pro); scienthoon (angry); deadline with --date_facts for the dates deltas.
+Decision rules are in PLAN.md "Tonight's autoresearch" — don't re-derive them here.

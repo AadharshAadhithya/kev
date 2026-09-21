@@ -7,7 +7,7 @@ import torch
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from .api import SystemOneRequest, to_record, to_answers, output_tokens
+from .api import SystemOneRequest, to_record, to_answers, output_tokens, with_date_facts
 from .data import DISTRACTORS, NONE
 from .evaluate import load
 from .model import encode
@@ -19,7 +19,8 @@ app = FastAPI(title="kev")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 STATE = {"run": None, "tok": None, "model": None, "dev": None, "lock": threading.Lock(), "prefix_cache": {}, "prefix_hits": 0, "prefix_misses": 0}
 PREFIX_CACHE_SIZE = int(os.environ.get("KEV_PREFIX_CACHE", "4"))          # states kept (KV + hidden); 0 disables
-PREFIX_MIN_TOKENS = int(os.environ.get("KEV_PREFIX_MIN_TOKENS", "384"))   # below this the branch-only pass is not faster on MPS (per-op overhead dominates)
+PREFIX_MIN_TOKENS = int(os.environ.get("KEV_PREFIX_MIN_TOKENS", "384"))
+DATE_FACTS = os.environ.get("KEV_DATE_FACTS", "0") == "1"                  # opt-in: append day counts between absolute dates in the state (api.with_date_facts)   # below this the branch-only pass is not faster on MPS (per-op overhead dominates)
 
 
 class Question(BaseModel):
@@ -77,6 +78,7 @@ def _probs(rec):
 @app.post("/v1/systemone")
 def systemone(req: SystemOneRequest):
     """TypeSafe-compatible endpoint: typed questions in, typed answers out, one prefill pass."""
+    if DATE_FACTS: req = req.model_copy(update={"state": with_date_facts(req.state)})
     rec, meta = to_record(req)
     ps, m = _probs(rec)
     answers = to_answers(ps, meta)
@@ -100,6 +102,7 @@ def systemone_permute(r: PermuteSystemOne):
         order = list(keys)
         if i > 0: rng.shuffle(order)
         req = r.request.model_copy(update={"questions": {r.question: q.model_copy(update={"criteria": {k: q.criteria[k] for k in order}})}})
+        if DATE_FACTS: req = req.model_copy(update={"state": with_date_facts(req.state)})
         rec, meta = to_record(req); ps, m = _probs(rec)
         a = to_answers(ps, meta)[r.question]
         runs.append({"order": order, "probabilities": a["probabilities"], "choice": a["choice"], "latency_ms": m["latency_ms"]})
@@ -112,7 +115,7 @@ def systemone_separate(req: SystemOneRequest):
     """Answer each question in its own request against the same state (N passes). For packed-vs-separate comparison."""
     answers, tokens, ms = {}, 0, 0.0
     for qid, q in req.questions.items():
-        rec, meta = to_record(req.model_copy(update={"questions": {qid: q}})); ps, m = _probs(rec)
+        rec, meta = to_record(req.model_copy(update={"questions": {qid: q}, **({"state": with_date_facts(req.state)} if DATE_FACTS else {})})); ps, m = _probs(rec)
         answers.update(to_answers(ps, meta)); tokens += m["tokens"]; ms += m["latency_ms"]
     return {"model": req.model, "answers": answers, "usage": {"input_tokens": tokens, "output_tokens": output_tokens(STATE["tok"], answers)}, "latency_ms": round(ms, 1)}
 

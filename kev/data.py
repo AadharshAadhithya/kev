@@ -319,6 +319,8 @@ def augment(req, rng, p_none=0.1, p_none_distract=0.12, p_distract=0.15):
         if q["type"] != "choice":
             out["questions"][qid] = q; continue
         crit, y = dict(q["criteria"]), q["label"]
+        if q.get("target") is not None:                       # soft-target questions: permute only; inserting or swapping options would change the target's meaning
+            keys = list(crit); rng.shuffle(keys); out["questions"][qid] = {**q, "criteria": {k: crit[k] for k in keys}}; continue
         r = rng.random()
         none_options = [(k, v) for k, v in NONE_OPTIONS if k not in crit]
         distractors = [k for k in DISTRACTORS if k not in crit]
@@ -384,4 +386,10 @@ def materialize(req):
         q["label"] = int(y) if m["type"] == "noul" else m["keys"].index(y) if m["type"] == "choice" else int(y)
         q["src"] = src_q["src"]; q["qtype"] = m["type"]; q["qid"] = qid
         q["keys"] = m["keys"] if m["type"] == "choice" else ["false", "true"] if m["type"] == "noul" else [str(i) for i in range(len(q["options"]))]
+        if src_q.get("target") is not None:
+            # soft target keyed by option name (choice), "false"/"true" (noul) or level index as a string (score); options the
+            # target does not name get 0, then the vector is normalised. Used for unknowable records (uniform over the options).
+            t = [float(src_q["target"].get(k, 0.0)) for k in q["keys"]]
+            if sum(t) <= 0: raise ValueError(f"target for {qid} puts no mass on any option")
+            q["target"] = [x / sum(t) for x in t]
     return rec

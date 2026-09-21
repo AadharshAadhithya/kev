@@ -303,6 +303,7 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--device", choices=["cpu", "mps", "cuda"], default=default_device())
     ap.add_argument("--allow-test", action="store_true")
+    ap.add_argument("--date_facts", action="store_true", help="apply kev.api.with_date_facts to every state before scoring (the opt-in serving preprocessor); reported in report.json")
     a = ap.parse_args()
     if bool(a.run) == bool(a.remote): ap.error("give exactly one of --run or --remote")
     if bool(a.suite) == bool(a.data): ap.error("give exactly one of --suite or --data")
@@ -313,10 +314,13 @@ def main():
         split = "test" if a.allow_test else "development"
         records = load_split(a.suite, split, allow_test=a.allow_test)
         heldout = json.loads((Path(a.suite) / "manifest.json").read_text())["holdout_sources"]; source_hash = digest(Path(a.suite) / "manifest.json")
+    if a.date_facts:
+        from kev.api import with_date_facts
+        records = [{**r, "state": with_date_facts(r["state"])} for r in records]
     import os
     predictor = RemotePredictor(a.remote, a.remote_model, os.environ.get("KEV_REMOTE_API_KEY", "local")) if a.remote else LocalPredictor(a.run, a.device)
     report, _ = evaluate_records(records, predictor, a.out, heldout_sources=tuple(heldout))
-    report.update(suite_sha256=source_hash, data=a.data, run=a.run or a.remote, split=split, calibration_applied=False,
+    report.update(suite_sha256=source_hash, data=a.data, date_facts=a.date_facts, run=a.run or a.remote, split=split, calibration_applied=False,
                   remote={"base_url": a.remote, "requested_model": a.remote_model, "served_model": predictor.served_model} if a.remote else None)
     write_json(Path(a.out) / "report.json", report)
     print(json.dumps({"objective": report["objective"], "clean": report["clean"], "coverage": report["coverage"]}, indent=2))

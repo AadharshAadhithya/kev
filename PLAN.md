@@ -52,7 +52,90 @@ Spend tonight ≈ $105 (probes $14, deltas 12 × ~$1.5, dense $5, benches ~$15, 
 3. **`date_facts` preprocessor** shipped opt-in (`KEV_DATE_FACTS=1`), documented as preprocessing with separate numbers.
 4. The Qwen3.6-35B-A3B checkpoint stays a research artifact.
 
-## Round 3 autoresearch — training-side calibration (proposed 2026-09-21; not started)
+## Round 3 autoresearch — audited execution on `research/calibration-audit`
+
+**Execution order approved:** metric audit → failure audit → matched loss screen → replicate a promising candidate → fresh final audit → decide whether a larger-model study is justified. No published weights or production deployment will be changed by this round. The binding machine-readable protocol is [`experiments/calibration-audit-protocol.json`](experiments/calibration-audit-protocol.json); it is frozen before new training results.
+
+### Measurement and failure audit
+
+- [`scripts/calibration_audit.py`](scripts/calibration_audit.py) re-scores saved development predictions into a **new** [`report`](runs/calibration-audit-v1/report.json), leaving the originals unchanged. The old coverage metric could split equal-confidence ties and gave 0.94 or 0.00 for the same synthetic predictions under a row permutation. Version 2 admits whole tie groups. Jev's observed coverage changes from 0.704 to 0.695; the saved Kev values are unchanged (4B 0.573, 9B 0.447 after approximate temperature replay).
+- Coverage is a non-additive statistic: the paired bootstrap now resamples complete record groups and recomputes the curve, rather than bootstrapping per-row coverage values. The wide intervals on this small set motivate reporting the entire risk–coverage curve and AURC, not claiming a deployment guarantee from one empirical 5% cutoff. AURC uses a documented right-step integral over complete confidence groups. See [`kev/benchmark.py`](kev/benchmark.py) and its regression tests in [`tests/test_research.py`](tests/test_research.py).
+- The previous statement that temperature cannot reorder confidence was incorrect. Positive temperature preserves each question's argmax, but may reorder top probabilities between multiclass questions, including equal-K questions. New local evaluations preserve raw logits and record effective temperature; historical probability replay is explicitly marked approximate because it applies a floor to rounded/saturated probabilities.
+- High-confidence-error **share** divides by all questions; error **among accepted answers** divides by accepted questions. At p_max ≥ 0.9, saved Kev-9B has 26/656 = 4.0% of all questions wrong but 6.8% error among accepted answers. These are not interchangeable calibration claims.
+- The [AI-assisted failure audit](runs/calibration-audit-v1/summary.json) inspects 26 confident errors and 26 matched correct controls. It finds executable rule errors, omitted facts, role-binding mistakes, ambiguous renderings, and possible annotation inconsistencies. **No label is changed, and this is not human adjudication.** [PAWS](https://arxiv.org/abs/1904.01130) is an adversarial human-judged reading benchmark; difficulty and teacher disagreement do not prove label noise. Cross-entropy is a proper scoring rule, not an established root cause of these failures. [Guo et al.](https://arxiv.org/abs/1706.04599) motivates calibration measurement, not a causal diagnosis of Kev.
+
+### Small, matched screen
+
+Use the pinned Kev-4B parent from the protocol, seed 11, one epoch, lr 2e-5, effective batch 8. All four arms see the exact same 3,425 frozen training records, augmentations, ordering, and number of optimizer updates. A re-evaluated unchanged parent and a standard-CE continuation control are both required.
+
+| arm | loss on hard-labelled questions | motivation |
+|---|---|---|
+| CE control | ordinary cross-entropy | separates extra training from changing the loss |
+| smoothing | CE against `(1−0.05) one_hot(y) + 0.05/K` | limited regularization, not assumed equivalent to temperature; [Müller et al.](https://arxiv.org/abs/1906.02629) |
+| CE + Brier | CE + 0.5 × sum of squared probability error | proper-scoring alternative; [Gneiting & Raftery](https://doi.org/10.1198/016214506000001437) |
+| focal | `(1−p_y) × CE` (gamma 1) | empirical hard-example weighting; no promised calibration gain; [Mukhoti et al.](https://arxiv.org/abs/2002.09437) |
+
+Existing soft-target records use the same soft-target CE in every arm. Temperature is fitted from raw logits on **decision-r3/calibration**, never on development or final-test labels. Report both raw and recalibrated metrics, per-source results, and all failed trials. Teacher relabelling, the entropy-penalty grid, full retraining, and ensembles are deferred until there is evidence to justify them.
+
+**Screening gate:** at least +5 percentage points of tie-aware micro coverage against **both** CE control and recalibrated parent; micro accuracy no more than 1 point worse; no source more than 5 points worse; AURC no worse. This screening gate is exploratory, not a significance claim. Advance at most one recipe, ranked by coverage, then AURC, NLL, and fixed arm order. If none passes, stop and leave the fresh test unscored.
+
+**Replication gate:** best loss versus matched CE controls at seeds 12 and 13 on 4B and 9B, within the remaining budget. Require positive coverage differences at both seeds and ≥5 points mean gain, the same accuracy/AURC constraints, unknowable high-confidence share ≤0.05, and intact-control accuracy within 2 points of the parent. Write the chosen checkpoint hashes before any final read. Record-group bootstrap intervals do not measure training-seed variability; report seeds separately.
+
+### Fresh final audit and spend control
+
+[`scripts/freeze_calibration_audit.py`](scripts/freeze_calibration_audit.py) freezes [`decision-r3`](evals/round3/decision-r3/manifest.json) and [`transfer-r3`](evals/round3/transfer-r3/manifest.json). The latter contains 580 new threshold-calibration records and **1,260 new final-test records**, including separate unknowable/control diagnostics. The builder excludes recorded prior normalized states and public-source origins, preserves generated groups, and verifies zero final-test overlap with training, calibration, and development. This does not establish absence from foundation-model pretraining. No fresh-test predictions have been read at registration.
+
+A qualifying recipe is evaluated once against its pinned parent and matching CE control. Select acceptance thresholds using the fresh threshold-calibration partition, then freeze them and apply them to the final set without re-selection. Recommend promotion only if the final coverage gain is ≥5 points against both controls with paired 95% CI lower bound >0, accuracy CI lower bound ≥−1 point, AURC no worse, and fixed-threshold empirical risk ≤5% on at least 100 accepted knowable questions. Report failure rather than choosing another candidate after reading this set. Previous test partitions are now historical regression evidence, not untouched confirmation.
+
+Modal reports **$392.14 metered** at registration; this supersedes the previous unverified $475 estimate. The user subsequently authorized **$1,000 total**, before any new training runs. Keep the initial stage within **$60**; reserve further spending only for evidence-backed follow-ups, with a conservative $600 additional ceiling and a fresh billing check before each stage. Experimental gates are unchanged by the budget increase. Bound launches using the actual requested CPU, memory and GPU limits; do not redeploy `kev-research`, cancel other jobs, overwrite outputs, move release tags, or publish checkpoints. The possible $10,000 credit grant is not authorized spend. The larger-model work in [`PLAN_27b.md`](PLAN_27b.md) remains gated.
+
+### Round 3 screening result — stopped at the registered gate
+
+All five jobs completed under [`calibration-screen-4b-s11-r2`](runs/calibration-screen-4b-s11-r2/results.jsonl). Each trained arm used exactly **3,899 records including augmentations, 429 optimizer steps, and 639,399 forward tokens** from the same 3,425-record corpus. The initial startup failed before training because the optional HF-secret dependency was declared differently locally and remotely; its five calls were cancelled with explicit approval, the environment was corrected, and the failed attempt is [recorded separately](runs/calibration-screen-startup/report.json). The production app was not redeployed.
+
+[Full comparison and paired intervals](runs/calibration-screen-review-v1/report.json), [concise outcome](runs/calibration-screen-review-v1/summary.json), [risk–coverage curves](runs/calibration-screen-review-v1/risk-coverage-final.png), and [`scripts/review_calibration_screen.py`](scripts/review_calibration_screen.py). All values below are on the same 656 clean development questions, after fitting each checkpoint's temperature on the same independent calibration partition using raw logits. No test labels were used for fitting or selection. The generic runner's legacy NLL-based candidate flag is not this protocol's promotion gate; the authoritative screen selected no candidate.
+
+| arm | accuracy | coverage at ≤5% empirical error | AURC ↓ | Brier ↓ | ECE ↓ |
+|---|---|---|---|---|---|
+| unchanged Kev-4B, recalibrated | 0.7973 | **0.5762** | **0.0580** | **0.2653** | 0.0478 |
+| CE continuation control | 0.7973 | 0.5320 | 0.0625 | 0.2737 | 0.0519 |
+| label smoothing, epsilon 0.05 | 0.8018 | 0.0061 | 0.1001 | 0.2879 | 0.0671 |
+| CE + Brier, weight 0.5 | 0.7973 | 0.5259 | 0.0628 | 0.2744 | 0.0561 |
+| focal, gamma 1 | 0.7988 | 0.5015 | 0.0606 | 0.2678 | **0.0433** |
+
+**Decision: no candidate advances.** Focal improves ECE slightly but not selective coverage or AURC. Smoothing slightly improves accuracy while harming ranking: AURC difference versus parent +0.0422 [95% CI +0.0228, +0.0651]. CE continuation also worsens selective performance, confirming why the matched control was necessary. These are results for one seed, one epoch and one setting per loss; they do not show that these losses fail universally.
+
+As registered, **no replication, fresh threshold-calibration read, final-test read, publication, or larger-model run** follows this negative screen. The 1,260-record final panel remains unscored and available for a future preregistered candidate. The reasonable next question is a targeted data/capability experiment (for example, controlled role-binding counterexamples from permitted training sources), not an expanded loss grid or automatic relabelling of PAWS. It needs its own registration before spending.
+
+Workspace metering initially showed $403.87 after the pass, then revised to **$398.32** on the final check: about **$6.18 above the $392.14 starting reading**, subject to billing lag and workspace attribution. Both observations are retained in the outcome summary; neither is an exact per-trial invoice. The authorized ceiling is $1,000, not a target to spend. The successful screen's conservative function-execution admission bound was $18.92, excluding startup/storage. No historical benchmark file or published checkpoint was overwritten.
+
+### Training-data investigation after the negative screen
+
+Analysis first, no training launched. Where the current checkpoints fail on the rule tasks ([`runs/binding-diagnostic-v1/report.json`](runs/binding-diagnostic-v1/report.json), [`scripts/build_binding_diagnostic.py`](scripts/build_binding_diagnostic.py)):
+
+- **Every Kev-4B rule error on `transfer-v4` development involves an `elapsed` (date-difference) atom**: 0.78 on structures with one, 1.00 on the 64 without; with `KEV_DATE_FACTS=1` 0.94. The 564 compositional training records with `elapsed` atoms never state a day count. Errors are not near the threshold (they occur at a +10-day margin too), so this is absent arithmetic, not off-by-one.
+- **Kev-9B's ten rule errors sit in four generated groups** (three renderings each), all confident `accept` on `reject` labels, all with `match` ("X is the same person as Y") or `elapsed` atoms. On the existing rows 9B scored 0/6 when a compared name recurred elsewhere in the case — but those six items are two groups.
+
+A fresh eval-only diagnostic (560 records, code labels, new seed, disjoint from every frozen suite; inference only, ~$2) tested both readings with real sample sizes:
+
+| stratum (n) | Kev-4B | Kev-9B |
+|---|---|---|
+| match true (120) | 0.992 | 0.992 |
+| mismatch, clean (120) | 0.975 | 0.967 |
+| mismatch, decoy name in another role (120) | 0.917 | 0.967 |
+| mismatch, second matching pair shares a name (120) | 0.967 | 1.000 |
+| elapsed rule, dates only (40) | 0.650 | 0.750 |
+| same cases with the day count stated (40) | **1.000** | **0.975** |
+
+**H1 (dates) confirmed:** 14 (4B) and 9 (9B) paired cases flip from wrong to right when the day count is stated; none flip back. The models already use a stated count; what they cannot do is subtract. That makes it a **serving question, not a training-data one**: training on day-count renderings would not change the plain case, and the earlier ablations showed fine-tuning erodes rather than teaches the arithmetic. The decision to take is whether `KEV_DATE_FACTS` becomes the serving default (development accuracy 0.797 → 0.820 at 4B, 0.822 → 0.828 at 9B, no observed harm elsewhere) — a product choice, still reported as preprocessing.
+
+**H2 (name-co-occurrence shortcut) not supported:** at 9B the decoy strata equal the clean stratum. The 0/6 was two correlated groups — exactly the small-sample trap the audit warned about. Kev-4B shows a small effect (0.917 vs 0.975, 9 of 10 errors answer `accept`), worth at most ~1 pp on rule tasks; decoy-augmented training data is not a priority.
+
+**Not pursued:** PAWS-style role binding in natural text. There is no permitted programmatic source that yields reliable labels for swapped-role paraphrases, and PAWS itself stays eval-only; this would need human-labelled data and its own registration.
+
+### Superseded initial round-3 proposal (retained for the research record)
+
+The draft below predates the metric/failure audit. Its causal claims, teacher identity, budget and timing estimates, temperature-ordering argument, and test-selection procedure are superseded by the registered execution protocol above; they are not instructions for this run.
 
 **Why.** After the built-in temperature, Kev's probabilities have the right *scale* — Kev-9B out-of-domain ECE 0.042, confident errors 4.0 % ([card](docs/model-cards/kev-9b.md); Jev 0.049 / 3.7 % on the same items, [`runs/jev-transfer-v4/report.json`](runs/jev-transfer-v4/report.json)) — but not the right *order*. Coverage at a ≤ 5 % error budget, the share of decisions that can be accepted in confidence order before the accepted set exceeds 5 % error ([`kev/benchmark.py: coverage_at_error`](kev/benchmark.py), the metric from [AbdelStark/jev-benchmarks](https://github.com/AbdelStark/jev-benchmarks)), is **0.45 at 9B and 0.57 at 4B vs Jev's 0.70**. A temperature is monotone within a question, so it cannot move this ([`scripts/temperature_groups.py`](scripts/temperature_groups.py): coverage 0.53 → 0.52 at T = 2.0). The ceiling at Kev-9B's accuracy (0.822) is 0.86 if confidence ranked correctness perfectly; the gap to Jev is ordering, not accuracy.
 

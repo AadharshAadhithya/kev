@@ -22,10 +22,27 @@ from pathlib import Path
 
 import modal
 
-APP_NAME = "kev-research"
+APP_NAME = os.environ.get("KEV_APP_NAME", "kev-research")
+TRIAL_CPU, TRIAL_MEMORY = 4, (65536, 196608)
+GPU_HOURLY = {"H100": 3.95, "H200": 4.54, "B200": 6.25, "T4": 0.59}
+
+
+def compute_bound(gpu, timeout, trials):
+    if gpu not in GPU_HOURLY or timeout <= 0 or trials < 1:
+        raise ValueError("invalid GPU, timeout, or trial count")
+    return (GPU_HOURLY[gpu] + TRIAL_CPU * 0.04730 + TRIAL_MEMORY[1] / 1024 * 0.008) * timeout / 3600 * trials
+
 ROOT = Path(__file__).resolve().parent
 RUNS_MOUNT, HF_MOUNT = "/runs", "/hf"
 GPU = os.environ.get("KEV_GPU", "H100")   # H100 needs a payment method on the workspace; KEV_GPU=T4 for the free tier
+
+def worker_environment(app_name, gpu, secret_name=None):
+    env = {"HF_HOME": HF_MOUNT, "HF_HUB_DISABLE_PROGRESS_BARS": "1", "TOKENIZERS_PARALLELISM": "false", "PYTHONUNBUFFERED": "1",
+           "KEV_APP_NAME": app_name, "KEV_GPU": gpu}
+    if secret_name:
+        env["KEV_HF_SECRET"] = secret_name
+    return env
+
 
 app = modal.App(APP_NAME)
 image = (
@@ -35,7 +52,7 @@ image = (
     # Gated DeltaNet kernels for the Qwen3.5 hybrid backbones (transformers falls back to slow reference code without them)
     # fla refuses its gated chunk backward on Hopper with Triton 3.4-3.7.0 (incorrect results, fla#640); torch 2.8 pins 3.4
     .uv_pip_install("flash-linear-attention", "triton>=3.7.1")
-    .env({"HF_HOME": HF_MOUNT, "HF_HUB_DISABLE_PROGRESS_BARS": "1", "TOKENIZERS_PARALLELISM": "false", "PYTHONUNBUFFERED": "1"})
+    .env(worker_environment(APP_NAME, GPU, os.environ.get("KEV_HF_SECRET")))
     .add_local_python_source("kev")
     .add_local_file(ROOT / "uv.lock", "/root/uv.lock")
     .add_local_file(ROOT / "pyproject.toml", "/root/pyproject.toml")
@@ -64,7 +81,7 @@ def remote_source_hashes():
     return source_hashes()
 
 
-@app.function(image=image, gpu=GPU, cpu=4, memory=(65536, 196608), max_containers=8, retries=0, timeout=14400,   # a 35B-A3B bf16 checkpoint (70 GB) is staged through host memory while loading; the old 48 GB cap stalled the container
+@app.function(image=image, gpu=GPU, cpu=TRIAL_CPU, memory=TRIAL_MEMORY, max_containers=8, retries=0, timeout=14400,   # a 35B-A3B bf16 checkpoint (70 GB) is staged through host memory while loading; the old 48 GB cap stalled the container
               volumes={RUNS_MOUNT: runs_volume, HF_MOUNT: hf_cache}, secrets=secrets)
 def run_trial(study, index, label, config, suite, expected_sources, git_commit, existing=None, transfer=None):
     """One trial in one container. `existing` is a checkpoint path on the runs volume or a Hub id (legacy scoring)."""
@@ -213,8 +230,7 @@ def launch_detached(suite, plan_path, name, gpu, existing=(), transfer=None, bud
     if (ROOT / "runs" / name).exists(): raise FileExistsError("choose a new study name; existing results are immutable")
     if not 60 <= timeout <= 14400 or not 0 < budget <= 250: raise ValueError("timeout must be 60..14400 seconds and study budget <= $250")
     trials = load_plan(ROOT / suite, ROOT / plan_path) if plan_path else []
-    rates = {"H100": 3.95, "H200": 4.54, "B200": 6.25, "T4": .59}
-    upper = (rates[gpu] + 2 * .04730 + 48 * .008) * timeout / 3600 * (len(trials) + len(existing))
+    upper = compute_bound(gpu, timeout, len(trials) + len(existing))
     if upper > budget: raise ValueError(f"timeout-based compute bound ${upper:.2f} exceeds budget ${budget:.2f}")
     commit, sources = local_git_commit(), local_source_hashes()
     if subprocess.run(["git", "status", "--porcelain", "kev", "evals"], cwd=ROOT, capture_output=True, text=True).stdout.strip():
@@ -262,10 +278,7 @@ def launch(suite, plan_path, name, gpu, existing=(), transfer=None, budget=20.0,
     if not 60 <= timeout <= 14400 or not 0 < budget <= 250:   # overnight authorization: $500 total, tracked in PLAN.md
         raise ValueError("timeout must be 60..14400 seconds and study budget <= $250")
     trials = load_plan(ROOT / suite, ROOT / plan_path) if plan_path else []
-    rates = {"H100": 3.95, "H200": 4.54, "B200": 6.25, "T4": .59}
-    if gpu not in rates:
-        raise ValueError("no verified cost bound for this GPU")
-    upper = (rates[gpu] + 2 * .04730 + 48 * .008) * timeout / 3600 * (len(trials) + len(existing))
+    upper = compute_bound(gpu, timeout, len(trials) + len(existing))
     if upper > budget:
         raise ValueError(f"timeout-based compute bound ${upper:.2f} exceeds budget ${budget:.2f}")
     print(f"Compute admission bound ${upper:.2f}; excludes image build, startup, and storage; no automatic retries.", flush=True)

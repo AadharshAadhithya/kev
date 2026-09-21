@@ -259,3 +259,239 @@ def test_contrastive_eval_split_is_stratified_by_family():
         fams = Counter(r["_meta"]["family"] for r in part)
         assert set(fams) == {"authorization", "deadline"} and all(v == 6 for v in fams.values())
         assert all(a["_meta"]["pair_id"] == b["_meta"]["pair_id"] for a, b in zip(part[::2], part[1::2]))
+
+
+def test_coverage_cannot_split_equal_confidence_ties():
+    from kev.benchmark import coverage_at_error
+    correct = [True] * 90 + [False] * 10
+    assert coverage_at_error([0.99] * 100, correct, 0.05) == 0.0
+    assert coverage_at_error([0.99] * 100, correct[::-1], 0.05) == 0.0
+    assert coverage_at_error([0.99] * 100, correct, 0.1) == 1.0
+    assert coverage_at_error([], [], 0.05) == 0.0
+
+
+def test_risk_curve_thresholds_and_nonmonotone_risk():
+    from kev.benchmark import coverage_at_error, risk_coverage_curve
+    curve = risk_coverage_curve([0.99, 0.99, 0.9, 0.8], [True, False, True, True])
+    assert [p["accepted"] for p in curve] == [2, 3, 4]
+    assert [p["threshold"] for p in curve] == [0.99, 0.9, 0.8]
+    assert [p["risk"] for p in curve] == pytest.approx([0.5, 1 / 3, 0.25])
+    assert coverage_at_error([0.99, 0.99, 0.9, 0.8], [True, False, True, True], 0.25) == 1.0
+
+
+@pytest.mark.parametrize("confidence,correct,budget", [
+    ([float("nan")], [True], 0.05), ([1.1], [True], 0.05),
+    ([0.5], [], 0.05), ([[0.5]], [True], 0.05), ([0.5], [True], -0.1),
+])
+def test_selective_metrics_reject_invalid_inputs(confidence, correct, budget):
+    from kev.benchmark import coverage_at_error
+    with pytest.raises(ValueError):
+        coverage_at_error(confidence, correct, budget)
+
+
+def test_fixed_threshold_does_not_reselect_using_evaluation_labels():
+    from kev.benchmark import select_threshold, evaluate_threshold
+    threshold = select_threshold([0.99, 0.98, 0.97, 0.6], [True, True, True, False], 0.05)
+    assert threshold == 0.97
+    result = evaluate_threshold([0.99, 0.7, 0.6], [False, True, True], threshold)
+    assert result["accepted"] == 1 and result["errors"] == 1 and result["risk"] == 1.0
+    assert result["coverage"] == pytest.approx(1 / 3)
+    empty = evaluate_threshold([0.99], [True], None)
+    assert empty["coverage"] == 0 and empty["risk"] is None
+
+
+def test_global_coverage_bootstrap_recomputes_full_statistic():
+    from kev.benchmark import metrics, paired_bootstrap
+    candidate, reference = [], []
+    for i in range(20):
+        common = {"id": str(i), "group": "one-cluster", "source": "fixture", "task": "fixture",
+                  "question": "q", "variant": "clean", "type": "choice", "keys": ["a", "b"], "label": 0}
+        candidate.append({**common, "p": [0.99, 0.01] if i < 18 else [0.4, 0.6]})
+        reference.append({**common, "p": [0.6, 0.4] if i < 18 else [0.01, 0.99]})
+    assert metrics(candidate)["acc"] == metrics(reference)["acc"]
+    result = paired_bootstrap(candidate, reference, samples=50, metric="coverage_at_5pct_error", aggregation="micro")
+    assert result["micro_coverage_at_5pct_error_delta"] == pytest.approx(0.9)
+    assert result["ci95"] == pytest.approx([0.9, 0.9])
+    assert result["groups"] == 1
+    assert paired_bootstrap(candidate, candidate, samples=50, metric="aurc", aggregation="micro")["ci95"] == [0, 0]
+
+
+def test_bootstrap_rejects_duplicate_or_inconsistent_pairs():
+    from kev.benchmark import paired_bootstrap, prediction_rows
+    rows = prediction_rows(frozen_request(), {"probabilities": {"reason": {"size": 0.8, "damage": 0.1, "color": 0.1}}})
+    with pytest.raises(ValueError, match="duplicate"):
+        paired_bootstrap(rows + rows, rows)
+    with pytest.raises(ValueError, match="group"):
+        paired_bootstrap(rows, [{**rows[0], "group": "different"}])
+
+
+def test_temperature_preserves_argmax_but_not_cross_question_ranking():
+    import numpy as np
+    from kev.benchmark import probabilities_at_temperature
+    rows = [{"p": [0.6, 0.2, 0.2]}, {"p": [0.55, 0.449, 0.001]}]
+    calibrated = [probabilities_at_temperature(r, 2.0) for r in rows]
+    assert max(rows[0]["p"]) > max(rows[1]["p"])
+    assert calibrated[0].max() < calibrated[1].max()
+    assert all(np.argmax(r["p"]) == p.argmax() for r, p in zip(rows, calibrated))
+
+
+def test_calibration_uses_logits_without_probability_floor_distortion():
+    import numpy as np
+    from kev.benchmark import probabilities_at_temperature
+    p = probabilities_at_temperature({"p": [1.0, 0.0], "logits": [0.0, -100.0]}, 2.0)
+    assert p[1] == pytest.approx(np.exp(-50), rel=1e-6, abs=0)
+    for temperature in (0, -1, float("nan"), float("inf")):
+        with pytest.raises(ValueError):
+            probabilities_at_temperature({"p": [0.5, 0.5]}, temperature)
+
+
+def test_unknowable_not_in_raw_or_calibrated_accuracy_denominator():
+    from kev.benchmark import prediction_rows, summarize
+    rows = prediction_rows(frozen_request(), {"probabilities": {"reason": {"size": 0.8, "damage": 0.1, "color": 0.1}}})
+    rows.append({**rows[0], "id": "unk", "source": "unknowable", "task": "unknowable_test"})
+    result = summarize(rows, temperature=2.0)
+    assert result["clean"]["n"] == result["calibrated_clean"]["n"] == 1
+    assert result["metric_policy"]["selective_ties"] == "whole_confidence_groups"
+
+
+def test_logits_are_recorded_in_option_order():
+    from kev.benchmark import prediction_rows
+    prediction = {"probabilities": {"reason": {"size": 0.8, "damage": 0.1, "color": 0.1}},
+                  "logits": {"reason": {"color": -2.0, "damage": -2.0, "size": 0.0}}, "inference_temperature": 1.0}
+    row = prediction_rows(frozen_request(), prediction)[0]
+    assert row["logits"] == [0.0, -2.0, -2.0] and row["inference_temperature"] == 1.0
+    prediction["logits"]["reason"]["size"] = float("inf")
+    with pytest.raises(ValueError, match="logit"):
+        prediction_rows(frozen_request(), prediction)
+
+
+def test_risk_curve_area_has_explicit_tie_policy():
+    from kev.benchmark import area_under_risk_coverage
+    assert area_under_risk_coverage([0.99, 0.9, 0.8], [True, True, False]) == pytest.approx(1 / 9)
+    assert area_under_risk_coverage([0.99] * 10, [True] * 9 + [False]) == pytest.approx(0.1)
+    assert area_under_risk_coverage([0.99] * 10, [False] + [True] * 9) == pytest.approx(0.1)
+
+
+@pytest.mark.parametrize("options", [{}, {"label_smoothing": 0.05}, {"brier_w": 0.5}, {"focal_gamma": 1.0}])
+def test_training_losses_match_definitions(options):
+    z = torch.tensor([0.4, -0.7, 1.2], requires_grad=True)
+    q = {"label": 1, "qtype": "choice"}
+    ce = torch.nn.functional.cross_entropy(z[None], torch.tensor([1]))
+    target = torch.nn.functional.one_hot(torch.tensor(1), 3).float()
+    expected = ce
+    if "label_smoothing" in options:
+        epsilon = options["label_smoothing"]
+        expected = -(((1 - epsilon) * target + epsilon / 3) * z.log_softmax(-1)).sum()
+    elif "brier_w" in options:
+        expected = ce + options["brier_w"] * (z.softmax(-1) - target).square().sum()
+    elif "focal_gamma" in options:
+        expected = (1 - z.softmax(-1)[1]) ** options["focal_gamma"] * ce
+    actual = question_loss(z, q, "cpu", 0, **options)
+    assert torch.allclose(actual, expected)
+    actual.backward()
+    assert torch.isfinite(z.grad).all()
+
+
+def test_brier_mixture_is_proper_and_soft_targets_unchanged():
+    distribution = torch.tensor([0.2, 0.3, 0.5])
+    logits = distribution.log().requires_grad_()
+    expected_loss = sum(p * question_loss(logits, {"label": i, "qtype": "choice"}, "cpu", 0, brier_w=0.5)
+                        for i, p in enumerate(distribution))
+    expected_loss.backward()
+    assert logits.grad.abs().max() < 1e-6
+    soft = {"label": 0, "qtype": "choice", "target": [1 / 3] * 3}
+    base = question_loss(logits, soft, "cpu", 0)
+    for options in ({"label_smoothing": 0.05}, {"brier_w": 0.5}, {"focal_gamma": 1.0}):
+        assert torch.equal(question_loss(logits, soft, "cpu", 0, **options), base)
+
+
+@pytest.mark.parametrize("bad", [{"label_smoothing": -0.1}, {"label_smoothing": 1.1}, {"brier_w": float("nan")},
+                                  {"focal_gamma": -1}, {"brier_w": 0.5, "focal_gamma": 1.0}])
+def test_loss_options_fail_before_training(bad):
+    with pytest.raises(ValueError):
+        question_loss(torch.zeros(3), {"label": 0, "qtype": "choice"}, "cpu", 0, **bad)
+
+
+def test_trial_accepts_one_registered_loss_change():
+    from kev.experiment import validated_trial
+    manifest = {"base_revisions": {"model": "pinned"}}
+    for flag, value in (("label_smoothing", 0.05), ("brier_w", 0.5), ("focal_gamma", 1.0)):
+        assert validated_trial({"base": "model", flag: value}, manifest)[flag] == value
+    with pytest.raises(ValueError):
+        validated_trial({"base": "model", "brier_w": 0.5, "focal_gamma": 1.0}, manifest)
+
+
+def test_temperature_fit_requires_raw_rows_and_uses_true_logit_nll():
+    from kev.benchmark import fit_temperature, nll_at_temperature
+    row = {"variant": "clean", "source": "fixture", "task": "fixture", "p": [1.0, 0.0],
+           "logits": [0.0, -100.0], "label": 1, "inference_temperature": 1.0}
+    assert nll_at_temperature(row, 2.0) == pytest.approx(50.0)
+    assert fit_temperature([row], aggregation="micro") == pytest.approx(4.0)
+    with pytest.raises(ValueError, match="raw logits"):
+        fit_temperature([{**row, "inference_temperature": 2.0}])
+
+
+def test_training_plan_matches_registered_screen():
+    import json
+    from pathlib import Path
+    from kev.experiment import load_plan
+    root = Path(__file__).resolve().parents[1]
+    protocol = json.loads((root / "experiments/calibration-audit-protocol.json").read_text())
+    trials = load_plan(root / protocol["data"]["decision_suite"], root / "experiments/calibration-screen-4b.json")
+    loss_keys = {"label_smoothing", "brier_w", "focal_gamma"}
+    assert len(trials) == len(protocol["screen"]["arms"]) == 4
+    assert all({k: v for k, v in t.items() if k not in loss_keys} == {k: v for k, v in trials[0].items() if k not in loss_keys} for t in trials)
+    assert trials[0]["init_from"] == protocol["parents"]["4b"]
+    for trial, arm in zip(trials, protocol["screen"]["arms"]):
+        assert all(trial[k] == arm[k] for k in loss_keys)
+
+
+def test_modal_compute_bound_includes_requested_memory_and_cpu():
+    from modal_app import TRIAL_CPU, TRIAL_MEMORY, compute_bound
+    expected = 3.95 + TRIAL_CPU * 0.04730 + TRIAL_MEMORY[1] / 1024 * 0.008
+    assert compute_bound("H100", 3600, 1) == pytest.approx(expected)
+    with pytest.raises(ValueError):
+        compute_bound("unknown", 3600, 1)
+
+
+def test_modal_worker_preserves_object_dependency_environment():
+    from modal_app import worker_environment
+    env = worker_environment("kev-calibration-audit", "H100", "named-secret")
+    assert env["KEV_APP_NAME"] == "kev-calibration-audit"
+    assert env["KEV_GPU"] == "H100" and env["KEV_HF_SECRET"] == "named-secret"
+    assert "HF_TOKEN" not in env
+    assert "KEV_HF_SECRET" not in worker_environment("kev-research", "H100")
+
+
+def test_screen_requires_beating_continuation_control_not_just_parent():
+    from scripts.review_calibration_screen import screen_checks
+    def result(cov):
+        return {"micro": {"coverage_at_5pct_error": cov, "acc": 0.8, "aurc": 0.05}, "sources": {"x": {"acc": 0.8}}}
+    rule = {"coverage_delta_vs_ce_control_min": 0.05, "coverage_delta_vs_recalibrated_parent_min": 0.05,
+            "accuracy_delta_vs_each_min": -0.01, "aurc_delta_vs_each_max": 0, "per_source_accuracy_delta_min": -0.05}
+    checks = screen_checks(result(0.6), {"parent": result(0.5), "ce-control": result(0.59)}, rule)
+    assert checks["coverage_vs_parent"] and not checks["coverage_vs_ce-control"]
+
+
+def test_final_audit_partition_remains_bound_to_registration():
+    import json
+    from pathlib import Path
+    from kev.suite import digest, load_split
+    root = Path(__file__).resolve().parents[1]
+    protocol = json.loads((root / "experiments/calibration-audit-protocol.json").read_text())
+    suite = root / protocol["data"]["development_suite"]
+    assert digest(suite / "test.jsonl") == protocol["data"]["fresh_test_sha256"]
+    assert digest(suite / "calibration.jsonl") == protocol["data"]["fresh_threshold_sha256"]
+    with pytest.raises(ValueError, match="locked test"):
+        load_split(suite, "test")
+
+
+def test_tempered_replay_records_effective_temperature():
+    from scripts.calibration_audit import tempered
+    from kev.benchmark import fit_temperature
+    raw = {"variant": "clean", "source": "fixture", "task": "fixture", "p": [0.9, 0.1],
+           "logits": [2.197224577, 0.0], "label": 0, "inference_temperature": 1.0}
+    rows = tempered([raw], 2.0)
+    assert raw["inference_temperature"] == 1.0 and rows[0]["inference_temperature"] == 2.0
+    with pytest.raises(ValueError, match="raw logits"):
+        fit_temperature(rows)

@@ -79,7 +79,7 @@ def main():
     ap.add_argument("--option_isolation", type=int, choices=[0, 1], default=0, help="option spans are isolated sub-branches with shared positions (exact permutation invariance)")
     ap.add_argument("--special_embeddings", type=int, choices=[0, 1], default=0, help="also train the embeddings of the 5 delimiter tokens")
     ap.add_argument("--head_dim", type=int, default=256, help="pointer head dimension")
-    ap.add_argument("--lora_targets", choices=["all", "attn", "qv"], default="all", help="LoRA module set; fewer modules = less drift from the base")
+    ap.add_argument("--lora_targets", choices=["all", "dense", "attn", "qv"], default="all", help="LoRA module set; fewer modules = less drift from the base; dense = all minus the DeltaNet projections on hybrid bases")
     ap.add_argument("--base_revision", default="", help="pin the base commit when the suite manifest does not pin this base")
     ap.add_argument("--p_none", type=float, default=0.1)
     ap.add_argument("--p_none_distract", type=float, default=0.12)

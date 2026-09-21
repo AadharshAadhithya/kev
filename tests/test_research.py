@@ -259,3 +259,114 @@ def test_contrastive_eval_split_is_stratified_by_family():
         fams = Counter(r["_meta"]["family"] for r in part)
         assert set(fams) == {"authorization", "deadline"} and all(v == 6 for v in fams.values())
         assert all(a["_meta"]["pair_id"] == b["_meta"]["pair_id"] for a, b in zip(part[::2], part[1::2]))
+
+
+def test_coverage_cannot_split_equal_confidence_ties():
+    from kev.benchmark import coverage_at_error
+    correct = [True] * 90 + [False] * 10
+    assert coverage_at_error([0.99] * 100, correct, 0.05) == 0.0
+    assert coverage_at_error([0.99] * 100, correct[::-1], 0.05) == 0.0
+    assert coverage_at_error([0.99] * 100, correct, 0.1) == 1.0
+    assert coverage_at_error([], [], 0.05) == 0.0
+
+
+def test_risk_curve_thresholds_and_nonmonotone_risk():
+    from kev.benchmark import coverage_at_error, risk_coverage_curve
+    curve = risk_coverage_curve([0.99, 0.99, 0.9, 0.8], [True, False, True, True])
+    assert [p["accepted"] for p in curve] == [2, 3, 4]
+    assert [p["threshold"] for p in curve] == [0.99, 0.9, 0.8]
+    assert [p["risk"] for p in curve] == pytest.approx([0.5, 1 / 3, 0.25])
+    assert coverage_at_error([0.99, 0.99, 0.9, 0.8], [True, False, True, True], 0.25) == 1.0
+
+
+@pytest.mark.parametrize("confidence,correct,budget", [
+    ([float("nan")], [True], 0.05), ([1.1], [True], 0.05),
+    ([0.5], [], 0.05), ([[0.5]], [True], 0.05), ([0.5], [True], -0.1),
+])
+def test_selective_metrics_reject_invalid_inputs(confidence, correct, budget):
+    from kev.benchmark import coverage_at_error
+    with pytest.raises(ValueError):
+        coverage_at_error(confidence, correct, budget)
+
+
+def test_fixed_threshold_does_not_reselect_using_evaluation_labels():
+    from kev.benchmark import select_threshold, evaluate_threshold
+    threshold = select_threshold([0.99, 0.98, 0.97, 0.6], [True, True, True, False], 0.05)
+    assert threshold == 0.97
+    result = evaluate_threshold([0.99, 0.7, 0.6], [False, True, True], threshold)
+    assert result["accepted"] == 1 and result["errors"] == 1 and result["risk"] == 1.0
+    assert result["coverage"] == pytest.approx(1 / 3)
+    empty = evaluate_threshold([0.99], [True], None)
+    assert empty["coverage"] == 0 and empty["risk"] is None
+
+
+def test_global_coverage_bootstrap_recomputes_full_statistic():
+    from kev.benchmark import metrics, paired_bootstrap
+    candidate, reference = [], []
+    for i in range(20):
+        common = {"id": str(i), "group": "one-cluster", "source": "fixture", "task": "fixture",
+                  "question": "q", "variant": "clean", "type": "choice", "keys": ["a", "b"], "label": 0}
+        candidate.append({**common, "p": [0.99, 0.01] if i < 18 else [0.4, 0.6]})
+        reference.append({**common, "p": [0.6, 0.4] if i < 18 else [0.01, 0.99]})
+    assert metrics(candidate)["acc"] == metrics(reference)["acc"]
+    result = paired_bootstrap(candidate, reference, samples=50, metric="coverage_at_5pct_error", aggregation="micro")
+    assert result["micro_coverage_at_5pct_error_delta"] == pytest.approx(0.9)
+    assert result["ci95"] == pytest.approx([0.9, 0.9])
+    assert result["groups"] == 1
+    assert paired_bootstrap(candidate, candidate, samples=50, metric="aurc", aggregation="micro")["ci95"] == [0, 0]
+
+
+def test_bootstrap_rejects_duplicate_or_inconsistent_pairs():
+    from kev.benchmark import paired_bootstrap, prediction_rows
+    rows = prediction_rows(frozen_request(), {"probabilities": {"reason": {"size": 0.8, "damage": 0.1, "color": 0.1}}})
+    with pytest.raises(ValueError, match="duplicate"):
+        paired_bootstrap(rows + rows, rows)
+    with pytest.raises(ValueError, match="group"):
+        paired_bootstrap(rows, [{**rows[0], "group": "different"}])
+
+
+def test_temperature_preserves_argmax_but_not_cross_question_ranking():
+    import numpy as np
+    from kev.benchmark import probabilities_at_temperature
+    rows = [{"p": [0.6, 0.2, 0.2]}, {"p": [0.55, 0.449, 0.001]}]
+    calibrated = [probabilities_at_temperature(r, 2.0) for r in rows]
+    assert max(rows[0]["p"]) > max(rows[1]["p"])
+    assert calibrated[0].max() < calibrated[1].max()
+    assert all(np.argmax(r["p"]) == p.argmax() for r, p in zip(rows, calibrated))
+
+
+def test_calibration_uses_logits_without_probability_floor_distortion():
+    import numpy as np
+    from kev.benchmark import probabilities_at_temperature
+    p = probabilities_at_temperature({"p": [1.0, 0.0], "logits": [0.0, -100.0]}, 2.0)
+    assert p[1] == pytest.approx(np.exp(-50), rel=1e-6, abs=0)
+    for temperature in (0, -1, float("nan"), float("inf")):
+        with pytest.raises(ValueError):
+            probabilities_at_temperature({"p": [0.5, 0.5]}, temperature)
+
+
+def test_unknowable_not_in_raw_or_calibrated_accuracy_denominator():
+    from kev.benchmark import prediction_rows, summarize
+    rows = prediction_rows(frozen_request(), {"probabilities": {"reason": {"size": 0.8, "damage": 0.1, "color": 0.1}}})
+    rows.append({**rows[0], "id": "unk", "source": "unknowable", "task": "unknowable_test"})
+    result = summarize(rows, temperature=2.0)
+    assert result["clean"]["n"] == result["calibrated_clean"]["n"] == 1
+    assert result["metric_policy"]["selective_ties"] == "whole_confidence_groups"
+
+
+def test_logits_are_recorded_in_option_order():
+    from kev.benchmark import prediction_rows
+    prediction = {"probabilities": {"reason": {"size": 0.8, "damage": 0.1, "color": 0.1}},
+                  "logits": {"reason": {"color": -2.0, "damage": -2.0, "size": 0.0}}, "inference_temperature": 1.0}
+    row = prediction_rows(frozen_request(), prediction)[0]
+    assert row["logits"] == [0.0, -2.0, -2.0] and row["inference_temperature"] == 1.0
+    prediction["logits"]["reason"]["size"] = float("inf")
+    with pytest.raises(ValueError, match="logit"):
+        prediction_rows(frozen_request(), prediction)
+
+
+def test_risk_curve_area_has_explicit_tie_policy():
+    from kev.benchmark import area_under_risk_coverage
+    assert area_under_risk_coverage([0.99, 0.9, 0.8], [True, True, False]) == pytest.approx(1 / 9)
+    assert area_under_risk_coverage([0.99] * 10, [True] * 9 + [False]) == pytest.approx(0.1)
+    assert area_under_risk_coverage([0.99] * 10, [False] + [True] * 9) == pytest.approx(0.1)

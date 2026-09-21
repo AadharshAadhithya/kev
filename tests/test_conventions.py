@@ -1,7 +1,7 @@
 """Source conventions: facts that have one canonical home must not be re-derived elsewhere.
 
 Each rule is (what it guards, regex, files allowed to match). A failure means a second copy of a rule that already has
-a home; call the canonical helper instead (the table in .devin/skills/thermonuclear-code-review/SKILL.md lists them).
+a home; call the canonical helper instead (the table in .agents/skills/thermonuclear-code-review/SKILL.md lists them).
 Run: uv run python -m pytest tests/test_conventions.py -q
 """
 import re

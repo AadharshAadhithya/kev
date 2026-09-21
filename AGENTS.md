@@ -71,7 +71,7 @@ See README.md (deep dive) and docs/model-cards/ (one card per checkpoint: recipe
   table of "one canonical home" rules (head.pt via `kev.checkpoint`, option keys via `api.question_keys`, context via `model.fits`/`MAX_PACKED`, ...); add a row when a new helper becomes canonical.
 - API tests (server must be up): `KEV_BASE_URL=http://127.0.0.1:8009 uv run --extra serve python -m pytest tests/test_api.py -q`
 
-## Skills (.devin/skills)
+## Skills (.agents/skills)
 - `kev-verify`: how to prove a change has no regression (unit suites, weight-backed parity, worktree parity harness against main) and ship it as a stacked, reviewed, squash-merged PR.
 - `skills/kev-finetune` (published; `npx skills add jaredpalmer/kev@kev-finetune`): the user-facing fine-tuning skill (SKILL.md for agents, README.md is the
   human cookbook). agentskills.io format (validate with `uvx --from skills-ref agentskills validate skills/kev-finetune`). Stdlib scripts: `extract_workload`
@@ -83,7 +83,7 @@ See README.md (deep dive) and docs/model-cards/ (one card per checkpoint: recipe
   checkpoint's `head.pt`; results are the skill's own `result.json` shape (not a research trial's); `publish` is private by default; `teardown` removes runs /
   the endpoint / the volumes. Tests for the stdlib scripts: `tests/test_skill_scripts.py`.
 - `thermonuclear-code-review`: how to apply the installed `thermo-nuclear-code-quality-review` standards to this repo; its table lists the canonical home of each shared rule.
-- `kev-modal-study` (.agents/skills): launching and pulling Modal studies.
+- `kev-modal-study`: launching and pulling Modal studies.
 
 ## Layout
 - `kev/data.py`      dataset -> typed records, permutation / none-of-the-above / distractor augmentation

@@ -75,6 +75,8 @@ def main():
     ap.add_argument("--device", choices=["cpu", "mps", "cuda"], default=None)
     ap.add_argument("--batch", type=int, default=1, help="records per forward pass (padded batch); optimizer step every --accum micro-batches")
     ap.add_argument("--dtype", choices=["fp32", "bf16"], default="fp32", help="bf16 = autocast forward with fp32 master weights (CUDA only)")
+    ap.add_argument("--weights_dtype", choices=["fp32", "bf16"], default="fp32", help="dtype of the frozen backbone weights. bf16 halves memory and is required by the fused MoE experts "
+                                                                                        "(torch._grouped_mm wants bf16); LoRA and head stay fp32 (peft upcasts adapters). Evaluation of such a run must also load bf16 (KEV_DTYPE=bf16).")
     ap.add_argument("--checkpointing", type=int, choices=[0, 1], default=0)
     ap.add_argument("--option_isolation", type=int, choices=[0, 1], default=0, help="option spans are isolated sub-branches with shared positions (exact permutation invariance)")
     ap.add_argument("--special_embeddings", type=int, choices=[0, 1], default=0, help="also train the embeddings of the 5 delimiter tokens")
@@ -128,7 +130,8 @@ def main():
         raise ValueError("base not pinned by the suite; pass --base_revision")
     tok = load_tokenizer(a.base, revision=revision)
     model = DecisionModel(a.base, tok, dev, lora=a.lora, revision=revision, head_dim=a.head_dim, lora_targets=a.lora_targets,
-                          option_isolation=bool(a.option_isolation), special_embeddings=bool(a.special_embeddings))
+                          option_isolation=bool(a.option_isolation), special_embeddings=bool(a.special_embeddings),
+                          dtype=torch.bfloat16 if a.weights_dtype == "bf16" else torch.float32)
     if a.checkpointing:
         model.lm.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
     model.lm.config.use_cache = False
@@ -275,7 +278,7 @@ def main():
     os.makedirs(a.out, exist_ok=True)
     model.lm.save_pretrained(a.out)
     torch.save({"head": model.head.state_dict(), "base": a.base, "base_revision": revision, "lora": a.lora, "head_dim": a.head_dim,
-                "option_isolation": bool(a.option_isolation), "special_embeddings": bool(a.special_embeddings),
+                "option_isolation": bool(a.option_isolation), "special_embeddings": bool(a.special_embeddings), "weights_dtype": a.weights_dtype,
                 "holdout": holdout, "args": vars(a), "suite_sha256": suite_hash, "init_source": init_source}, f"{a.out}/head.pt")
     tok.save_pretrained(a.out)
     write_json(out_dir / "training_metrics.json", {"wall_seconds": time.time() - t0, "records_seen": seen,

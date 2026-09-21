@@ -87,3 +87,4 @@ DATES+UNKNOWABLE (du) DELTAS (22:25), transfer-v4 dev
 - 4B-du: acc +0.5, brier .316->.299, cerr .082->.069, cov@5% .54 unchanged, deadline .60. Pure improvement at 4B.
 - Launched du benches (v9 / sci / date_facts). Next: locked reads for both du. Decision: 9B main -> du or all (both beat released on dev; all has the locked +1.8); 4B main -> du.
 - du benches: unknowable .00 both; date_facts deadline 9B .90 / 4B .85 (overall with facts 9B .828, 4B .820); costs: scienthoon ECE +3pp both, mmlu_pro -3 (9B) / -1 (4B), angry unchanged. Locked reads for du launched (22:30).
+- 22:31 35B trials stalled 35 min with no training output + Modal heartbeat failures: run_trial had memory=(32,48) GB and the 70 GB checkpoint is staged through host RAM. Cancelled, raised to cpu 4 / 64-192 GB, relaunched as night2-36b2 (ETA ~01:15). Lost ~$5.

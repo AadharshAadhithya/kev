@@ -9,7 +9,8 @@
   "base": "Qwen/Qwen3.6-35B-A3B",
   "base_revision": "995ad96eacd98c81ed38be0c5b274b04031597b0",
   "seed": 0,
-  "lr": 5e-05
+  "lr": 5e-05,
+  "weights_dtype": "bf16"
  },
  {
   "epochs": 2,
@@ -21,6 +22,7 @@
   "base": "Qwen/Qwen3.6-35B-A3B",
   "base_revision": "995ad96eacd98c81ed38be0c5b274b04031597b0",
   "seed": 0,
-  "lr": 2e-05
+  "lr": 2e-05,
+  "weights_dtype": "bf16"
  }
 ]

@@ -37,7 +37,7 @@ RANGES = {"epochs": (1, 5), "seed": (0, 10000), "lr": (1e-6, 0.001), "lora": (1,
           "perm_kl": (0, 2), "perm_frac": (0, 1), "ord_w": (0, 2),
           "p_none": (0, 0.4), "p_none_distract": (0, 0.4), "p_distract": (0, 0.4), "p_none_pair": (0, 1), "synthetic_repeat": (1, 6), "public_frac": (0.05, 1.0), "head_lr": (0, 0.01), "weight_decay": (0, 0.3), "anchor_w": (0, 5)}
 CHOICES = {"dtype": ("fp32", "bf16"), "checkpointing": (0, 1), "option_isolation": (0, 1), "special_embeddings": (0, 1), "head_dim": (128, 256, 512, 1024),
-           "lora_targets": ("all", "dense", "attn", "qv")}
+           "lora_targets": ("all", "dense", "attn", "qv"), "weights_dtype": ("fp32", "bf16")}
 
 
 def validated_trial(value, manifest):
@@ -205,6 +205,8 @@ def execute_trial(config, suite, output, expected_sources, device, existing=None
                 if line.startswith(("ep", "saved", "device", "ablation")) or "Error" in line: print(line.rstrip(), flush=True)
         if proc.returncode:
             raise subprocess.CalledProcessError(proc.returncode, args)
+    if config.get("weights_dtype") == "bf16":
+        os.environ["KEV_DTYPE"] = "bf16"      # a backbone trained in bf16 weights is evaluated the same way (fp32 would not fit and is not what was trained)
     predictor = LocalPredictor(run, device)
     try:
         if existing:

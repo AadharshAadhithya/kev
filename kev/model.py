@@ -156,7 +156,7 @@ class DecisionModel(nn.Module):
         self.pad_id = tok.pad_token_id if tok.pad_token_id is not None else 0
         # hybrid backbones (Qwen3.5: Gated DeltaNet layers, recurrent) cannot honour the block-causal mask, so every
         # question runs as its own causal row continuing from the state (rows_of). Attention-only backbones keep the
-        # packed form; the two agree to fp32 noise (tests/test_v3.py::test_rows_match_packed).
+        # packed form; the two agree to fp32 noise (tests/test_model.py::test_rows_match_packed).
         cfg = self.lm.config
         self.hybrid = "linear_attention" in set(getattr(cfg, "layer_types", None) or [])
         if self.hybrid and option_isolation: raise ValueError("option_isolation needs the packed mask; not available on hybrid backbones")
@@ -234,7 +234,7 @@ class DecisionModel(nn.Module):
 
     def forward_batch(self, encs):
         """List (per record) of lists (per question) of logits, from one padded forward pass. Hybrid backbones take the
-        row form; attention-only ones the packed block-causal mask (the two agree, tests/test_v3.py::test_rows_match_packed)."""
+        row form; attention-only ones the packed block-causal mask (the two agree, tests/test_model.py::test_rows_match_packed)."""
         if self.hybrid: return self.forward_rows_batch(encs)
         hs = self.hidden_batch(encs)
         return [self._readout(hs[b], e) for b, e in enumerate(encs)]

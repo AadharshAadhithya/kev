@@ -8,6 +8,7 @@ import math
 import os
 import subprocess
 import time
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -59,19 +60,18 @@ class RemotePredictor:
     server-reported model id so the manifest can pin what was scored."""
 
     def __init__(self, base_url, model="kev-latest", api_key="local", timeout=120, retries=3):
-        import urllib.request
         self.base_url, self.model, self.api_key, self.timeout, self.retries = base_url.rstrip("/"), model, api_key, timeout, retries
-        self.served_model = None; self._request = urllib.request
+        self.served_model = None
 
     def __call__(self, record):
         payload = json.dumps({**api_request(record), "model": self.model}).encode()
-        req = self._request.Request(f"{self.base_url}/v1/systemone", data=payload, method="POST",
+        req = urllib.request.Request(f"{self.base_url}/v1/systemone", data=payload, method="POST",
                                     headers={"content-type": "application/json", "authorization": f"Bearer {self.api_key}"})
         last = None
         for attempt in range(self.retries):
             try:
                 start = time.perf_counter()
-                with self._request.urlopen(req, timeout=self.timeout) as resp:
+                with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                     body = json.loads(resp.read())
                 latency = 1000 * (time.perf_counter() - start)
                 break

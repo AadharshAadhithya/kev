@@ -40,8 +40,8 @@ def main():
         # runs before task_type was set saved null; the Hub warns about it and PEFT treats both the same for a bare backbone
         cfg_path = f"{tmp}/adapter_config.json"; cfg = json.load(open(cfg_path))
         if not cfg.get("task_type"): cfg["task_type"] = "FEATURE_EXTRACTION"; json.dump(cfg, open(cfg_path, "w"), indent=2)
-        for log in (f"runs/logs/train_{run_name}.log", f"runs/train_{run_name}.log", f"runs/train.log" if run_name == "kev" else ""):
-            if log and os.path.exists(log): shutil.copy(log, f"{tmp}/train.log"); break
+        if os.path.exists(f"runs/logs/train_{run_name}.log"):   # standalone runs keep their log there (see .gitignore)
+            shutil.copy(f"runs/logs/train_{run_name}.log", f"{tmp}/train.log")
         # research trials: runs/<study>/<trial>/checkpoint -> ship the trial's result, provenance and training log too
         trial = os.path.dirname(a.run.rstrip("/")) if run_name == "checkpoint" else None
         if trial:
@@ -50,11 +50,9 @@ def main():
                 for src in (f"{trial}/{f}", f"{a.run}/{f}"):
                     if os.path.exists(src): shutil.copy(src, f"{tmp}/{f}"); break
 
-        card = open(a.card).read()
-        card = re.sub(r"^base_model: .*$", f"base_model: {base}", card, flags=re.M)
+        # the card's prose names the Hub repo and trial itself; only the frontmatter is filled from the checkpoint
+        card = re.sub(r"^base_model: .*$", f"base_model: {base}", open(a.card).read(), flags=re.M)
         if "base_model_relation:" not in card: card = card.replace(f"base_model: {base}", f"base_model: {base}\nbase_model_relation: adapter")
-        card = card.replace("- Code, training recipe, evaluation and demo:", f"- Hub: [{a.repo}](https://huggingface.co/{a.repo}) (this repo, run `{run_name}`)\n- Code, training recipe, evaluation and demo:")
-        card = card.replace("(this repo; trial `v4-06b-hardened/00-trial-0`, seed 0 of 3)", f"(this repo; trial `{run_name}`)")
         open(f"{tmp}/README.md", "w").write(card)
 
         ev = json.load(open(f"{tmp}/eval.json")) if os.path.exists(f"{tmp}/eval.json") else {}

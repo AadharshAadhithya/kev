@@ -464,7 +464,7 @@ keeps only the last-triggered function). Studies now fan out server-side from th
 
 - [x] Modal CUDA/batched path and backbone-v1 study completed; MBP path retained.
 - [x] v2 source policy, PAWS/SciQ conversion, contrastive prototype, and data-ablation study completed. Findings remain exploratory.
-- [x] v3 minimal-pair/calibration/metric corrections and regression tests ([tests](tests/test_v3.py)).
+- [x] v3 minimal-pair/calibration/metric corrections and regression tests ([tests](tests/test_generators.py), [tests](tests/test_research.py)).
 - [x] v3 compositional generator with truth-table and boundary tests ([generator](kev/composition.py)).
 - [x] v3 frozen matched suites ([decision-v3](evals/v3/decision-v3/manifest.json), [transfer-v3](evals/v3/transfer-v3/manifest.json)); both arms share 3,000 public records and 448 synthetic records.
 - [x] Modal smoke and the matched 0.6B/4B comparison, seed 0 ([ledger](runs/v3-data-capacity-s0/results.jsonl)).
@@ -481,7 +481,7 @@ keeps only the last-triggered function). Studies now fan out server-side from th
 - [ ] Deferred: 8B runs after the data-versus-capacity result, not as an automatic escalation.
 - [ ] Deferred: final release/model-card/Hub updates until generalization and calibration justify them.
 
-Relevant code: [suite builder](kev/study_v3.py), [rule generator](kev/composition.py), [experiment runner](kev/experiment.py), [benchmark](kev/benchmark.py), [Modal app](modal_app.py), [v3 tests](tests/test_v3.py).
+Relevant code: [suite builder](kev/study_v3.py), [rule generator](kev/composition.py), [experiment runner](kev/experiment.py), [benchmark](kev/benchmark.py), [Modal app](modal_app.py), [v3 tests](tests/test_model.py).
 
 ## Autoresearch log
 

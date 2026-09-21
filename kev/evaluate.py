@@ -13,7 +13,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from .checkpoint import Checkpoint, LoadOptions
-from .data import build, augment, materialize, DISTRACTORS
+from .data import NONE_OPTIONS, build, augment, materialize, DISTRACTORS
 from .device import default_device, empty_cache, sync
 from .metrics import ece
 
@@ -83,7 +83,6 @@ def test_iia(tok, model, reqs, rng):
 def test_none_of_the_above(tok, model, reqs, rng):
     """Add a 'none of the above' option. When the true option is still present it should get little mass;
     when the true option is removed it should be chosen. A shortcut model picks it in both cases."""
-    from .data import NONE_OPTIONS
     p_present, hit_present, hit_absent, n = [], 0, 0, 0
     for r in reqs:
         for qid, q in r["questions"].items():

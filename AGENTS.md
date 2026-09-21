@@ -66,7 +66,8 @@ See README.md (deep dive) and docs/model-cards/ (one card per checkpoint: recipe
   - React Compiler lint forbids sync setState in effects; schedule via setTimeout or move into handlers.
   - Next 16 dev only trusts `localhost`; other hostnames need `allowedDevOrigins` or the page SSRs but never hydrates
     (no console errors). `127.0.0.1` is allowed in `next.config.ts`. Verify hydration with `agent-browser` (CDP), not curl.
-- Unit tests (no weights, CI): `uv run --extra serve python -m pytest tests/test_unit.py tests/test_research.py tests/test_conventions.py -q`. `test_conventions.py` is a
+- Unit tests (no weights, CI): `uv run --extra serve python -m pytest tests/test_unit.py tests/test_research.py tests/test_generators.py tests/test_conventions.py -q`.
+  Weight-backed parity tests (smoke checkpoint + Qwen2.5-0.5B download, ~2.5 min, local only): `tests/test_model.py`. `test_conventions.py` is a
   table of "one canonical home" rules (head.pt via `kev.checkpoint`, option keys via `api.question_keys`, context via `model.fits`/`MAX_PACKED`, ...); add a row when a new helper becomes canonical.
 - API tests (server must be up): `KEV_BASE_URL=http://127.0.0.1:8009 uv run --extra serve python -m pytest tests/test_api.py -q`
 
@@ -98,7 +99,7 @@ See README.md (deep dive) and docs/model-cards/ (one card per checkpoint: recipe
   so train and serve text are identical.
 - Serving path (`kev.checkpoint.Checkpoint.load` + `kev.serve`; `LoadOptions.from_env()` reads the `KEV_*` variables at CLI entry points only): LoRA merged in fp32 then cast (`KEV_MERGE=0` to keep unmerged), `KEV_ATTN=sdpa` default on MPS,
   `KEV_SHAPE_BUCKET=64` on MPS, state-prefix KV LRU (`KEV_PREFIX_CACHE=4`, `KEV_PREFIX_MIN_TOKENS=384`). Any change here must keep the parity
-  tests in tests/test_v3.py (merged vs unmerged, prefix vs full pass, bucket padding) passing; report numbers with the fp32 unmerged path.
+  tests in tests/test_model.py (merged vs unmerged, prefix vs full pass, bucket padding) passing; report numbers with the fp32 unmerged path.
 
 ## Calibration Research
 

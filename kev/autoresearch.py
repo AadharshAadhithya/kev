@@ -18,6 +18,7 @@ Budget: before each round, `modal billing summary` is read; the loop stops when 
 exceeds `--spend-cap`. Per-round admission bounds still apply in modal_app.admit_study.
 """
 import argparse
+import hashlib
 import json
 import random
 import subprocess
@@ -29,12 +30,12 @@ from pathlib import Path
 
 from kev.data import source_seed
 from kev.experiment import CHOICE_DEFAULTS, DEFAULTS, validated_trial
+from kev.metrics import paired_bootstrap
 from kev.suite import digest, write_json
 
 
 def config_digest(value):
     """Canonical (key-sorted) digest for config identity; kev.suite.record_digest keeps insertion order for provenance."""
-    import hashlib
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
@@ -99,7 +100,6 @@ def collect():
 def dev_partition_hashes():
     """manifest sha -> development.jsonl sha, for every frozen suite. Suites that differ only in training data (v4/v5/v6)
     share development bytes and are comparable."""
-    from kev.suite import digest
     out = {}
     for m in ROOT.glob("evals/**/manifest.json"):
         try: out[digest(m)] = json.loads(m.read_text())["files"]["development.jsonl"]["sha256"]
@@ -252,7 +252,6 @@ def plan_section():
 def compare(studies, reference, tasks=("mmlu", "paws", "qnli", "emotion", "tweet_offensive", "contrastive_deadline")):
     """Print every trial of the given studies with a record-clustered paired bootstrap on transfer accuracy vs `reference`
     (a runs/<study>/<trial> path). Development-set selection only."""
-    from kev.metrics import paired_bootstrap
     def rows(p): return json.loads((ROOT / p / "transfer/rows.json").read_text())
     ref_rows = rows(reference)
     print(f"reference: {reference}")

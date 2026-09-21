@@ -119,6 +119,12 @@ def study_lock():
         yield
 
 
+# research screening thresholds; gate_report's policy string is generated from them. The gate *names* ("..._over_5pp",
+# "..._at_least_70pct") are ledger keys and must be renamed by hand if a threshold changes.
+GATES = {"isolation_tolerance": 0.001, "task_accuracy_regression": 0.05, "variant_accuracy_regression": 0.05, "permutation_flip_increase": 0.05,
+         "heldout_pairs_min": 0.7, "transfer_confident_errors_max": 0.1, "transfer_accuracy_regression": 0.02, "transfer_brier_increase": 0.02}
+
+
 def mechanism_checks(records, predictor):
     packed_max = isolation_max = 0.0
     n = 0
@@ -134,7 +140,7 @@ def mechanism_checks(records, predictor):
             isolation_max = max(isolation_max, max(abs(alone[k] - with_sibling[k]) for k in alone))
             n += 1
     return {"n": n, "packed_max_delta": packed_max, "sibling_max_delta": isolation_max,
-            "tolerance": 0.001, "passed": n > 0 and max(packed_max, isolation_max) < 0.001}
+            "tolerance": GATES["isolation_tolerance"], "passed": n > 0 and max(packed_max, isolation_max) < GATES["isolation_tolerance"]}
 
 
 def gate_report(report, checks, baseline=None):
@@ -142,26 +148,28 @@ def gate_report(report, checks, baseline=None):
     gates = {"complete_coverage": cov["evaluated_records"] == cov["requested_records"] and cov["evaluated_questions"] == cov["requested_questions"] and not cov["rejected_records"] and not cov["truncated_records"],
              "isolation_and_packing": checks["passed"]}
     if baseline is not None:
-        gates["no_task_accuracy_regression_over_5pp"] = all(report["tasks"][k]["acc"] >= v["acc"] - .05 for k, v in baseline["tasks"].items())
+        gates["no_task_accuracy_regression_over_5pp"] = all(report["tasks"][k]["acc"] >= v["acc"] - GATES["task_accuracy_regression"] for k, v in baseline["tasks"].items())
         for variant in ("none_present", "none_absent"):
-            gates[f"{variant}_not_worse"] = report["variants"][variant]["acc"] >= baseline["variants"][variant]["acc"] - .05
-        gates["permutation_not_worse"] = report["permutation"]["flip_rate"] <= baseline["permutation"]["flip_rate"] + .05
+            gates[f"{variant}_not_worse"] = report["variants"][variant]["acc"] >= baseline["variants"][variant]["acc"] - GATES["variant_accuracy_regression"]
+        gates["permutation_not_worse"] = report["permutation"]["flip_rate"] <= baseline["permutation"]["flip_rate"] + GATES["permutation_flip_increase"]
     transfer = report.get("transfer")
     if transfer:
         c = transfer["coverage"]
         gates["transfer_complete"] = c["requested_records"] == c["evaluated_records"] and not c["rejected_records"] and not c["truncated_records"]
         pairs = transfer.get("paired_flip")
         if pairs and pairs["pairs"]:
-            gates["heldout_pairs_at_least_70pct"] = pairs["both_correct_rate"] >= .7
+            gates["heldout_pairs_at_least_70pct"] = pairs["both_correct_rate"] >= GATES["heldout_pairs_min"]
         if "confident_error_rate" in transfer["clean"]:
-            gates["transfer_confident_errors_below_10pct"] = transfer["clean"]["confident_error_rate"] <= .1
+            gates["transfer_confident_errors_below_10pct"] = transfer["clean"]["confident_error_rate"] <= GATES["transfer_confident_errors_max"]
         if baseline and baseline.get("transfer"):
             other = baseline["transfer"]
             if transfer["suite_sha256"] != other["suite_sha256"]:
                 raise ValueError("transfer suite hashes differ")
-            gates["transfer_accuracy_not_worse"] = transfer["clean"]["acc"] >= other["clean"]["acc"] - .02
-            gates["transfer_brier_not_worse"] = transfer["clean"]["brier"] <= other["clean"]["brier"] + .02
-    return {"passed": all(gates.values()), "checks": gates, "policy": "Research screening only: 1e-3 isolation; 5pp task regression; 70% heldout pair correctness; <=10% confident errors; no automatic release."}
+            gates["transfer_accuracy_not_worse"] = transfer["clean"]["acc"] >= other["clean"]["acc"] - GATES["transfer_accuracy_regression"]
+            gates["transfer_brier_not_worse"] = transfer["clean"]["brier"] <= other["clean"]["brier"] + GATES["transfer_brier_increase"]
+    policy = (f"Research screening only: {GATES['isolation_tolerance']:g} isolation; {GATES['task_accuracy_regression'] * 100:g}pp task regression; "
+              f"{GATES['heldout_pairs_min'] * 100:g}% heldout pair correctness; <={GATES['transfer_confident_errors_max'] * 100:g}% confident errors; no automatic release.")
+    return {"passed": all(gates.values()), "checks": gates, "policy": policy}
 
 
 def execute_trial(config, suite, output, expected_sources, device, existing=None, transfer_suite=None):

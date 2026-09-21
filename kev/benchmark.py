@@ -9,14 +9,15 @@ predictions.jsonl, rows.json and report.json. Predictors live in kev.predictors.
 import argparse
 import json
 import math
+import os
 from pathlib import Path
 
 import numpy as np
 
-from kev.api import question_keys
+from kev.api import question_keys, with_date_facts
 from kev.checkpoint import LoadOptions
 from kev.contrastive import paired_flip
-from kev.data import api_request
+from kev.data import api_request, load_records
 from kev.device import default_device
 from kev.metrics import EPSILON, grouped_metrics, metrics, unknowable_report
 from kev.predictors import LocalPredictor, RemotePredictor
@@ -156,16 +157,13 @@ def main():
     if bool(a.run) == bool(a.remote): ap.error("give exactly one of --run or --remote")
     if bool(a.suite) == bool(a.data): ap.error("give exactly one of --suite or --data")
     if a.data:
-        from kev.data import load_records
         records, heldout, split, source_hash = load_records(a.data), [], "custom", digest(Path(a.data))
     else:
         split = "test" if a.allow_test else "development"
         records = load_split(a.suite, split, allow_test=a.allow_test)
         heldout = json.loads((Path(a.suite) / "manifest.json").read_text())["holdout_sources"]; source_hash = digest(Path(a.suite) / "manifest.json")
     if a.date_facts:
-        from kev.api import with_date_facts
         records = [{**r, "state": with_date_facts(r["state"])} for r in records]
-    import os
     predictor = RemotePredictor(a.remote, a.remote_model, os.environ.get("KEV_REMOTE_API_KEY", "local")) if a.remote else LocalPredictor(a.run, a.device, LoadOptions.from_env())
     report, _ = evaluate_records(records, predictor, a.out, heldout_sources=tuple(heldout), skip_overlong=bool(a.data))
     report.update(suite_sha256=source_hash, data=a.data, date_facts=a.date_facts, run=a.run or a.remote, split=split,

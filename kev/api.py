@@ -4,7 +4,9 @@ Noul   -> 2 options [false, true];            answer = p(true)
 Choice -> options 'name' or 'name: desc';      answer = argmax, probabilities by name, confidence
 Score  -> options = ordered level descriptions; answer = expected level, legend, probabilities by index
 """
+import json
 import re
+from datetime import datetime
 from typing import Any, Literal, Union
 from pydantic import BaseModel, Field, model_validator
 
@@ -65,7 +67,6 @@ def date_facts(text: str) -> str:
     """Deterministic date arithmetic for the model: every pair of absolute dates found in `text`, as one sentence each
     ("August 3, 2026 is 12 days after July 22, 2026."). The model cannot subtract dates reliably (issue #8); it can use a
     stated day count. Returns "" when fewer than two dates are found. Dates are listed in order of first appearance."""
-    from datetime import datetime
     found = []
     for m in _DATE.finditer(text):
         raw = m.group(0)
@@ -148,5 +149,4 @@ def to_answers(probs: list[list[float]], meta: list[dict]) -> dict[str, Any]:
 
 def output_tokens(tok, answers: dict) -> int:
     """Billing-style figure: tokens of the serialised answers. Not a measure of generation (there is none)."""
-    import json
     return len(tok(json.dumps(answers), add_special_tokens=False).input_ids)

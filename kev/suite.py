@@ -3,10 +3,12 @@ import copy
 import hashlib
 import json
 import random
+import shutil
 from collections import Counter
 from pathlib import Path
 
 from kev.composition import DEV_SHAPES, HELD_OUT_KEYS, TEST_SHAPES, TRAIN_SHAPES
+from kev.contrastive import FAMILIES, generate
 from kev.data import ALL_REPOS, ALL_SOURCES, EVAL_ONLY, REPOS, SOURCES, TRAINABLE, TRANSFER_REPOS, TRANSFER_SOURCES, build, dataset_ref, materialize, source_seed
 from kev.model import MAX_BRANCH, MAX_PACKED, MAX_STATE, fits, load_tokenizer
 
@@ -89,7 +91,6 @@ def load_split(directory, split, allow_test=False):
 
 def fetch_partition(directory, filename):
     """Download one partition of a frozen suite from the Hub mirror into place. The caller verifies the sha256."""
-    import shutil
     from huggingface_hub import hf_hub_download
     directory = Path(directory).resolve()
     evals_root = next((p for p in directory.parents if p.name == "evals"), None)
@@ -219,7 +220,6 @@ def freeze(directory, train=300, calibration=40, development=80, test=80, seed=2
         manifest["admission"][source] = dict(report)
         print(f"froze {source}: {dict(report)}", flush=True)
     if contrastive_pairs:
-        from kev.contrastive import FAMILIES, generate
         families = list(FAMILIES)
         held = list(contrastive_holdout_families)
         unknown = set(held) - set(families)

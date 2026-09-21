@@ -559,7 +559,8 @@ def publish(name: str, repo: str, public: bool = False, message: str = "", card:
 
 
 def modal_cli(*args):
-    subprocess.run([sys.executable, "-m", "modal", *args], check=False)
+    """Run a modal CLI command non-interactively (agents have no TTY, so confirmation prompts must be pre-answered)."""
+    return subprocess.run([sys.executable, "-m", "modal", *args, "--yes"], check=False).returncode == 0
 
 
 @app.local_entrypoint()
@@ -574,10 +575,10 @@ def teardown(run: str = "", endpoint: bool = False, everything: bool = False, ca
         for name in run.split(","):
             runs.remove_file(f"/{name}", recursive=True); print(f"deleted /runs/{name} from kev-finetune-runs")
     if endpoint or everything:
-        modal_cli("app", "stop", APP_NAME); print(f"stopped app {APP_NAME} (deployed endpoint is gone; `modal deploy` recreates it)")
+        print(f"stopped app {APP_NAME} (deployed endpoint is gone; `modal deploy` recreates it)" if modal_cli("app", "stop", APP_NAME) else f"could not stop app {APP_NAME}; run: modal app stop {APP_NAME} --yes")
     if everything:
-        modal_cli("volume", "delete", "kev-finetune-runs", "--yes"); print("deleted volume kev-finetune-runs")
-        if cache: modal_cli("volume", "delete", "kev-hf-cache", "--yes"); print("deleted volume kev-hf-cache")
+        if modal_cli("volume", "delete", "kev-finetune-runs"): print("deleted volume kev-finetune-runs")
+        if cache and modal_cli("volume", "delete", "kev-hf-cache"): print("deleted volume kev-hf-cache")
         for secret in (SETTINGS["KEV_SERVE_SECRET"], SETTINGS["KEV_HF_SECRET"]):
             if secret: print(f"secret {secret} was left in place; remove it with: modal secret delete {secret}")
         print("images are garbage-collected by Modal; nothing else remains")

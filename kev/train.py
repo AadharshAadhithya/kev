@@ -16,7 +16,7 @@ import torch.nn.functional as F
 from .checkpoint import Checkpoint, Meta, write_meta
 from .device import allocated_bytes, default_device, empty_cache
 from .data import EVAL_ONLY, build, augment, load_records, materialize, none_pair, source_seed
-from .suite import SYNTHETIC_SOURCES, digest, load_split, validate_training, write_json
+from .suite import SYNTHETIC_SOURCES, digest, load_split, read_manifest, validate_training, write_json
 from .model import MAX_BRANCH, MAX_PACKED, MAX_STATE, DecisionModel, fits, load_tokenizer
 
 
@@ -276,7 +276,7 @@ def main():
     if dev == "cuda":
         torch.backends.cuda.matmul.allow_tf32 = True; torch.backends.cudnn.allow_tf32 = True
     autocast = torch.autocast("cuda", dtype=torch.bfloat16) if a.dtype == "bf16" else contextlib.nullcontext()
-    manifest = json.loads((Path(a.suite) / "manifest.json").read_text()) if a.suite else None
+    manifest = read_manifest(a.suite) if a.suite else None
     revision = pinned_revision(a, manifest)
     holdout = manifest["holdout_sources"] if manifest else [s for s in a.holdout.split(",") if s]
     anchors = json.loads(Path(a.anchor).read_text()).get("targets", {}) if a.anchor else {}

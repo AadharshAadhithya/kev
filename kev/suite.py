@@ -71,13 +71,17 @@ def validate_training(records, manifest):
         raise ValueError("empty training partition")
 
 
+def read_manifest(directory):
+    return json.loads((Path(directory) / "manifest.json").read_text())
+
+
 def load_split(directory, split, allow_test=False):
     if split not in SPLITS:
         raise ValueError(f"unknown split: {split}")
     if split == "test" and not allow_test:
         raise ValueError("locked test requires explicit --allow-test; never use it for search")
     directory = Path(directory)
-    manifest = json.loads((directory / "manifest.json").read_text())
+    manifest = read_manifest(directory)
     path = directory / f"{split}.jsonl"
     if not path.exists():
         fetch_partition(directory, path.name)

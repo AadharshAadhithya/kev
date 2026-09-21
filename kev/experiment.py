@@ -31,7 +31,7 @@ from kev.checkpoint import LoadOptions
 from kev.device import default_device, empty_cache
 from kev.metrics import fit_temperature, paired_bootstrap
 from kev.predictors import LocalPredictor
-from kev.suite import digest, load_split, record_digest, validate_training, write_json
+from kev.suite import digest, load_split, read_manifest, record_digest, validate_training, write_json
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULTS = {"epochs": 1, "seed": 0, "lr": 0.0002, "lora": 16, "accum": 8, "batch": 1,
@@ -252,7 +252,7 @@ def score_trial(run, suite, output, expected_sources, device, provenance, transf
                 raise ValueError("training studies require a nonempty calibration partition")
             temperature, calibration_fit = 1.0, {"temperature": 1.0, "split": None, "n": 0}
         records = load_split(suite, "development")
-        heldout = tuple(json.loads((Path(suite) / "manifest.json").read_text()).get("holdout_sources", []))
+        heldout = tuple(read_manifest(suite).get("holdout_sources", []))
         report, rows = evaluate_records(records, predictor, output / "development", temperature, heldout_sources=heldout)
         checks = mechanism_checks(records, predictor)
         transfer = None
@@ -321,7 +321,7 @@ def aggregate(study_dir):
 def load_plan(suite, plan_path):
     """Validated trials of a study plan, after checking that the suite's partitions verify and its training partition
     obeys the trainable / eval-only policy. The locked test is not read."""
-    manifest = json.loads((Path(suite) / "manifest.json").read_text())
+    manifest = read_manifest(suite)
     validate_training(load_split(suite, "train"), manifest)
     for split in ("calibration", "development"):
         load_split(suite, split)

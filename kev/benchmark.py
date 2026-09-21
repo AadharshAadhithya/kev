@@ -21,7 +21,7 @@ from kev.data import api_request, load_records
 from kev.device import default_device
 from kev.metrics import EPSILON, grouped_metrics, metrics, unknowable_report
 from kev.predictors import LocalPredictor, RemotePredictor
-from kev.suite import digest, load_split, record_digest, write_json
+from kev.suite import digest, load_split, read_manifest, record_digest, write_json
 
 
 def labels(q):
@@ -161,7 +161,7 @@ def main():
     else:
         split = "test" if a.allow_test else "development"
         records = load_split(a.suite, split, allow_test=a.allow_test)
-        heldout = json.loads((Path(a.suite) / "manifest.json").read_text())["holdout_sources"]; source_hash = digest(Path(a.suite) / "manifest.json")
+        heldout = read_manifest(a.suite)["holdout_sources"]; source_hash = digest(Path(a.suite) / "manifest.json")
     if a.date_facts:
         records = [{**r, "state": with_date_facts(r["state"])} for r in records]
     predictor = RemotePredictor(a.remote, a.remote_model, os.environ.get("KEV_REMOTE_API_KEY", "local")) if a.remote else LocalPredictor(a.run, a.device, LoadOptions.from_env())

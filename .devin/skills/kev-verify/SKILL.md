@@ -1,0 +1,69 @@
+---
+name: kev-verify
+description: Verify a Kev change has no regression and ship it as a reviewed PR. Use when refactoring, editing kev/*.py, scripts, the Space or the playground, and when opening or merging Kev pull requests (stacked branches, squash merges).
+---
+
+# Verify and ship a Kev change
+
+Behaviour is defined by numbers: probabilities, saved weights, frozen-suite bytes. A refactor is done when the numbers
+are bit-identical to `main`, not when the tests are green. Work bottom-up: unit suites, then weight-backed parity, then
+the harness below for anything that touches the model, the loader, the trainer, the data converters or the metrics.
+
+## 1. Fast suites (also CI)
+
+```bash
+uv run --extra serve python -m pytest tests/test_unit.py tests/test_research.py tests/test_generators.py tests/test_conventions.py -q
+```
+
+`test_conventions.py` fails when a rule that has a canonical home is re-derived elsewhere (head.pt access, KEV_* env
+reads, option keys, the context literal, device selection). Do not add an allowlist entry to make it pass; call the
+helper. Add a row when a new helper becomes canonical.
+
+## 2. Weight-backed parity (local, ~2.5 min)
+
+```bash
+uv run --extra serve python -m pytest tests/test_model.py -q     # needs runs/smoke-hl/00-trial-0/checkpoint
+```
+
+Merged vs unmerged LoRA, prefix cache vs full pass, shape-bucket padding, row form vs packed mask, hybrid isolation,
+`--init_from` end to end. Run it for any change under `kev/model.py`, `kev/checkpoint.py`, `kev/serve.py`, `kev/train.py`.
+
+## 3. Serving
+
+```bash
+uv run --extra serve python -m kev.serve --run runs/smoke-hl/00-trial-0/checkpoint --port 8009 &
+KEV_BASE_URL=http://127.0.0.1:8009 uv run --extra serve python -m pytest tests/test_api.py -q
+```
+
+Space changes: `python3 -m py_compile space/app.py`; the Space vendors `kev/{model,api,checkpoint}.py` via
+`scripts/publish_space.sh`, so any change to those needs a republish. Playground: `cd playground && npm run lint && npx tsc --noEmit -p .`.
+
+## 4. Parity harness against main
+
+Run the *old* code from a worktree and the new code from the checkout on the same inputs, then compare bytes.
+
+```bash
+git worktree add /tmp/kev-main origin/main
+OLD="env PYTHONPATH=/tmp/kev-main $PWD/.venv/bin/python"          # `import kev` resolves to the worktree; kev is not installed in the venv
+CKPT="$PWD/runs/smoke-hl/00-trial-0/checkpoint"; SUITE="$PWD/evals/smoke-v1"   # absolute: runs/ weights exist only in this checkout
+# benchmark rows/report (model, loader, metrics, api, data)
+(cd /tmp/kev-main && $OLD -m kev.benchmark --run "$CKPT" --suite "$SUITE" --out /tmp/bench-main)
+uv run python -m kev.benchmark --run "$CKPT" --suite "$SUITE" --out /tmp/bench-new
+# -> rows.json must be identical; report.json identical on every numeric field
+# training (trainer, losses, augmentation): same args on CPU, then compare head.pt["head"] tensors and adapter_model.safetensors
+ARGS="--n_per_source 4 --epochs 1 --accum 2 --batch 2 --device cpu --base Qwen/Qwen2.5-0.5B --lr 1e-4 --perm_kl 0.2 --perm_frac 1 --p_none_pair 0.5 --ord_w 0.3"
+(cd /tmp/kev-main && OMP_NUM_THREADS=4 $OLD -m kev.train $ARGS --out /tmp/train-main); OMP_NUM_THREADS=4 uv run python -m kev.train $ARGS --out /tmp/train-new
+# data converters: json.dumps(build(3, "test", 0, only=[...])) from both trees must be equal
+```
+
+Everything the worktree process opens must be an absolute path into this checkout. CPU runs with fixed seeds are deterministic, so
+"max |Δ| = 0.0" is the bar; a nonzero difference is a behaviour change to explain in the PR or fix.
+
+## 5. Ship
+
+- One branch per concern, stacked on the previous branch while it is under review; PR bodies list the parity evidence.
+- Review every PR with the `thermonuclear-code-review` skill (a read-only subagent works well) and apply the findings
+  before merging; the reviewer has caught real bugs (a dropped import, a double-applied temperature).
+- Merge with `gh pr merge <n> --squash`. Because of the squash, rebase the next stacked branch with
+  `git rebase --onto origin/main <merged-branch> <next-branch>` (a plain rebase replays the already-merged commits and conflicts).
+- Never commit regenerated `runs/leaderboard.*` or frozen `evals/` files as part of a refactor.

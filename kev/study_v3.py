@@ -11,7 +11,7 @@ from kev.composition import DEV_SHAPES, HELD_OUT_KEYS, TEST_SHAPES, TRAIN_SHAPES
 from kev.contrastive import ORDINAL_FAMILIES, generate
 from kev.data import materialize
 from kev.model import fits, load_tokenizer
-from kev.suite import SPLITS, digest, load_split, semantic_hash, validate_training, write_json
+from kev.suite import SPLITS, digest, load_split, read_manifest, semantic_hash, validate_training, write_json
 
 BASES = ("Qwen/Qwen3-0.6B-Base", "Qwen/Qwen3-4B-Base")
 FAMILIES = ("return_window", "spend_threshold", "age_eligibility", "quantity_limit")
@@ -61,8 +61,8 @@ def freeze(out, source="evals/decision-v2", transfer="evals/transfer-v2", public
     out, source, transfer = Path(out), Path(source), Path(transfer)
     if out.exists():
         raise FileExistsError("v3 destination already exists; choose a new version")
-    original = json.loads((source / "manifest.json").read_text())
-    old_transfer = json.loads((transfer / "manifest.json").read_text())
+    original = read_manifest(source)
+    old_transfer = read_manifest(transfer)
     revisions = {base: HfApi().model_info(base).sha for base in BASES}
     tokenizers = [load_tokenizer(base, revision=sha) for base, sha in revisions.items()]
     parts = {s: [] for s in SPLITS}
@@ -132,7 +132,7 @@ def freeze(out, source="evals/decision-v2", transfer="evals/transfer-v2", public
     manifest = {"version": 3, "base_revisions": revisions, "dataset_revisions": original["dataset_revisions"],
         "parent_files": parent_hashes, "holdout_sources": [],
         "trainable_sources": sorted({s for s in original["trainable_sources"] if s != "contrastive"}
-                                    | ({s for s in json.loads((Path(public_train) / "manifest.json").read_text())["trainable_sources"]} if public_train else set())) + ["legacy_policy", "compositional"],
+                                    | ({s for s in read_manifest(public_train)["trainable_sources"]} if public_train else set())) + ["legacy_policy", "compositional"],
         "eval_only_sources": old_transfer["eval_only_sources"] + ["legacy_holdout", "composition_holdout"],
         "context": original["context"],
         "protocol": {"train_shapes": TRAIN_SHAPES, "transfer_shapes": DEV_SHAPES, "locked_shapes": TEST_SHAPES,
@@ -164,7 +164,7 @@ def freeze(out, source="evals/decision-v2", transfer="evals/transfer-v2", public
             inherited_records = inherited_questions = 0
             if split == "test":
                 test_src = Path(inherit_eval) if (inherit_eval and name.startswith("decision")) else inherited
-                old = json.loads((test_src / "manifest.json").read_text())["files"]["test.jsonl"]
+                old = read_manifest(test_src)["files"]["test.jsonl"]
                 if digest(test_src / "test.jsonl") != old["sha256"]:
                     raise ValueError("inherited test checksum mismatch")
                 payload = (test_src / "test.jsonl").read_bytes()
@@ -183,7 +183,7 @@ def freeze(out, source="evals/decision-v2", transfer="evals/transfer-v2", public
 
 def smoke_subset(source, out):
     source, out = Path(source), Path(out)
-    manifest = json.loads((source / "manifest.json").read_text())
+    manifest = read_manifest(source)
     out.mkdir(parents=True, exist_ok=False)
     manifest["files"] = {}
     for split in SPLITS:

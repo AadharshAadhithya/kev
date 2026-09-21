@@ -31,7 +31,7 @@ from pathlib import Path
 from kev.data import source_seed
 from kev.experiment import CHOICE_DEFAULTS, DEFAULTS, validated_trial
 from kev.metrics import paired_bootstrap
-from kev.suite import digest, write_json
+from kev.suite import digest, read_manifest, write_json
 
 
 def config_digest(value):
@@ -204,7 +204,7 @@ def update_plan(section_text):
 
 def run_round(base, n, name, seeds, spend_start, spend_cap, timeout=None):
     rows, incumbents, dv4, tv4 = refresh_leaderboard()
-    manifest = json.loads((ROOT / SUITE / "manifest.json").read_text())
+    manifest = read_manifest(ROOT / SUITE)
     inc = incumbents.get(base)
     plan = []
     for seed in seeds:
@@ -310,7 +310,7 @@ def main():
     if a.cmd == "leaderboard":
         rows, inc, _, _ = refresh_leaderboard(); update_plan(plan_section()); print(f"{len(rows)} trials;", {b.split('/')[-1]: (i and round(i['transfer_acc'], 3)) for b, i in inc.items()})
     elif a.cmd == "propose":
-        rows, inc, dv4, tv4 = refresh_leaderboard(); manifest = json.loads((ROOT / SUITE / "manifest.json").read_text())
+        rows, inc, dv4, tv4 = refresh_leaderboard(); manifest = read_manifest(ROOT / SUITE)
         write_json(a.out, propose(rows, a.base, a.n, a.seed, manifest, inc[a.base] and inc[a.base]["config"])); print(open(a.out).read())
     else:
         seeds = [int(x) for x in a.seeds.split(",")]

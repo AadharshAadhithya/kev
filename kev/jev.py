@@ -7,7 +7,7 @@ from pathlib import Path
 
 from kev.benchmark import evaluate_records
 from kev.predictors import JevPredictor
-from kev.suite import digest, load_split, write_json
+from kev.suite import digest, load_split, read_manifest, write_json
 
 
 def provision_key(scope):
@@ -43,7 +43,7 @@ def main():
         ap.error("Set AI_GATEWAY_API_KEY or explicitly select --provision-scope")
     predictor = JevPredictor(key, a.budget, a.max_calls)
     try:
-        heldout = json.loads((Path(a.suite) / "manifest.json").read_text())["holdout_sources"]
+        heldout = read_manifest(a.suite)["holdout_sources"]
         report, _ = evaluate_records(records, predictor, a.out, heldout_sources=tuple(heldout))
         report.update(suite_sha256=digest(Path(a.suite) / "manifest.json"), split="development", provider=predictor.accounting())
         write_json(Path(a.out) / "report.json", report)

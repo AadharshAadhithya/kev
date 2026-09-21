@@ -27,7 +27,7 @@ from huggingface_hub import HfApi
 from . import contrastive
 from .data import materialize
 from .model import fits, load_tokenizer
-from .suite import digest, record_digest, write_json
+from .suite import digest, read_manifest, record_digest, write_json
 
 PARENT = Path("evals/v4/transfer-v4")
 MMLU_PRO = "TIGER-Lab/MMLU-Pro"
@@ -121,7 +121,7 @@ def main():
     a = ap.parse_args()
     out, parent = Path(a.out), Path(a.parent)
     if out.exists(): raise FileExistsError(out)
-    pm = json.loads((parent / "manifest.json").read_text())
+    pm = read_manifest(parent)
     revision = HfApi().dataset_info(MMLU_PRO).sha
     tokenizers = [load_tokenizer("Qwen/Qwen3-4B-Base", revision=pm["base_revisions"].get("Qwen/Qwen3-4B-Base")), load_tokenizer("Qwen/Qwen3.5-4B-Base", revision=QWEN35["Qwen/Qwen3.5-4B-Base"])]
     files, counts = {}, {}

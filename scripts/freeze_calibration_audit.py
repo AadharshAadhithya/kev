@@ -14,7 +14,7 @@ from kev.composition import DEV_SHAPES, check_group, generate as compose
 from kev.contrastive import generate as contrastive
 from kev.data import ALL_REPOS, ALL_SOURCES, build, materialize
 from kev.model import fits, load_tokenizer
-from kev.suite import SPLITS, digest, load_split, record_digest, semantic_hash, validate_training, write_json
+from kev.suite import SPLITS, digest, load_split, read_manifest, record_digest, semantic_hash, validate_training, write_json
 from kev.transfer_v9 import QWEN35, unknowable
 
 PUBLIC = ("mmlu", "emotion", "tweet_offensive", "qnli", "paws", "sciq")
@@ -151,8 +151,8 @@ def main():
     if out.exists():
         raise FileExistsError(out)
     parents = ROOT / "evals/v7/decision-v7", ROOT / "evals/v4/transfer-v4"
-    pm = json.loads((parents[0] / "manifest.json").read_text())
-    revisions = json.loads((ROOT / "evals/transfer-v2/manifest.json").read_text())["dataset_revisions"]
+    pm = read_manifest(parents[0])
+    revisions = read_manifest(ROOT / "evals/transfer-v2")["dataset_revisions"]
     tokenizers = [load_tokenizer(base, revision=revision) for base, revision in QWEN35.items() if "0.8" not in base]
     states, origins, reserved_files = reserve_existing(ROOT / "evals")
     reservation_hash = hashlib.sha256("\n".join(sorted(states)).encode()).hexdigest()

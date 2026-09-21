@@ -92,3 +92,4 @@ DATES+UNKNOWABLE (du) DELTAS (22:25), transfer-v4 dev
 
 LOCKED du (22:50): 9B+du OOD .852 (+1.8 [+0.8,+2.9]), brier .237 (better), cov@5% .62 (-4), deadline .88, pairs .81, in-dist .874. 4B+du .837 (+1.0 [-0.1,+2.1]), brier .255, cov .68 (+1), deadline .75, pairs .77.
 RECOMMENDATION: promote du at both sizes. 9B .852 locked vs Jev .857 dev. Publish tonight as Hub tags (night2-du) with main untouched; Jared flips main in the morning (release action).
+- 23:02 36b3 measured 18-24 optimizer steps/min (2.5 s/step vs 0.65 s printed compute) -> 2 epochs = 4.4 h > 4 h cap. Cancelled; relaunched night2-36b4 with epochs 1 (~2.2 h + eval). ETA ~01:40. Wasted ~$4 more. Lesson for the skill: measure wall steps/min in the first 5 min and check against the cap.

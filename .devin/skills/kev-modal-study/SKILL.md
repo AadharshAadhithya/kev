@@ -42,6 +42,8 @@ Image has transformers 5 + fla; mounts `evals/` and `scripts/` at run time (no d
 - Always give the entrypoint (`::main`, `::benchmarks`): the file has several.
 
 ## Gotchas
+- Wall-clock check in the first 5 minutes: count optimizer steps/min from `modal container logs` and multiply by steps/epoch × epochs; the printed `s/rec` is compute only and undercounts by 2-4× on MoE bases. Cancel and relaunch with fewer epochs if it will not fit the cap — a timed-out trial saves nothing.
+- `--gpu H200` on `study` only works if the deployed app was deployed with `KEV_GPU=H200` (the GPU is fixed at deploy time); deploy H200, launch, then redeploy H100 for the small jobs.
 - Symptom "config=... printed, then nothing, and `Modal Client → Modal Worker Heartbeat attempt failed`" = the container is thrashing host memory (checkpoint staging). Check `run_trial`'s `memory=` against the checkpoint size (bf16 bytes ≈ 2 × params); big bases need ≥ weights + 20 GB.
 - Training progress is only visible via `modal container logs <ta-id>` (`modal container list` to find it); `modal app logs` shows the last ~50 lines across containers, and the volume's train.log is committed at the end.
 - Modal rate-limits app creation: launching more than ~3 detached `modal run`s within a minute fails with "App create rate limit exceeded" (the log shows it; nothing runs). Space launches ≥ 30 s apart or batch jobs into one `benchmarks` call.

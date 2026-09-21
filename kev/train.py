@@ -1,14 +1,26 @@
-import argparse, contextlib, json, math, os, random, resource, sys, time
-from pathlib import Path
+"""LoRA fine-tune of the decision model on labelled requests (a frozen suite's training partition, records built on the
+fly from the public sources, or your own JSONL), with the pointer head trained from scratch.
+
+    uv run python -m kev.train --suite evals/v7/decision-v7 --out runs/<name>          # what studies run
+    uv run python -m kev.train --n_per_source 40 --accum 4 --out runs/smoke               # ~1 min smoke test
+    uv run python -m kev.train --data mine.jsonl --init_from jaredpalmer/kev-4b --lr 2e-5 --out runs/mine   # delta
+
+Batch size is small (variable-length records with custom masks) and gradients are accumulated over --accum micro-batches.
+"""
+import argparse, contextlib, json, math, random, resource, sys, time
 from collections import Counter
+from dataclasses import dataclass
+from pathlib import Path
 import torch
 import torch.nn.functional as F
 from .checkpoint import Checkpoint, Meta, write_meta
 from .device import allocated_bytes, default_device, empty_cache
 from .data import EVAL_ONLY, build, augment, load_records, materialize, none_pair, source_seed
-from .suite import digest, load_split, write_json
+from .suite import SYNTHETIC_SOURCES, digest, load_split, validate_training, write_json
 from .model import MAX_BRANCH, MAX_PACKED, MAX_STATE, DecisionModel, fits, load_tokenizer
 
+
+# --- losses -----------------------------------------------------------------------------------------------------------
 
 def permuted_copy(rec, rng):
     """Re-shuffle options of every Choice question with K>=3; return (record, perms) with perms[q] = new->old index or None."""
@@ -53,12 +65,134 @@ def anchor_loss(z, q, target, dev):
     return F.kl_div(F.log_softmax(z, -1), t, reduction="sum")
 
 
+def permutation_kl(z1, z2, perm, dev):
+    """Symmetric KL between one question's predictions under two option orders; perm maps the second order's positions
+    back to the first (perms from permuted_copy)."""
+    lp1 = F.log_softmax(z1, -1); lp2 = F.log_softmax(z2, -1)[torch.tensor([perm.index(j) for j in range(len(perm))], device=dev)]
+    return 0.5 * (F.kl_div(lp2, lp1, log_target=True, reduction="sum") + F.kl_div(lp1, lp2, log_target=True, reduction="sum"))
+
+
 def accumulation_records(n, batch, accum, microbatch):
     start = (microbatch // accum) * accum * batch
     return min(accum * batch, n - start)
 
 
-def main():
+# --- data -------------------------------------------------------------------------------------------------------------
+
+def training_requests(a, tok, manifest, holdout):
+    """The labelled requests one run trains on: the suite's training partition, records built from the public sources,
+    or the user's own file (optionally with a replay sample from the suite); filtered to the training context, checked
+    against the eval-only policy, then the ablation knobs (--train_sources, --public_frac, --synthetic_repeat)."""
+    # the suite's rules (declared trainable sources, no held-out structures) apply to every record taken from it
+    if a.data:
+        reqs = load_records(a.data)
+        if a.replay:
+            pool = load_split(a.suite, "train"); replay = random.Random(f"replay:{a.seed}").sample(pool, min(a.replay, len(pool)))
+            validate_training(replay, manifest)
+            print(f"replay: {len(replay)} of {len(pool)} suite training records mixed with {len(reqs)} from {a.data}", flush=True)
+            reqs = reqs + replay
+    elif manifest:
+        reqs = load_split(a.suite, "train"); validate_training(reqs, manifest)
+    else:
+        reqs = build(a.n_per_source, "train", a.seed, exclude=holdout)
+    if not manifest or a.data:
+        # frozen suites are filtered to the training context when they are frozen (kev.suite.select_unique); records built
+        # on the fly here are not, so apply the same rule instead of letting the strict encoder abort the run (issue #5)
+        kept = [r for r in reqs if fits(materialize(r), tok)]
+        if len(kept) < len(reqs):
+            print(f"dropped {len(reqs) - len(kept)} of {len(reqs)} records that exceed the training context "
+                  f"({MAX_STATE} state / {MAX_BRANCH} branch / {MAX_PACKED} packed tokens)", flush=True)
+        reqs = kept
+    if not reqs:
+        raise ValueError("empty training set")
+    eval_only = set(EVAL_ONLY) | set(manifest.get("eval_only_sources", []) if manifest else [])
+    forbidden = {r["_meta"]["source"] for r in reqs} & eval_only
+    if forbidden:
+        raise ValueError(f"training data contains eval-only sources: {sorted(forbidden)}")
+    if a.train_sources:
+        wanted = set(a.train_sources.split(","))
+        unknown = wanted - {r["_meta"]["source"] for r in reqs}
+        if unknown: raise ValueError(f"--train_sources not in the training partition: {sorted(unknown)}")
+        reqs = [r for r in reqs if r["_meta"]["source"] in wanted]
+        print(f"ablation: training on {sorted(wanted)} -> {len(reqs)} records", flush=True)
+    if a.public_frac < 1:
+        mix_rng = random.Random(source_seed(a.seed, "public_frac"))
+        public = [r for r in reqs if r["_meta"]["source"] not in SYNTHETIC_SOURCES]; synth = [r for r in reqs if r["_meta"]["source"] in SYNTHETIC_SOURCES]
+        keep = sorted(mix_rng.sample(range(len(public)), int(round(a.public_frac * len(public)))))
+        reqs = [public[i] for i in keep] + synth
+        print(f"mix: public_frac {a.public_frac} -> {len(keep)} public + {len(synth)} synthetic records", flush=True)
+    if a.synthetic_repeat > 1:
+        extra = [r for r in reqs if r["_meta"]["source"] in SYNTHETIC_SOURCES] * (a.synthetic_repeat - 1)
+        reqs = reqs + extra
+        print(f"mix: synthetic_repeat {a.synthetic_repeat} -> +{len(extra)} records", flush=True)
+    return reqs
+
+
+@dataclass(eq=False)   # identity, so batch.index(v) finds this very variant
+class Variant:
+    """One encoded training example: an augmented copy of a source request, with the request's id and source kept for
+    the anchor lookup, and optionally the same record under a second option order for the permutation KL."""
+    rec: dict
+    enc: dict
+    request_id: str
+    source: str
+    permuted: tuple | None = None   # (encoding under the other order, perms from permuted_copy)
+
+    @property
+    def tokens(self):
+        return len(self.enc["ids"]) + (len(self.permuted[0]["ids"]) if self.permuted else 0)
+
+
+def encode_batch(model, tok, a, chunk, epoch):
+    """Augment each request (fresh permutation / none option / distractor per epoch), optionally add its none-pair
+    siblings and a permuted copy for the KL term, and encode strictly."""
+    out = []
+    for req in chunk:
+        item_rng = random.Random(source_seed(a.seed, f"{epoch}:{req['_meta']['id']}"))
+        variants = [augment(req, item_rng, p_none=a.p_none, p_none_distract=a.p_none_distract, p_distract=a.p_distract)]
+        if a.p_none_pair > 0 and item_rng.random() < a.p_none_pair:
+            variants += none_pair(req, item_rng)
+        for v in variants:
+            rec = materialize(v)
+            enc = model.encode(tok, rec, strict=True)
+            if len(enc["ids"]) > MAX_PACKED:
+                raise ValueError(f"training request exceeds {MAX_PACKED} packed tokens")
+            out.append(Variant(rec, enc, req["_meta"]["id"], req["_meta"]["source"]))
+        if a.perm_kl > 0 and item_rng.random() < a.perm_frac and any(q["qtype"] == "choice" and len(q["options"]) >= 3 for q in rec["questions"]):
+            rec2, perms = permuted_copy(rec, item_rng)
+            out[-1].permuted = (model.encode(tok, rec2, strict=True), perms)
+    return out
+
+
+def batch_loss(model, a, batch, dev, anchors, anchor_sources, autocast):
+    """Forward the variants and sum the loss terms: mean question loss per variant, the anchor KL per anchored variant,
+    the permutation KL per permuted variant. Returns (loss, terms) with the summed term values for logging."""
+    terms = Counter()
+    permuted = [v for v in batch if v.permuted]
+    with autocast:
+        logits_b = model.forward_batch([v.enc for v in batch])
+        logits2_b = model.forward_batch([v.permuted[0] for v in permuted]) if permuted else []
+    loss = 0.0
+    for v, logits in zip(batch, logits_b):
+        ce = sum(question_loss(z.float(), q, dev, a.ord_w, a.label_smoothing, a.brier_w, a.focal_gamma)
+                 for z, q in zip(logits, v.rec["questions"])) / len(logits)
+        terms["ce"] += ce.item(); loss = loss + ce
+        if anchors and v.request_id in anchors and (anchor_sources is None or v.source in anchor_sources):
+            kls = [t for t in (anchor_loss(z.float(), q, anchors[v.request_id].get(q["qid"]), dev) for z, q in zip(logits, v.rec["questions"])) if t is not None]
+            if kls:
+                kl_a = sum(kls) / len(kls); loss = loss + a.anchor_w * kl_a; terms["anchor"] += kl_a.item(); terms["anchor_n"] += 1
+    for v, logits2 in zip(permuted, logits2_b):
+        logits = logits_b[batch.index(v)]
+        kls = [permutation_kl(z1.float(), z2.float(), perm, dev) for z1, z2, perm in zip(logits, logits2, v.permuted[1]) if perm is not None]
+        kl = sum(kls) / len(kls); loss = loss + a.perm_kl * kl; terms["kl"] += kl.item(); terms["kl_n"] += 1
+    if not torch.isfinite(loss):
+        raise ValueError("non-finite training loss")
+    return loss, terms
+
+
+# --- run --------------------------------------------------------------------------------------------------------------
+
+def parse_args():
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", default="Qwen/Qwen3-0.6B-Base")
     ap.add_argument("--n_per_source", type=int, default=1000)
@@ -81,7 +215,7 @@ def main():
     ap.add_argument("--batch", type=int, default=1, help="records per forward pass (padded batch); optimizer step every --accum micro-batches")
     ap.add_argument("--dtype", choices=["fp32", "bf16"], default="fp32", help="bf16 = autocast forward with fp32 master weights (CUDA only)")
     ap.add_argument("--weights_dtype", choices=["fp32", "bf16"], default="fp32", help="dtype of the frozen backbone weights. bf16 halves memory and is required by the fused MoE experts "
-                                                                                        "(torch._grouped_mm wants bf16); LoRA and head stay fp32 (peft upcasts adapters). Evaluation of such a run must also load bf16 (KEV_DTYPE=bf16).")
+                                                                                        "(torch._grouped_mm wants bf16); LoRA and head stay fp32 (peft upcasts adapters). The checkpoint records it and is loaded the same way.")
     ap.add_argument("--checkpointing", type=int, choices=[0, 1], default=0)
     ap.add_argument("--option_isolation", type=int, choices=[0, 1], default=0, help="option spans are isolated sub-branches with shared positions (exact permutation invariance)")
     ap.add_argument("--special_embeddings", type=int, choices=[0, 1], default=0, help="also train the embeddings of the 5 delimiter tokens")
@@ -105,7 +239,6 @@ def main():
                                                    "released model's in-domain skill while adapting to a new domain")
     ap.add_argument("--seed", type=int, default=0)
     a = ap.parse_args()
-
     if min(a.epochs, a.accum, a.n_per_source, a.lora, a.batch, a.synthetic_repeat) < 1 or not 0 < a.public_frac <= 1:
         ap.error("epochs, accum, n_per_source, lora, batch and synthetic_repeat must be positive; 0 < public_frac <= 1")
     if a.dtype == "bf16" and a.device != "cuda":
@@ -117,25 +250,39 @@ def main():
         ap.error("use at most one finite, nonnegative loss modifier; smoothing must be <= 1")
     if bool(a.anchor) != (a.anchor_w > 0):
         ap.error("--anchor and --anchor_w > 0 go together")
-    anchors = json.loads(Path(a.anchor).read_text()).get("targets", {}) if a.anchor else {}
-    if a.anchor: print(f"anchor targets: {len(anchors)} records from {a.anchor}", flush=True)
-    anchor_sources = set(a.anchor_sources.split(",")) if a.anchor_sources else None
-    out_dir = Path(a.out)
-    if out_dir.exists():
+    if a.replay and not (a.data and a.suite):
+        ap.error("--replay needs both --data and --suite")
+    if Path(a.out).exists():
         ap.error("refusing to overwrite an existing run")
-    out_dir.mkdir(parents=True)
-    torch.manual_seed(a.seed); rng = random.Random(a.seed)
-    dev = a.device or default_device()
-    if dev == "cuda":
-        torch.backends.cuda.matmul.allow_tf32 = True; torch.backends.cudnn.allow_tf32 = True
-    autocast = torch.autocast("cuda", dtype=torch.bfloat16) if a.dtype == "bf16" else contextlib.nullcontext()
-    manifest = json.loads((Path(a.suite) / "manifest.json").read_text()) if a.suite else None
+    return a
+
+
+def pinned_revision(a, manifest):
+    """The base commit this run trains against: the suite's pin, or --base_revision when the suite has none."""
     revision = manifest["base_revisions"].get(a.base) if manifest else None
     if a.base_revision:
         if revision and revision != a.base_revision: raise ValueError("--base_revision conflicts with the suite's pinned revision")
         revision = a.base_revision
     if manifest and not revision:
         raise ValueError("base not pinned by the suite; pass --base_revision")
+    return revision
+
+
+def main():
+    a = parse_args()
+    out_dir = Path(a.out); out_dir.mkdir(parents=True)
+    torch.manual_seed(a.seed); rng = random.Random(a.seed)
+    dev = a.device or default_device()
+    if dev == "cuda":
+        torch.backends.cuda.matmul.allow_tf32 = True; torch.backends.cudnn.allow_tf32 = True
+    autocast = torch.autocast("cuda", dtype=torch.bfloat16) if a.dtype == "bf16" else contextlib.nullcontext()
+    manifest = json.loads((Path(a.suite) / "manifest.json").read_text()) if a.suite else None
+    revision = pinned_revision(a, manifest)
+    holdout = manifest["holdout_sources"] if manifest else [s for s in a.holdout.split(",") if s]
+    anchors = json.loads(Path(a.anchor).read_text()).get("targets", {}) if a.anchor else {}
+    if a.anchor: print(f"anchor targets: {len(anchors)} records from {a.anchor}", flush=True)
+    anchor_sources = set(a.anchor_sources.split(",")) if a.anchor_sources else None
+
     tok = load_tokenizer(a.base, revision=revision)
     model = DecisionModel(a.base, tok, dev, lora=a.lora, revision=revision, head_dim=a.head_dim, lora_targets=a.lora_targets,
                           option_isolation=bool(a.option_isolation), special_embeddings=bool(a.special_embeddings),
@@ -145,7 +292,7 @@ def main():
     model.lm.config.use_cache = False
     # what this run will save as head.pt; also the architecture a warm start must match
     meta = Meta(base=a.base, base_revision=revision, lora=a.lora, head_dim=a.head_dim, option_isolation=bool(a.option_isolation),
-                special_embeddings=bool(a.special_embeddings), weights_dtype=a.weights_dtype)
+                special_embeddings=bool(a.special_embeddings), weights_dtype=a.weights_dtype, holdout=holdout)
     init_source = None
     if a.init_from:
         # delta mode (PR #9, Radexito): start from an already trained adapter + pointer head instead of the base model, so a
@@ -154,52 +301,7 @@ def main():
         print(f"delta: warm start from {init_source['resolved']}: {init_source['adapter_tensors']} adapter tensors and the pointer head loaded", flush=True)
     print(f"device={dev} trainable params={sum(p.numel() for p in model.trainable_parameters())/1e6:.1f}M", flush=True)
 
-    holdout = manifest["holdout_sources"] if manifest else [s for s in a.holdout.split(",") if s]
-    if a.replay and not (a.data and a.suite): ap.error("--replay needs both --data and --suite")
-    if a.data:
-        reqs = load_records(a.data)
-        if a.replay:
-            pool = load_split(a.suite, "train"); replay = random.Random(f"replay:{a.seed}").sample(pool, min(a.replay, len(pool)))
-            print(f"replay: {len(replay)} of {len(pool)} suite training records mixed with {len(reqs)} from {a.data}", flush=True); reqs = reqs + replay
-    else:
-        reqs = load_split(a.suite, "train") if manifest else build(a.n_per_source, "train", a.seed, exclude=holdout)
-    if not manifest or a.data:
-        # frozen suites are filtered to the training context when they are frozen (kev.suite.select_unique); records built
-        # on the fly here are not, so apply the same rule instead of letting the strict encoder abort the run (issue #5)
-        kept = [r for r in reqs if fits(materialize(r), tok)]
-        if len(kept) < len(reqs):
-            print(f"dropped {len(reqs) - len(kept)} of {len(reqs)} records that exceed the training context "
-                  f"({MAX_STATE} state / {MAX_BRANCH} branch / {MAX_PACKED} packed tokens)", flush=True)
-        reqs = kept
-    if not reqs:
-        raise ValueError("empty training set")
-    forbidden = {r["_meta"]["source"] for r in reqs} & set(EVAL_ONLY)
-    if forbidden:
-        raise ValueError(f"training partition contains eval-only sources: {sorted(forbidden)}")
-    if a.train_sources:
-        wanted = set(a.train_sources.split(","))
-        unknown = wanted - {r["_meta"]["source"] for r in reqs}
-        if unknown: raise ValueError(f"--train_sources not in the training partition: {sorted(unknown)}")
-        reqs = [r for r in reqs if r["_meta"]["source"] in wanted]
-        print(f"ablation: training on {sorted(wanted)} -> {len(reqs)} records", flush=True)
-    if manifest:
-        from .study_v3 import validate_training
-        # --data records are the user's own (validated by load_records; never an eval-only source by construction of their
-        # names); the suite's rules apply to the replay sample and to suite-only runs
-        validate_training([r for r in reqs if not a.data or not r["_meta"]["source"].startswith(("custom", "night2_"))], manifest)
-        if a.data and any(r["_meta"]["source"] in set(EVAL_ONLY) | set(manifest.get("eval_only_sources", [])) for r in reqs):
-            raise ValueError("--data contains an eval-only source")
-    SYNTHETIC = ("legacy_policy", "compositional", "contrastive")
-    if a.public_frac < 1:
-        mix_rng = random.Random(source_seed(a.seed, "public_frac"))
-        public = [r for r in reqs if r["_meta"]["source"] not in SYNTHETIC]; synth = [r for r in reqs if r["_meta"]["source"] in SYNTHETIC]
-        keep = sorted(mix_rng.sample(range(len(public)), int(round(a.public_frac * len(public)))))
-        reqs = [public[i] for i in keep] + synth
-        print(f"mix: public_frac {a.public_frac} -> {len(keep)} public + {len(synth)} synthetic records", flush=True)
-    if a.synthetic_repeat > 1:
-        extra = [r for r in reqs if r["_meta"]["source"] in SYNTHETIC] * (a.synthetic_repeat - 1)
-        reqs = reqs + extra
-        print(f"mix: synthetic_repeat {a.synthetic_repeat} -> +{len(extra)} records", flush=True)
+    reqs = training_requests(a, tok, manifest, holdout)
     suite_hash = digest(Path(a.suite) / "manifest.json") if manifest else None
     write_json(out_dir / "training_config.json", {"args": vars(a), "suite_sha256": suite_hash, "base_revision": revision, "init_source": init_source,
                                                 "ordinal_objective": "ranked_probability_score", "holdout": holdout})
@@ -213,51 +315,17 @@ def main():
     micro_per_epoch = math.ceil(len(reqs) / a.batch)
     steps = a.epochs * math.ceil(micro_per_epoch / a.accum)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=[a.lr, a.head_lr or a.lr], total_steps=max(steps, 1), pct_start=0.1)
-    model.train(); t0 = time.time(); run = Counter(); step = 0; seen = 0
-    tokens_seen = peak_mem = 0
+    model.train(); t0 = time.time(); run = Counter(); step = seen = tokens_seen = peak_mem = 0
     for ep in range(a.epochs):
         rng.shuffle(reqs)
         for mb in range(micro_per_epoch):
             chunk = reqs[mb * a.batch : (mb + 1) * a.batch]
-            recs, encs, perm_jobs, rec_ids, rec_sources = [], [], [], [], []
-            for req in chunk:
-                item_rng = random.Random(source_seed(a.seed, f"{ep}:{req['_meta']['id']}"))
-                variants = [augment(req, item_rng, p_none=a.p_none, p_none_distract=a.p_none_distract, p_distract=a.p_distract)]  # fresh permutation / distractors each epoch
-                if a.p_none_pair > 0 and item_rng.random() < a.p_none_pair:
-                    variants += none_pair(req, item_rng)
-                for v in variants:
-                    rec = materialize(v)
-                    enc = model.encode(tok, rec, strict=True)
-                    if len(enc["ids"]) > MAX_PACKED:
-                        raise ValueError(f"training request exceeds {MAX_PACKED} packed tokens")
-                    recs.append(rec); encs.append(enc); tokens_seen += len(enc["ids"])
-                    rec_ids.append(req["_meta"]["id"]); rec_sources.append(req["_meta"]["source"])
-                if a.perm_kl > 0 and item_rng.random() < a.perm_frac and any(q["qtype"] == "choice" and len(q["options"]) >= 3 for q in rec["questions"]):
-                    rec2, perms = permuted_copy(rec, item_rng); perm_jobs.append((len(recs) - 1, model.encode(tok, rec2, strict=True), perms))
-            with autocast:
-                logits_b = model.forward_batch(encs)
-                logits2_b = model.forward_batch([e for _, e, _ in perm_jobs]) if perm_jobs else []
-            loss = 0.0
-            for logits, rec, rid, src in zip(logits_b, recs, rec_ids, rec_sources):
-                ce = sum(question_loss(z.float(), q, dev, a.ord_w, a.label_smoothing, a.brier_w, a.focal_gamma)
-                         for z, q in zip(logits, rec["questions"])) / len(logits)
-                run["ce"] += ce.item(); loss = loss + ce
-                if anchors and rid in anchors and (anchor_sources is None or src in anchor_sources):
-                    terms = [t for t in (anchor_loss(z.float(), q, anchors[rid].get(q["qid"]), dev) for z, q in zip(logits, rec["questions"])) if t is not None]
-                    if terms:
-                        kl_a = sum(terms) / len(terms); loss = loss + a.anchor_w * kl_a; run["anchor"] += kl_a.item(); run["anchor_n"] += 1
-            for (ri, enc2, perms), logits2 in zip(perm_jobs, logits2_b):
-                kl, n = 0.0, 0; tokens_seen += len(enc2["ids"])
-                for z1, z2, perm in zip(logits_b[ri], logits2, perms):
-                    if perm is None: continue
-                    lp1 = F.log_softmax(z1.float(), -1); lp2 = F.log_softmax(z2.float(), -1)[torch.tensor([perm.index(j) for j in range(len(perm))], device=dev)]
-                    kl = kl + 0.5 * (F.kl_div(lp2, lp1, log_target=True, reduction="sum") + F.kl_div(lp1, lp2, log_target=True, reduction="sum")); n += 1
-                kl = kl / n; loss = loss + a.perm_kl * kl; run["kl"] += kl.item(); run["kl_n"] += 1
-            if not torch.isfinite(loss):
-                raise ValueError("non-finite training loss")
+            batch = encode_batch(model, tok, a, chunk, ep)
+            loss, terms = batch_loss(model, a, batch, dev, anchors, anchor_sources, autocast)
             # weight by source records in the accumulation group so none-pair siblings do not inflate a record's share
-            group_records = accumulation_records(len(reqs), a.batch, a.accum, mb) * (len(recs) / len(chunk))
-            (loss / group_records).backward(); run["n"] += len(recs); seen += len(recs)
+            group_records = accumulation_records(len(reqs), a.batch, a.accum, mb) * (len(batch) / len(chunk))
+            (loss / group_records).backward()
+            run += terms; run["n"] += len(batch); seen += len(batch); tokens_seen += sum(v.tokens for v in batch)
             peak_mem = max(peak_mem, allocated_bytes(dev))
             if (mb + 1) % a.accum == 0 or mb + 1 == micro_per_epoch:
                 torch.nn.utils.clip_grad_norm_(model.trainable_parameters(), 1.0)
@@ -266,9 +334,9 @@ def main():
                 if step % 10 == 0:
                     print(f"ep{ep} step {step}/{steps} loss {run['ce']/run['n']:.3f} kl {run['kl']/max(run['kl_n'],1):.3f} anchor {run['anchor']/max(run['anchor_n'],1):.3f} {(time.time()-t0)/seen:.3f}s/rec", flush=True)
                     run = Counter()
-    os.makedirs(a.out, exist_ok=True)
+
     model.lm.save_pretrained(a.out)
-    meta.head, meta.holdout, meta.extra = model.head.state_dict(), holdout, {"args": vars(a), "suite_sha256": suite_hash, "init_source": init_source}
+    meta.head, meta.extra = model.head.state_dict(), {"args": vars(a), "suite_sha256": suite_hash, "init_source": init_source}
     write_meta(a.out, meta)
     tok.save_pretrained(a.out)
     write_json(out_dir / "training_metrics.json", {"wall_seconds": time.time() - t0, "records_seen": seen,

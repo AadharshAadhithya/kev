@@ -72,8 +72,10 @@ See README.md (deep dive) and docs/model-cards/ (one card per checkpoint: recipe
 
 ## Layout
 - `kev/data.py`      dataset -> typed records, permutation / none-of-the-above / distractor augmentation
+- `kev/suite.py`     frozen suites: digest/manifest/load_split (Hub mirror), CONTEXT + admission, `validate_training` (trainable/eval-only policy), `semantic_hash`, freeze CLI
 - `kev/model.py`     encode(), branch_mask(), PointerHead, DecisionModel
-- `kev/train.py`     LoRA fine-tune, batch size 1 with grad accumulation (variable-length custom masks)
+- `kev/train.py`     LoRA fine-tune: `training_requests` (suite / built / --data+--replay, context filter, policy checks, mix ablations),
+                     `encode_batch` + `batch_loss` (CE, anchor KL, permutation KL), `main` orchestration. Grad accumulation over small padded batches.
 - `kev/checkpoint.py` Checkpoint (resolve run dir or Hub id, `head.pt` schema = `Meta`, load with `LoadOptions`, `warm_start` for deltas)
 - `kev/evaluate.py`  acc/ECE, permutation stability, IIA shift, isolation probe, packed-vs-separate (legacy prototype eval)
 - `kev/device.py`    default_device / sync / empty_cache / allocated_bytes for cuda, mps, cpu

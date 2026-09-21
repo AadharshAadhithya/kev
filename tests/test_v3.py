@@ -118,7 +118,7 @@ def test_uneven_microbatches_have_equal_record_weight():
 
 
 def test_v3_training_refuses_heldout_structure():
-    from kev.study_v3 import validate_training
+    from kev.suite import validate_training
     r = {"_meta": {"source": "compositional", "family": "held_and_or"}}
     with pytest.raises(ValueError, match="held-out"):
         validate_training([r], {"trainable_sources": ["compositional"]})

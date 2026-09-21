@@ -11,17 +11,10 @@ from kev.composition import DEV_SHAPES, HELD_OUT_KEYS, TEST_SHAPES, TRAIN_SHAPES
 from kev.contrastive import ORDINAL_FAMILIES, generate
 from kev.data import materialize
 from kev.model import fits, load_tokenizer
-from kev.suite import SPLITS, digest, load_split, record_digest, write_json
+from kev.suite import SPLITS, digest, load_split, semantic_hash, validate_training, write_json
 
 BASES = ("Qwen/Qwen3-0.6B-Base", "Qwen/Qwen3-4B-Base")
 FAMILIES = ("return_window", "spend_threshold", "age_eligibility", "quantity_limit")
-
-
-def semantic_hash(r):
-    state = r["state"]
-    if isinstance(state, dict) and "policy" in state and "case" in state:
-        state = {"policy": state["policy"], "sentences": sorted(s.rstrip(".") for s in state["case"].split(". "))}
-    return record_digest(state)
 
 
 def grouped_split(records, calibration_groups):
@@ -55,23 +48,6 @@ def legacy(pairs, seed, families=FAMILIES, source="legacy_policy", excluded=()):
     if any(counts[f] != pairs for f in families):
         raise ValueError("insufficient unique legacy pairs")
     return records
-
-
-def validate_training(records, manifest):
-    from kev.data import EVAL_ONLY
-    allowed = set(manifest.get("trainable_sources", []))
-    forbidden = set(EVAL_ONLY) | set(manifest.get("eval_only_sources", [])) | set(manifest.get("holdout_sources", []))
-    for r in records:
-        m = r["_meta"]
-        if m["source"] in forbidden or (allowed and m["source"] not in allowed):
-            raise ValueError(f"eval-only or undeclared training source: {m['source']}")
-        if m["source"] == "compositional":
-            held_shape = m["family"] in DEV_SHAPES + TEST_SHAPES
-            held_structure = m.get("structure") in HELD_OUT_KEYS
-            if held_shape or held_structure or (m["family"] not in TRAIN_SHAPES and not m["family"].startswith("rand:")):
-                raise ValueError("held-out compositional structure in training")
-    if not records:
-        raise ValueError("empty training partition")
 
 
 def freeze(out, source="evals/decision-v2", transfer="evals/transfer-v2", public_train=None, synthetic_scale=1, inherit_eval=None,

@@ -14,8 +14,7 @@ from kev.composition import DEV_SHAPES, check_group, generate as compose
 from kev.contrastive import generate as contrastive
 from kev.data import ALL_REPOS, ALL_SOURCES, build, materialize
 from kev.model import fits, load_tokenizer
-from kev.study_v3 import semantic_hash, validate_training
-from kev.suite import SPLITS, digest, load_split, record_digest, write_json
+from kev.suite import SPLITS, digest, load_split, record_digest, semantic_hash, validate_training, write_json
 from kev.transfer_v9 import QWEN35, unknowable
 
 PUBLIC = ("mmlu", "emotion", "tweet_offensive", "qnli", "paws", "sciq")

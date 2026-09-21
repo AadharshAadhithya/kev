@@ -31,7 +31,7 @@ from kev.checkpoint import LoadOptions
 from kev.device import default_device, empty_cache
 from kev.metrics import fit_temperature, paired_bootstrap
 from kev.predictors import LocalPredictor
-from kev.suite import digest, load_split, record_digest, write_json
+from kev.suite import digest, load_split, record_digest, validate_training, write_json
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULTS = {"epochs": 1, "seed": 0, "lr": 0.0002, "lora": 16, "accum": 8, "batch": 1,
@@ -303,7 +303,6 @@ def load_plan(suite, plan_path):
     forbidden = {r["_meta"]["source"] for r in load_split(suite, "train")} & set(EVAL_ONLY)
     if forbidden:
         raise ValueError(f"suite training partition contains eval-only sources: {sorted(forbidden)}")
-    from kev.study_v3 import validate_training
     validate_training(load_split(suite, "train"), manifest)
     plan = json.loads(Path(plan_path).read_text())
     if not isinstance(plan, list) or not 1 <= len(plan) <= 8:

@@ -6,6 +6,7 @@ import random
 from collections import Counter
 from pathlib import Path
 
+from kev.composition import DEV_SHAPES, HELD_OUT_KEYS, TEST_SHAPES, TRAIN_SHAPES
 from kev.data import ALL_REPOS, ALL_SOURCES, EVAL_ONLY, REPOS, SOURCES, TRAINABLE, TRANSFER_REPOS, TRANSFER_SOURCES, build, dataset_ref, materialize, source_seed
 from kev.model import MAX_BRANCH, MAX_PACKED, MAX_STATE, fits, load_tokenizer
 
@@ -21,6 +22,8 @@ ADMISSION_BRANCH_HEADROOM = 64
 # the manifest, so the suite hash and every provenance record stay unchanged.
 SUITES_DATASET = "jaredpalmer/kev-suites"
 SUITES_REVISION = "a88f56db5341397299137cb68775c2ea6e3f68cb"
+# programmatic policy sources (kev.study_v3 / kev.contrastive); the trainer's mix ablations treat them as one group
+SYNTHETIC_SOURCES = ("legacy_policy", "compositional", "contrastive")
 
 
 def digest(path):
@@ -37,6 +40,33 @@ def record_digest(record):
 
 def write_json(path, value):
     Path(path).write_text(json.dumps(value, indent=2, ensure_ascii=False, allow_nan=False) + "\n")
+
+
+def semantic_hash(r):
+    """State hash that ignores sentence order for policy/case records (contrastive, compositional), so the same case
+    told in a different order counts as the same state; record_digest of the state otherwise."""
+    state = r["state"]
+    if isinstance(state, dict) and "policy" in state and "case" in state:
+        state = {"policy": state["policy"], "sentences": sorted(s.rstrip(".") for s in state["case"].split(". "))}
+    return record_digest(state)
+
+
+def validate_training(records, manifest):
+    """Every training record must come from a source the manifest declares trainable, never from an eval-only or held-out
+    one, and compositional records must not use a held-out rule structure."""
+    allowed = set(manifest.get("trainable_sources", []))
+    forbidden = set(EVAL_ONLY) | set(manifest.get("eval_only_sources", [])) | set(manifest.get("holdout_sources", []))
+    for r in records:
+        m = r["_meta"]
+        if m["source"] in forbidden or (allowed and m["source"] not in allowed):
+            raise ValueError(f"eval-only or undeclared training source: {m['source']}")
+        if m["source"] == "compositional":
+            held_shape = m["family"] in DEV_SHAPES + TEST_SHAPES
+            held_structure = m.get("structure") in HELD_OUT_KEYS
+            if held_shape or held_structure or (m["family"] not in TRAIN_SHAPES and not m["family"].startswith("rand:")):
+                raise ValueError("held-out compositional structure in training")
+    if not records:
+        raise ValueError("empty training partition")
 
 
 def load_split(directory, split, allow_test=False):

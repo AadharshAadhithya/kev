@@ -24,8 +24,9 @@
   "published_changes": false,
   "budget": {
     "workspace_metered_before_usd":392.13507560,
-    "workspace_metered_after_usd":403.86507560,
-    "observed_workspace_increase_usd":11.73,
+    "workspace_metered_after_usd":398.31507560,
+    "observed_workspace_increase_usd":6.18,
+    "earlier_provisional_metered_usd":403.86507560,
     "successful_screen_compute_admission_bound_usd":18.92,
     "authorized_total_usd":1000,
     "caveat":"Workspace billing can lag and includes startup/storage or unrelated workspace activity; this is not an exact invoice for each individual trial."

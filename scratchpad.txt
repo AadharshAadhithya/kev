@@ -127,4 +127,4 @@ CALIBRATION AUDIT — research/calibration-audit
 - All five r2 calls completed; every trained arm used 3899 augmented records, 429 optimizer steps and 639399 forward tokens. Results and protocol checks: runs/calibration-screen-review-v1/{report,summary}.json.
 - Recalibrated 4B development: parent acc .7973 / cov5 .5762 / AURC .0580; CE continuation .7973/.5320/.0625; smoothing .8018/.0061/.1001; CE+Brier .7973/.5259/.0628; focal .7988/.5015/.0606. No arm passes.
 - STOP as registered: no replication, no fresh-threshold/final-test scoring, no larger-model run, no checkpoint or production changes. One seed/epoch/setting is not a universal negative claim about these losses.
-- Metered workspace reached $403.87 (increase ~$11.73 during this pass, billing lag/attribution caveat). Total authorization $1000 is a ceiling, not a spending target.
+- Metered workspace first showed $403.87, then revised to $398.32 on the final no-active-containers check (latest increase ~$6.18 over $392.14; billing lag/attribution caveat). Both snapshots retained. Total authorization $1000 is a ceiling, not a spending target.

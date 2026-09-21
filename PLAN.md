@@ -107,7 +107,7 @@ All five jobs completed under [`calibration-screen-4b-s11-r2`](runs/calibration-
 
 As registered, **no replication, fresh threshold-calibration read, final-test read, publication, or larger-model run** follows this negative screen. The 1,260-record final panel remains unscored and available for a future preregistered candidate. The reasonable next question is a targeted data/capability experiment (for example, controlled role-binding counterexamples from permitted training sources), not an expanded loss grid or automatic relabelling of PAWS. It needs its own registration before spending.
 
-Observed workspace metering rose from $392.14 to **$403.87** during this pass (about **$11.73**, subject to billing lag and workspace attribution). The authorized ceiling is $1,000, not a target to spend. The successful screen's conservative function-execution admission bound was $18.92, excluding startup/storage. No historical benchmark file or published checkpoint was overwritten.
+Workspace metering initially showed $403.87 after the pass, then revised to **$398.32** on the final check: about **$6.18 above the $392.14 starting reading**, subject to billing lag and workspace attribution. Both observations are retained in the outcome summary; neither is an exact per-trial invoice. The authorized ceiling is $1,000, not a target to spend. The successful screen's conservative function-execution admission bound was $18.92, excluding startup/storage. No historical benchmark file or published checkpoint was overwritten.
 
 ### Superseded initial round-3 proposal (retained for the research record)
 

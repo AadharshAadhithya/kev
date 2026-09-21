@@ -9,9 +9,11 @@ The exact base checkpoint is recorded in the model card's `base_model` field and
 Uploads: adapter, head.pt, tokenizer files, eval.json, training log (if found), and the model card (--card) as README.md
 with the repo id and run name filled in. Requires `hf auth login`.
 """
-import argparse, json, os, re, shutil, tempfile
+import argparse, os, re, shutil, tempfile
+from pathlib import Path
 from huggingface_hub import HfApi
 from .checkpoint import read_meta
+from .suite import read_json, write_json
 
 FILES = ["adapter_config.json", "adapter_model.safetensors", "head.pt", "tokenizer.json", "tokenizer_config.json",
          "vocab.json", "merges.txt", "added_tokens.json", "special_tokens_map.json", "eval.json"]
@@ -38,8 +40,8 @@ def main():
             if os.path.exists(src): shutil.copy(src, tmp)
             else: print(f"skip {f} (not found)")
         # runs before task_type was set saved null; the Hub warns about it and PEFT treats both the same for a bare backbone
-        cfg_path = f"{tmp}/adapter_config.json"; cfg = json.load(open(cfg_path))
-        if not cfg.get("task_type"): cfg["task_type"] = "FEATURE_EXTRACTION"; json.dump(cfg, open(cfg_path, "w"), indent=2)
+        cfg_path = f"{tmp}/adapter_config.json"; cfg = read_json(cfg_path)
+        if not cfg.get("task_type"): cfg["task_type"] = "FEATURE_EXTRACTION"; write_json(cfg_path, cfg)
         if os.path.exists(f"runs/logs/train_{run_name}.log"):   # standalone runs keep their log there (see .gitignore)
             shutil.copy(f"runs/logs/train_{run_name}.log", f"{tmp}/train.log")
         # research trials: runs/<study>/<trial>/checkpoint -> ship the trial's result, provenance and training log too
@@ -51,14 +53,14 @@ def main():
                     if os.path.exists(src): shutil.copy(src, f"{tmp}/{f}"); break
 
         # the card's prose names the Hub repo and trial itself; only the frontmatter is filled from the checkpoint
-        card = re.sub(r"^base_model: .*$", f"base_model: {base}", open(a.card).read(), flags=re.M)
+        card = re.sub(r"^base_model: .*$", f"base_model: {base}", Path(a.card).read_text(encoding="utf-8"), flags=re.M)
         if "base_model_relation:" not in card: card = card.replace(f"base_model: {base}", f"base_model: {base}\nbase_model_relation: adapter")
-        open(f"{tmp}/README.md", "w").write(card)
+        Path(tmp, "README.md").write_text(card, encoding="utf-8")
 
-        ev = json.load(open(f"{tmp}/eval.json")) if os.path.exists(f"{tmp}/eval.json") else {}
+        ev = read_json(f"{tmp}/eval.json") if os.path.exists(f"{tmp}/eval.json") else {}
         acc = ev.get("accuracy_calibration", {}).get("ALL", {})
         if os.path.exists(f"{tmp}/result.json"):
-            r = json.load(open(f"{tmp}/result.json")); acc = {"acc": r["clean"]["acc"], "ece": r["clean"]["ece"]}
+            r = read_json(f"{tmp}/result.json"); acc = {"acc": r["clean"]["acc"], "ece": r["clean"]["ece"]}
         msg = a.message or f"Upload {run_name} (base {base}; acc {acc.get('acc', float('nan')):.3f}, ECE {acc.get('ece', float('nan')):.3f})"
         if a.revision: api.create_branch(a.repo, branch=a.revision, repo_type="model", exist_ok=True)
         info = api.upload_folder(folder_path=tmp, repo_id=a.repo, repo_type="model", commit_message=msg, revision=a.revision)

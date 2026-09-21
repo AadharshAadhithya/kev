@@ -31,7 +31,7 @@ from kev.checkpoint import LoadOptions
 from kev.device import default_device, empty_cache
 from kev.metrics import fit_temperature, paired_bootstrap
 from kev.predictors import LocalPredictor
-from kev.suite import digest, load_split, read_manifest, record_digest, validate_training, write_json
+from kev.suite import ENCODING, digest, load_split, read_json, read_manifest, record_digest, validate_training, write_json
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULTS = {"epochs": 1, "seed": 0, "lr": 0.0002, "lora": 16, "accum": 8, "batch": 1,
@@ -197,7 +197,7 @@ def resume_trial(suite, output, expected_sources, device, transfer_suite=None):
     output = Path(output)
     if not (output / "checkpoint" / "head.pt").exists() or (output / "result.json").exists():
         raise ValueError("resume needs a finished checkpoint and no result.json")
-    provenance = json.loads((output / "provenance.json").read_text())
+    provenance = read_json(output / "provenance.json")
     changed = {k for k in set(provenance["source_hashes"]) | set(expected_sources) if provenance["source_hashes"].get(k) != expected_sources.get(k)}
     if provenance["suite_sha256"] != digest(Path(suite) / "manifest.json") or changed & EVALUATOR_FILES:
         raise ValueError(f"resume refused: suite or evaluator code differs from the interrupted trial: {sorted(changed & EVALUATOR_FILES)}")
@@ -217,7 +217,7 @@ def train_checkpoint(config, suite, output, device):
     args = [sys.executable, "-m", "kev.train", "--suite", str(suite), "--out", run, "--device", device]
     for key, value in config.items():
         args += ["--" + key, str(value)]
-    with (Path(output) / "train.log").open("w") as log, subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=ROOT) as proc:
+    with (Path(output) / "train.log").open("w", encoding=ENCODING) as log, subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=ROOT) as proc:
         for line in proc.stdout:
             log.write(line); log.flush()
             if line.startswith(("ep", "saved", "device", "ablation")) or "Error" in line: print(line.rstrip(), flush=True)
@@ -269,7 +269,7 @@ def score_trial(run, suite, output, expected_sources, device, provenance, transf
     report.update(provenance=provenance, mechanism_checks=checks, gates=gate_report(report, checks), calibration_fit=calibration_fit,
                   wall_seconds=time.perf_counter() - started, promotable=False, test_evaluated=False)
     if not legacy:
-        report["training_resources"] = json.loads((Path(run) / "training_metrics.json").read_text())
+        report["training_resources"] = read_json(Path(run) / "training_metrics.json")
     write_json(output / "result.json", report)
     return report, rows
 
@@ -299,10 +299,10 @@ def aggregate(study_dir):
     study_dir = Path(study_dir)
     trials = sorted(p for p in study_dir.iterdir() if (p / "result.json").exists())
     baselines = {}
-    with (study_dir / "results.jsonl").open("x") as ledger:
+    with (study_dir / "results.jsonl").open("x", encoding=ENCODING) as ledger:
         for directory in trials:
-            report = json.loads((directory / "result.json").read_text())
-            rows = json.loads((directory / "development/rows.json").read_text())
+            report = read_json(directory / "result.json")
+            rows = read_json(directory / "development/rows.json")
             legacy = report["provenance"]["legacy_checkpoint"]
             config = report["provenance"]["config"]
             key = (config.get("base"), config.get("seed"))
@@ -325,7 +325,7 @@ def load_plan(suite, plan_path):
     validate_training(load_split(suite, "train"), manifest)
     for split in ("calibration", "development"):
         load_split(suite, split)
-    plan = json.loads(Path(plan_path).read_text())
+    plan = read_json(plan_path)
     if not isinstance(plan, list) or not 1 <= len(plan) <= 8:
         raise ValueError("plan must contain 1..8 bounded trials")
     return [validated_trial(t, manifest) for t in plan]
@@ -381,7 +381,7 @@ def main():
             try:
                 execute_trial(config or {}, suite, output / f"{i:02d}-{label}", expected_sources, a.device, existing, Path(a.transfer).resolve() if a.transfer else None)
             except Exception as error:
-                with (output / "results.jsonl").open("a") as ledger:
+                with (output / "results.jsonl").open("a", encoding=ENCODING) as ledger:
                     ledger.write(json.dumps({"id": label, "status": "failed", "error": str(error)}) + "\n")
                 raise
         aggregate(output)

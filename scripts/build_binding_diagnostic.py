@@ -21,7 +21,7 @@ sys.path.insert(0, str(ROOT))
 from kev.composition import POLICY_WRAPPERS, evaluate_rule, render_rule
 from kev.data import materialize
 from kev.model import fits, load_tokenizer
-from kev.suite import digest, load_split
+from kev.suite import digest, load_split, write_json, write_jsonl
 
 NAMES = ["Mira", "Noah", "Aiko", "Ravi", "Sana", "Elin", "Tomas", "Kofi"]
 NOUNS = ["request", "account", "package", "review", "member", "shipment", "entry", "case"]
@@ -31,7 +31,7 @@ TREES = {"and_match_num": ("and", 0, 1), "or_match_num": ("or", 0, 1), "if_match
 def state_hashes():
     seen = set()
     for path in (ROOT / "evals").rglob("*.jsonl"):
-        for line in path.read_text().splitlines():
+        for line in path.read_text(encoding="utf-8").splitlines():
             if line.strip():
                 r = json.loads(line); s = r.get("state")
                 if isinstance(s, dict) and "policy" in s and "case" in s:
@@ -115,12 +115,12 @@ def main():
         if not fits(materialize(r), *toks): continue
         r["_meta"]["text_sha256"] = h; seen.add(h); kept.append(r)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in kept))
+    write_jsonl(out, kept)
     strata = Counter(r["_meta"]["stratum"] for r in kept); labels = Counter((r["_meta"]["stratum"], r["questions"]["decision"]["label"]) for r in kept)
     manifest = {"records": len(kept), "dropped": len(recs) - len(kept), "seed": a.seed, "sha256": digest(out), "strata": dict(strata),
                 "labels_by_stratum": {f"{s}/{l}": n for (s, l), n in sorted(labels.items())}, "source": "binding_diagnostic (eval only; kev.composition generator, code labels)",
                 "code_sha256": digest(Path(__file__))}
-    (out.with_suffix(".manifest.json")).write_text(json.dumps(manifest, indent=1) + "\n")
+    write_json(out.with_suffix(".manifest.json"), manifest)
     print(json.dumps(manifest, indent=1))
 
 

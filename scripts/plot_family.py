@@ -11,6 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import matplotlib.pyplot as plt
 import numpy as np
+from kev.suite import read_json, write_json
 from chartstyle import GREEN, GRID, HOLLOW, JEV, KEV, RULE, TEXT, TEXT2, body, display, heading, rule, strip, use_style
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,7 +34,7 @@ RECIPE_SHORT = {"default recipe": "default recipe", "low lr": "low lr", "low lr 
 
 
 def transfer(path):
-    r = json.loads((ROOT / path).read_text())
+    r = read_json(ROOT / path)
     t = r["transfer"] if "transfer" in r else r
     return {k: v["acc"] for k, v in t["tasks"].items()}, t["clean"]["acc"], t["clean"]["brier"], t["paired_flip"]["both_correct_rate"]
 
@@ -105,8 +106,8 @@ def main():
 
     out = ROOT / "docs/kev-family.png"
     fig.savefig(out, dpi=170, metadata={"Title": "Kev family vs Jev, out of domain"}); plt.close(fig)
-    (ROOT / "docs/kev-family-summary.json").write_text(json.dumps({"models": {n: {"path": p, "transfer_acc": data[n][1], "transfer_brier": data[n][2], "tasks": data[n][0]} for n, p in MODELS},
-                                                                     "jev": {"path": JEV_PATH, "transfer_acc": jev_acc, "transfer_brier": jev_brier, "tasks": jev_tasks}, "curve": CURVE}, indent=1))
+    write_json(ROOT / "docs/kev-family-summary.json", {"models": {n: {"path": p, "transfer_acc": data[n][1], "transfer_brier": data[n][2], "tasks": data[n][0]} for n, p in MODELS},
+                                                       "jev": {"path": JEV_PATH, "transfer_acc": jev_acc, "transfer_brier": jev_brier, "tasks": jev_tasks}, "curve": CURVE})
     print(out, {n: round(data[n][1], 3) for n, _ in MODELS}, "jev", round(jev_acc, 3))
 
 

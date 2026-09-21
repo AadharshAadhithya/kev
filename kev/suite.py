@@ -40,8 +40,25 @@ def record_digest(record):
     return hashlib.sha256(json.dumps(record, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
 
 
+# Every JSON/JSONL file this repo writes is UTF-8 with LF line endings, whatever the platform's locale says (issue #12:
+# frozen partitions are sha256-checked byte for byte, and they contain non-ASCII text). Read them the same way.
+ENCODING = "utf-8"
+
+
+def read_json(path):
+    return json.loads(Path(path).read_text(encoding=ENCODING))
+
+
 def write_json(path, value):
-    Path(path).write_text(json.dumps(value, indent=2, ensure_ascii=False, allow_nan=False) + "\n")
+    Path(path).write_text(json.dumps(value, indent=2, ensure_ascii=False, allow_nan=False) + "\n", encoding=ENCODING)
+
+
+def read_jsonl(path):
+    return [json.loads(line) for line in Path(path).read_text(encoding=ENCODING).splitlines() if line.strip()]
+
+
+def write_jsonl(path, records):
+    Path(path).write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in records), encoding=ENCODING)
 
 
 def semantic_hash(r):
@@ -72,7 +89,7 @@ def validate_training(records, manifest):
 
 
 def read_manifest(directory):
-    return json.loads((Path(directory) / "manifest.json").read_text())
+    return read_json(Path(directory) / "manifest.json")
 
 
 def load_split(directory, split, allow_test=False):
@@ -87,7 +104,7 @@ def load_split(directory, split, allow_test=False):
         fetch_partition(directory, path.name)
     if digest(path) != manifest["files"][path.name]["sha256"]:
         raise ValueError(f"suite checksum mismatch: {path}")
-    records = [json.loads(line) for line in path.read_text().splitlines()]
+    records = read_jsonl(path)
     if len(records) != manifest["files"][path.name]["records"]:
         raise ValueError("suite record count mismatch")
     return records
@@ -267,7 +284,7 @@ def freeze(directory, train=300, calibration=40, development=80, test=80, seed=2
     directory.mkdir(parents=True)
     for split, records in partitions.items():
         path = directory / f"{split}.jsonl"
-        path.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in records))
+        write_jsonl(path, records)
         manifest["files"][path.name] = {"sha256": digest(path), "records": len(records),
                                         "questions": sum(len(r["questions"]) for r in records)}
     manifest["code_hashes"] = {name: digest(Path(__file__).parent / name) for name in ("data.py", "api.py", "model.py", "suite.py")}

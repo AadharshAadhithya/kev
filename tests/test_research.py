@@ -1,4 +1,5 @@
 import copy
+import pathlib
 import random
 
 import pytest
@@ -104,15 +105,15 @@ def test_strict_encoding_rejects_truncation():
 
 def test_locked_split_and_hash_verification(tmp_path):
     import json
-    from kev.suite import digest, load_split, write_json
+    from kev.suite import digest, load_split, write_json, write_jsonl
     for name in ("development", "test"):
-        (tmp_path / f"{name}.jsonl").write_text(json.dumps(frozen_request()) + "\n")
+        write_jsonl(tmp_path / f"{name}.jsonl", [frozen_request()])
     manifest = {"files": {f"{name}.jsonl": {"sha256": digest(tmp_path / f"{name}.jsonl"), "records": 1} for name in ("development", "test")}}
     write_json(tmp_path / "manifest.json", manifest)
     assert len(load_split(tmp_path, "development")) == 1
     with pytest.raises(ValueError, match="locked test"):
         load_split(tmp_path, "test")
-    (tmp_path / "development.jsonl").write_text("{}\n")
+    write_jsonl(tmp_path / "development.jsonl", [{}])
     with pytest.raises(ValueError, match="checksum"):
         load_split(tmp_path, "development")
 
@@ -125,7 +126,7 @@ def test_api_payload_excludes_answers_and_metadata():
 
 
 def test_failed_prediction_cannot_produce_partial_score(tmp_path):
-    import json
+    from kev.suite import read_json
     from kev.benchmark import evaluate_records
 
     def fail(record):
@@ -134,7 +135,7 @@ def test_failed_prediction_cannot_produce_partial_score(tmp_path):
     out = tmp_path / "evaluation"
     with pytest.raises(ValueError):
         evaluate_records([frozen_request()], fail, out)
-    failure = json.loads((out / "failure.json").read_text())
+    failure = read_json(out / "failure.json")
     assert failure["coverage"]["requested_records"] == 1
     assert failure["coverage"]["evaluated_records"] == 0
     assert failure["coverage"]["rejected_records"] == 1
@@ -188,14 +189,14 @@ def test_batched_mask_matches_single_and_pads_are_invisible():
 def test_eval_only_sources_cannot_be_trained(tmp_path):
     import json
     from kev.data import EVAL_ONLY, TRAINABLE, ALL_SOURCES
-    from kev.suite import digest, write_json
+    from kev.suite import digest, write_json, write_jsonl
     from kev.experiment import load_plan
     assert "mmlu" in EVAL_ONLY and not set(TRAINABLE) & set(EVAL_ONLY) and set(TRAINABLE) | set(EVAL_ONLY) == set(ALL_SOURCES)
     r = frozen_request(); r["_meta"]["source"] = "mmlu"
     for name in ("train", "calibration", "development"):
-        (tmp_path / f"{name}.jsonl").write_text(json.dumps(r) + "\n")
+        write_jsonl(tmp_path / f"{name}.jsonl", [r])
     write_json(tmp_path / "manifest.json", {"base_revisions": {"m": "x"}, "files": {f"{n}.jsonl": {"sha256": digest(tmp_path / f"{n}.jsonl"), "records": 1} for n in ("train", "calibration", "development")}})
-    (tmp_path / "plan.json").write_text('[{"base": "m"}]')
+    write_json(tmp_path / "plan.json", [{"base": "m"}])
     with pytest.raises(ValueError, match="eval-only"):
         load_plan(tmp_path, tmp_path / "plan.json")
 
@@ -437,8 +438,9 @@ def test_training_plan_matches_registered_screen():
     import json
     from pathlib import Path
     from kev.experiment import load_plan
+    from kev.suite import read_json
     root = Path(__file__).resolve().parents[1]
-    protocol = json.loads((root / "experiments/calibration-audit-protocol.json").read_text())
+    protocol = read_json(root / "experiments/calibration-audit-protocol.json")
     trials = load_plan(root / protocol["data"]["decision_suite"], root / "experiments/calibration-screen-4b.json")
     loss_keys = {"label_smoothing", "brier_w", "focal_gamma"}
     assert len(trials) == len(protocol["screen"]["arms"]) == 4
@@ -479,8 +481,9 @@ def test_final_audit_partition_remains_bound_to_registration():
     import json
     from pathlib import Path
     from kev.suite import digest, load_split
+    from kev.suite import read_json
     root = Path(__file__).resolve().parents[1]
-    protocol = json.loads((root / "experiments/calibration-audit-protocol.json").read_text())
+    protocol = read_json(root / "experiments/calibration-audit-protocol.json")
     suite = root / protocol["data"]["development_suite"]
     assert digest(suite / "test.jsonl") == protocol["data"]["fresh_test_sha256"]
     assert digest(suite / "calibration.jsonl") == protocol["data"]["fresh_threshold_sha256"]
@@ -627,3 +630,22 @@ def test_anchor_trial_validation():
     with pytest.raises(ValueError, match="anchor_sources"):
         validated_trial({"base": "m", "anchor": "runs/anchors/x.json", "anchor_w": 0.5, "anchor_sources": "mmlu"}, m)
     assert validated_trial({"base": "m", "anchor": "runs/anchors/x.json", "anchor_w": 0.5, "anchor_sources": "arc"}, m)["anchor_w"] == 0.5
+
+
+def test_frozen_suites_load_under_any_locale(tmp_path):
+    """Issue #12: frozen partitions contain non-ASCII text and are sha256-checked byte for byte, so they must be read as
+    UTF-8 whatever the platform's preferred encoding is (Windows cp936 in the report; an ASCII C locale here), and their
+    line endings must survive checkout (.gitattributes pins *.json / *.jsonl to LF)."""
+    import os, subprocess, sys
+    from kev.suite import digest, write_json, write_jsonl
+    suite = tmp_path / "evals" / "x" / "decision-x"; suite.mkdir(parents=True)
+    record = {**frozen_request(), "state": "Zwölf Boxkämpfer — ‘quotes’ and é"}
+    write_jsonl(suite / "development.jsonl", [record])
+    write_json(suite / "manifest.json", {"files": {"development.jsonl": {"sha256": digest(suite / "development.jsonl"), "records": 1}}})
+    env = {**os.environ, "PYTHONUTF8": "0", "PYTHONCOERCECLOCALE": "0", "LC_ALL": "C", "LANG": "C", "PYTHONIOENCODING": "utf-8"}   # stdio only; open() still defaults to the locale
+    code = f"import locale; from kev.suite import load_split; r = load_split({str(suite)!r}, 'development'); print(locale.getpreferredencoding(False), r[0]['state'])"
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env, cwd=os.path.dirname(os.path.dirname(__file__)), encoding="utf-8")
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip().endswith(record["state"]) and "UTF-8" not in out.stdout.split()[0].upper(), out.stdout
+    attributes = (pathlib.Path(__file__).resolve().parents[1] / ".gitattributes").read_text(encoding="utf-8")
+    assert "*.jsonl text eol=lf" in attributes and "*.json text eol=lf" in attributes

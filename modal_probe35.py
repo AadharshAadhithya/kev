@@ -42,7 +42,8 @@ def probe(base, suite, name, tasks="all", prompt="plain", split="development", r
                        check=True, cwd="/root", env={**os.environ, "PYTHONPATH": "/root"})
     finally:
         runs_volume.commit(); hf_cache.commit()
-    return json.loads((out / "report.json").read_text())["clean"]
+    from kev.suite import read_json
+    return read_json(out / "report.json")["clean"]
 
 
 @app.local_entrypoint()
@@ -74,7 +75,8 @@ def bench(run, suite, name, flags=""):
         subprocess.run([sys.executable, "-m", "kev.benchmark", "--run", run, *source, "--out", str(out), "--device", "cuda", *flags.split()], check=True, cwd="/root", env={**os.environ, "PYTHONPATH": "/root"})
     finally:
         runs_volume.commit(); hf_cache.commit()
-    return json.loads((out / "report.json").read_text())["clean"]
+    from kev.suite import read_json
+    return read_json(out / "report.json")["clean"]
 
 
 @app.local_entrypoint()

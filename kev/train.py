@@ -16,7 +16,7 @@ import torch.nn.functional as F
 from .checkpoint import Checkpoint, Meta, write_meta
 from .device import allocated_bytes, default_device, empty_cache
 from .data import EVAL_ONLY, build, augment, load_records, materialize, none_pair, source_seed
-from .suite import SYNTHETIC_SOURCES, digest, load_split, read_manifest, validate_training, write_json
+from .suite import SYNTHETIC_SOURCES, digest, load_split, read_json, read_manifest, validate_training, write_json
 from .model import MAX_BRANCH, MAX_PACKED, MAX_STATE, DecisionModel, fits, load_tokenizer
 
 
@@ -279,7 +279,7 @@ def main():
     manifest = read_manifest(a.suite) if a.suite else None
     revision = pinned_revision(a, manifest)
     holdout = manifest["holdout_sources"] if manifest else [s for s in a.holdout.split(",") if s]
-    anchors = json.loads(Path(a.anchor).read_text()).get("targets", {}) if a.anchor else {}
+    anchors = read_json(a.anchor).get("targets", {}) if a.anchor else {}
     if a.anchor: print(f"anchor targets: {len(anchors)} records from {a.anchor}", flush=True)
     anchor_sources = set(a.anchor_sources.split(",")) if a.anchor_sources else None
 

@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 
 from kev.benchmark import labels
-from kev.suite import CONTEXT, digest, record_digest, write_json
+from kev.suite import CONTEXT, digest, read_jsonl, record_digest, write_json, write_jsonl
 
 QUESTIONS = {"choice": ("queue", "unknowable_none"), "score": ("priority", "org_rule"), "noul": ("angry", "text")}
 
@@ -27,8 +27,8 @@ def main():
     repo, out = Path(a.repo), Path(a.out)
     if out.exists(): raise FileExistsError(out)
     commit = subprocess.run(["git", "-C", str(repo), "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
-    rows = [json.loads(l) for l in (repo / "data/val.jsonl").read_text().splitlines()]
-    jev = [json.loads(l) for l in (repo / "results/jev_synth.jsonl").read_text().splitlines()]
+    rows = read_jsonl(repo / "data/val.jsonl")
+    jev = read_jsonl(repo / "results/jev_synth.jsonl")
     assert len(rows) == len(jev) == 900
     # one record per ticket with its three questions; tickets are identified by their state bytes
     tickets = {}
@@ -57,7 +57,7 @@ def main():
                              "pair_id": None, "sibling": None, "parent": rid, "p": p.tolist(), "raw_probability_sum": total, "zero_count": int((p == 0).sum()), "control_id": None})
     out.mkdir(parents=True); files = {}
     for name, rs in (("development.jsonl", records), ("train.jsonl", []), ("calibration.jsonl", []), ("test.jsonl", [])):
-        (out / name).write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rs)); files[name] = {"sha256": digest(out / name), "records": len(rs)}
+        write_jsonl(out / name, rs); files[name] = {"sha256": digest(out / name), "records": len(rs)}
     write_json(out / "manifest.json", {"version": 1, "external": {"repo": "https://github.com/scienthoon/jev-ood-calibration", "commit": commit, "license": "MIT",
                                                                    "files": {"data/val.jsonl": digest(repo / "data/val.jsonl"), "results/jev_synth.jsonl": digest(repo / "results/jev_synth.jsonl")}},
                                        "base_revisions": {}, "dataset_revisions": {}, "holdout_sources": [], "trainable_sources": [], "eval_only_sources": ["scienthoon"],

@@ -11,7 +11,7 @@ from kev.composition import DEV_SHAPES, HELD_OUT_KEYS, TEST_SHAPES, TRAIN_SHAPES
 from kev.contrastive import ORDINAL_FAMILIES, generate
 from kev.data import materialize
 from kev.model import fits, load_tokenizer
-from kev.suite import SPLITS, digest, load_split, read_manifest, semantic_hash, validate_training, write_json
+from kev.suite import SPLITS, digest, load_split, read_manifest, semantic_hash, validate_training, write_json, write_jsonl
 
 BASES = ("Qwen/Qwen3-0.6B-Base", "Qwen/Qwen3-4B-Base")
 FAMILIES = ("return_window", "spend_threshold", "age_eligibility", "quantity_limit")
@@ -197,7 +197,7 @@ def smoke_subset(source, out):
                 if taken[name] < 2:
                     records.extend(group); taken[name] += 1
         path = out / f"{split}.jsonl"
-        path.write_text("".join(json.dumps(r) + "\n" for r in records))
+        write_jsonl(path, records)
         manifest["files"][path.name] = {"sha256": digest(path), "records": len(records),
                                         "questions": sum(len(r["questions"]) for r in records)}
     manifest["smoke_only"] = True

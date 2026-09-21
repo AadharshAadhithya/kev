@@ -14,7 +14,7 @@ from kev.composition import DEV_SHAPES, check_group, generate as compose
 from kev.contrastive import generate as contrastive
 from kev.data import ALL_REPOS, ALL_SOURCES, build, materialize
 from kev.model import fits, load_tokenizer
-from kev.suite import SPLITS, digest, load_split, read_manifest, record_digest, semantic_hash, validate_training, write_json
+from kev.suite import digest, load_split, read_jsonl, read_manifest, record_digest, semantic_hash, SPLITS, validate_training, write_json, write_jsonl
 from kev.transfer_v9 import QWEN35, unknowable
 
 PUBLIC = ("mmlu", "emotion", "tweet_offensive", "qnli", "paws", "sciq")
@@ -43,17 +43,13 @@ def reserve_existing(evals):
     states, origins, files = set(), set(), {}
     for path in sorted(evals.rglob("*.jsonl")):
         files[str(path.relative_to(ROOT))] = digest(path)
-        with path.open() as stream:
-            for line in stream:
-                if not line.strip():
-                    continue
-                r = json.loads(line)
-                if "state" not in r or "questions" not in r:
-                    continue
-                states.add(state_fingerprint(r))
-                m = r.get("_meta", {})
-                if m.get("repo") and m.get("row") is not None:
-                    origins.add((m["repo"], m.get("split"), str(m["row"])))
+        for r in read_jsonl(path):
+            if "state" not in r or "questions" not in r:
+                continue
+            states.add(state_fingerprint(r))
+            m = r.get("_meta", {})
+            if m.get("repo") and m.get("row") is not None:
+                origins.add((m["repo"], m.get("split"), str(m["row"])))
     return states, origins, files
 
 
@@ -136,7 +132,7 @@ def freeze_suite(out, partitions, metadata):
     for split in SPLITS:
         rows = partitions.get(split, [])
         path = out / f"{split}.jsonl"
-        path.write_text("".join(json.dumps(r, ensure_ascii=False, allow_nan=False) + "\n" for r in rows))
+        write_jsonl(path, rows)
         manifest["files"][path.name] = {"sha256": digest(path), "records": len(rows), "questions": sum(len(r["questions"]) for r in rows)}
     write_json(out / "manifest.json", manifest)
     return manifest
@@ -166,7 +162,7 @@ def main():
         transfer[split] = [r for source in PUBLIC for r in public[source][start:stop]]
         transfer[split].extend(fresh_generated(f"audit-{a.seed}-{split}", states, tokenizers, cg, pp, up))
         random.Random(f"{a.seed}:{split}").shuffle(transfer[split])
-    delta = [json.loads(line) for line in (ROOT / "evals/night2/dates_unknowable.jsonl").read_text().splitlines()]
+    delta = read_jsonl(ROOT / "evals/night2/dates_unknowable.jsonl")
     replay = random.Random(a.seed).sample(load_split(parents[0], "train"), 2000)
     training = delta + replay
     if not all(fits(materialize(r), *tokenizers) for r in training):

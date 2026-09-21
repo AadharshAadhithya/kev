@@ -8,6 +8,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import chartstyle as cs
+from kev.suite import read_json
 
 
 def main():
@@ -15,7 +16,7 @@ def main():
     ap.add_argument("--report", required=True)
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
-    report = json.loads(Path(args.report).read_text())
+    report = read_json(args.report)
     out = Path(args.out)
     if out.exists():
         raise FileExistsError(out)

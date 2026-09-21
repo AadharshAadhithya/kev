@@ -12,7 +12,7 @@ sys.path.insert(0, str(ROOT))
 
 from kev.metrics import metrics, paired_bootstrap, probabilities_at_temperature, risk_coverage_curve
 from kev.checkpoint import read_meta
-from kev.suite import digest, load_split, write_json
+from kev.suite import digest, load_split, read_json, write_json
 
 RUNS = {
     "Kev-0.8B": "night2-08b-du2/00-trial-0",
@@ -22,7 +22,7 @@ RUNS = {
 
 
 def read_rows(path):
-    return [r for r in json.loads(Path(path).read_text()) if r["variant"] == "clean" and r["source"] != "unknowable"]
+    return [r for r in read_json(path) if r["variant"] == "clean" and r["source"] != "unknowable"]
 
 
 def tempered(rows, temperature):

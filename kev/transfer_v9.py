@@ -27,7 +27,7 @@ from huggingface_hub import HfApi
 from . import contrastive
 from .data import materialize
 from .model import fits, load_tokenizer
-from .suite import digest, read_manifest, record_digest, write_json
+from .suite import ENCODING, digest, read_jsonl, read_manifest, record_digest, write_json, write_jsonl
 
 PARENT = Path("evals/v4/transfer-v4")
 MMLU_PRO = "TIGER-Lab/MMLU-Pro"
@@ -128,18 +128,18 @@ def main():
     out.mkdir(parents=True)
     used = set()
     for split, seed in (("development", "v5-dev-20260920"), ("test", "v5-test-20260920")):
-        base = [json.loads(l) for l in (parent / f"{split}.jsonl").read_text().splitlines()]
+        base = read_jsonl(parent / f"{split}.jsonl")
         assert digest(parent / f"{split}.jsonl") == pm["files"][f"{split}.jsonl"]["sha256"]
         mp = mmlu_pro(a.mmlu_pro, seed, revision, tokenizers, exclude_ids=used); used |= {r["_meta"]["id"] for r in mp}
         records = base + mp + buried(base, a.buried, seed) + unknowable(a.unknowable_pairs, seed)
         ids = [r["_meta"]["id"] for r in records]
         if len(ids) != len(set(ids)): raise ValueError("duplicate ids")
         path = out / f"{split}.jsonl"
-        path.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in records))
+        write_jsonl(path, records)
         files[path.name] = {"sha256": digest(path), "records": len(records)}
         counts[split] = {s: sum(r["_meta"]["source"] == s for r in records) for s in sorted({r["_meta"]["source"] for r in records})}
     for name in ("train.jsonl", "calibration.jsonl"):
-        (out / name).write_text(""); files[name] = {"sha256": digest(out / name), "records": 0}
+        (out / name).write_text("", encoding=ENCODING); files[name] = {"sha256": digest(out / name), "records": 0}
     manifest = {"version": 5, "parent": str(parent), "parent_files": pm["files"], "base_revisions": {**pm["base_revisions"], **QWEN35},
                 "dataset_revisions": {**pm.get("dataset_revisions", {}), MMLU_PRO: revision}, "holdout_sources": pm["holdout_sources"], "trainable_sources": [],
                 "eval_only_sources": pm["eval_only_sources"] + ["mmlu_pro", "buried", "unknowable", "unknowable_control"], "context": pm["context"],

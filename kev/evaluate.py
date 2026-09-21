@@ -16,6 +16,7 @@ from .checkpoint import Checkpoint, LoadOptions
 from .data import NONE_OPTIONS, build, augment, materialize, DISTRACTORS
 from .device import default_device, empty_cache, sync
 from .metrics import ece
+from .suite import write_json
 
 
 def _probs(tok, model, req):
@@ -211,7 +212,7 @@ def main():
         acc = out["accuracy_calibration"]
         out["held_out_sources"] = {s: acc[s] for s in acc if any(s.startswith(h) for h in out["holdout_sources"])}
         print("== held_out_sources (never seen in training)\n" + json.dumps(out["held_out_sources"], indent=1))
-    json.dump(out, open(f"{a.run}/eval.json", "w"), indent=1)
+    write_json(f"{a.run}/eval.json", out)
 
 
 if __name__ == "__main__":

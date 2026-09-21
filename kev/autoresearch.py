@@ -31,7 +31,7 @@ from pathlib import Path
 from kev.data import source_seed
 from kev.experiment import CHOICE_DEFAULTS, DEFAULTS, validated_trial
 from kev.metrics import paired_bootstrap
-from kev.suite import digest, read_manifest, write_json
+from kev.suite import ENCODING, digest, read_json, read_jsonl, read_manifest, write_json, write_jsonl
 
 
 def config_digest(value):
@@ -79,7 +79,7 @@ def collect():
     """Every completed trial in runs/*/ with its provenance, as flat leaderboard rows."""
     rows = []
     for result in sorted(ROOT.glob("runs/*/*/result.json")):
-        r = json.loads(result.read_text())
+        r = read_json(result)
         prov = r.get("provenance", {}); cfg = prov.get("config") or {}
         tr = r.get("transfer") or {}
         row = {"study": result.parent.parent.name, "trial": result.parent.name, "legacy": prov.get("legacy_checkpoint", False),
@@ -102,7 +102,7 @@ def dev_partition_hashes():
     share development bytes and are comparable."""
     out = {}
     for m in ROOT.glob("evals/**/manifest.json"):
-        try: out[digest(m)] = json.loads(m.read_text())["files"]["development.jsonl"]["sha256"]
+        try: out[digest(m)] = read_json(m)["files"]["development.jsonl"]["sha256"]
         except (KeyError, ValueError): pass
     return out
 
@@ -189,17 +189,17 @@ def refresh_leaderboard():
     rows = collect()
     dv4, tv4 = digest(ROOT / SUITE / "manifest.json"), digest(ROOT / TRANSFER / "manifest.json")
     incumbents = {b: incumbent(rows, b, dv4, tv4) for b in BASE_DEFAULTS}
-    (ROOT / "runs/leaderboard.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
-    (ROOT / "runs/leaderboard.md").write_text(leaderboard_md(rows, incumbents))
+    write_jsonl(ROOT / "runs/leaderboard.jsonl", rows)
+    (ROOT / "runs/leaderboard.md").write_text(leaderboard_md(rows, incumbents), encoding=ENCODING)
     return rows, incumbents, dv4, tv4
 
 
 def update_plan(section_text):
     """Rewrite the '## Autoresearch log' section of PLAN.md (created if absent)."""
-    plan = ROOT / "PLAN.md"; text = plan.read_text()
+    plan = ROOT / "PLAN.md"; text = plan.read_text(encoding=ENCODING)
     marker = "## Autoresearch log"
     head = text.split(marker)[0].rstrip() + "\n\n"
-    plan.write_text(head + marker + "\n\n" + section_text.strip() + "\n")
+    plan.write_text(head + marker + "\n\n" + section_text.strip() + "\n", encoding=ENCODING)
 
 
 def run_round(base, n, name, seeds, spend_start, spend_cap, timeout=None):
@@ -222,7 +222,7 @@ def run_round(base, n, name, seeds, spend_start, spend_cap, timeout=None):
     cmd = [sys.executable, "-m", "modal", "run", "modal_app.py::study", "--suite", SUITE, "--plan", str(plan_path.relative_to(ROOT)),
            "--name", name, "--transfer", TRANSFER, "--budget", f"{bound + 1:.2f}", "--timeout", str(timeout)]
     log = ROOT / "runs" / f"{name}.log"
-    with log.open("w") as f:
+    with log.open("w", encoding=ENCODING) as f:
         rc = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, cwd=ROOT).returncode
     rows, incumbents, _, _ = refresh_leaderboard()
     new = [r for r in rows if r["study"] == name]
@@ -231,14 +231,14 @@ def run_round(base, n, name, seeds, spend_start, spend_cap, timeout=None):
                "best": best and {"trial": best["trial"], "transfer_acc": best["transfer_acc"], "dev_acc": best["dev_acc"], "knobs": strip_seed(best["config"])},
                "incumbent_after": incumbents.get(base) and {k: incumbents[base][k] for k in ("transfer_acc", "dev_acc", "seeds", "trials")},
                "spend_since_start": None if (s := metered_spend()) is None else round(s - spend_start, 2), "at": datetime.now(timezone.utc).isoformat(timespec="minutes")}
-    (ROOT / "runs/autoresearch.jsonl").open("a").write(json.dumps(summary) + "\n")
+    (ROOT / "runs/autoresearch.jsonl").open("a", encoding=ENCODING).write(json.dumps(summary) + "\n")
     print(json.dumps(summary, indent=1), flush=True)
     return summary
 
 
 def plan_section():
     rows, incumbents, dv4, tv4 = refresh_leaderboard()
-    log = [json.loads(l) for l in (ROOT / "runs/autoresearch.jsonl").read_text().splitlines()] if (ROOT / "runs/autoresearch.jsonl").exists() else []
+    log = read_jsonl(ROOT / "runs/autoresearch.jsonl") if (ROOT / "runs/autoresearch.jsonl").exists() else []
     lines = ["Maintained by `kev.autoresearch`; full table in [`runs/leaderboard.md`](runs/leaderboard.md). Selection uses development partitions only.", ""]
     for b, inc in incumbents.items():
         lines.append(f"- **{b.split('/')[-1]}** incumbent (v4 suites): transfer {inc['transfer_acc']:.3f}, dev {inc['dev_acc']:.3f}, seeds {inc['seeds']}, knobs `{json.dumps(knobs(inc['config']))}`" if inc else f"- **{b.split('/')[-1]}**: no eligible trial yet")
@@ -252,14 +252,14 @@ def plan_section():
 def compare(studies, reference, tasks=("mmlu", "paws", "qnli", "emotion", "tweet_offensive", "contrastive_deadline")):
     """Print every trial of the given studies with a record-clustered paired bootstrap on transfer accuracy vs `reference`
     (a runs/<study>/<trial> path). Development-set selection only."""
-    def rows(p): return json.loads((ROOT / p / "transfer/rows.json").read_text())
+    def rows(p): return read_json(ROOT / p / "transfer/rows.json")
     ref_rows = rows(reference)
     print(f"reference: {reference}")
     print(f"{'trial':34} {'dev':>6} {'trf':>6} {'brier':>6} {'cerr':>6} {'pairs':>6} {'d trf':>7} {'ci95':>18}  knobs / tasks")
     for study in studies:
         for d in sorted((ROOT / "runs" / study).iterdir()):
             if not (d / "result.json").exists(): continue
-            r = json.loads((d / "result.json").read_text()); tr = r.get("transfer")
+            r = read_json(d / "result.json"); tr = r.get("transfer")
             if not tr: continue
             cfg = r["provenance"]["config"]
             try:
@@ -311,7 +311,7 @@ def main():
         rows, inc, _, _ = refresh_leaderboard(); update_plan(plan_section()); print(f"{len(rows)} trials;", {b.split('/')[-1]: (i and round(i['transfer_acc'], 3)) for b, i in inc.items()})
     elif a.cmd == "propose":
         rows, inc, dv4, tv4 = refresh_leaderboard(); manifest = read_manifest(ROOT / SUITE)
-        write_json(a.out, propose(rows, a.base, a.n, a.seed, manifest, inc[a.base] and inc[a.base]["config"])); print(open(a.out).read())
+        write_json(a.out, propose(rows, a.base, a.n, a.seed, manifest, inc[a.base] and inc[a.base]["config"])); print(Path(a.out).read_text(encoding=ENCODING))
     else:
         seeds = [int(x) for x in a.seeds.split(",")]
         names = [a.name] if a.cmd == "round" else [f"{a.prefix}-{a.base.split('/')[-1].split('-')[1].lower()}-r{i}-{int(time.time()) % 100000}" for i in range(a.rounds)]

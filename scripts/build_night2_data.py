@@ -116,8 +116,8 @@ def main():
     manifest = {"seed": SEED, "files": {}}
     for name, recs in files.items():
         before = len(recs); recs = [r for r in recs if r["_meta"].get("text_sha256") not in dev]   # never train on an evaluation state
-        body = "".join(json.dumps(r, ensure_ascii=False, default=str) + "\n" for r in recs)
-        (OUT / name).write_text(body)
+        body = "".join(json.dumps(r, ensure_ascii=False, default=str) + "\n" for r in recs)   # default=str for date objects: not write_jsonl
+        (OUT / name).write_text(body, encoding="utf-8")
         manifest["files"][name] = {"records": len(recs), "dropped_eval_overlap": before - len(recs), "sha256": digest(OUT / name),
                                    "sources": sorted({r["_meta"]["source"] for r in recs})}
         print(name, manifest["files"][name])

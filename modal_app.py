@@ -113,7 +113,7 @@ def run_locked_test(trial_path, name, suites, git_commit, redo_interrupted=False
     from kev.benchmark import evaluate_records
     from kev.checkpoint import LoadOptions
     from kev.predictors import LocalPredictor
-    from kev.suite import digest, load_split, write_json
+    from kev.suite import digest, load_split, read_json, write_json
     os.environ["KEV_GIT_COMMIT"] = git_commit
     trial = Path(RUNS_MOUNT) / trial_path
     out = Path(RUNS_MOUNT) / "locked" / name
@@ -121,7 +121,7 @@ def run_locked_test(trial_path, name, suites, git_commit, redo_interrupted=False
     summary = None
     if out.exists():
         # an interrupted read may finish the suites it never touched; a suite that was read is never read again
-        prior = json.loads((out / "summary.json").read_text()) if (out / "summary.json").exists() else {"suites": {}}
+        prior = read_json(out / "summary.json") if (out / "summary.json").exists() else {"suites": {}}
         if all(label in prior["suites"] for label in suites):
             raise FileExistsError(f"locked test already read for {name}; a second read is not allowed")
         interrupted = []
@@ -135,7 +135,7 @@ def run_locked_test(trial_path, name, suites, git_commit, redo_interrupted=False
                 import shutil; shutil.rmtree(out / label); interrupted.append(label)
         summary = {**prior, "resumed_for": sorted(suites), "interrupted_reads_redone": interrupted}
     out.mkdir(parents=True, exist_ok=True)
-    result = json.loads((trial / "result.json").read_text())
+    result = read_json(trial / "result.json")
     if not result["gates"]["passed"] and not name.endswith("-ungated"):
         raise RuntimeError("trial did not pass its gates; name the read '<name>-ungated' to record an exploratory read")
     temperature = result.get("temperature", 1.0)
@@ -168,7 +168,8 @@ def run_base_probe(base, suite, name, tasks="all"):
                check=True, cwd="/root", env={**os.environ, "PYTHONPATH": "/root"})
     finally:
         runs_volume.commit(); hf_cache.commit()
-    return json.loads((out / "report.json").read_text())["clean"]
+    from kev.suite import read_json
+    return read_json(out / "report.json")["clean"]
 
 
 @app.function(image=image, gpu=GPU, cpu=2, memory=(32768, 65536), retries=0, timeout=3600,
@@ -255,11 +256,12 @@ def deployed_run_trial(sources):
 def launch_detached(suite, plan_path, name, gpu, existing=(), transfer=None, budget=20.0, timeout=1800):
     """Validate locally, spawn every trial as its own call on the deployed app, record the call ids and return. Results
     land on the volume; `pull --name` collects and ranks them."""
+    from kev.suite import write_json
     jobs, upper = admit_study(suite, plan_path, name, gpu, existing, transfer, budget, timeout)
     fn = deployed_run_trial(local_source_hashes()).with_options(gpu=gpu, timeout=timeout, retries=0)
     calls = [fn.spawn(*job) for job in jobs]
     (ROOT / "runs").mkdir(exist_ok=True)
-    (ROOT / "runs" / f"{name}.spawn.json").write_text(json.dumps({"name": name, "calls": {j.label: c.object_id for j, c in zip(jobs, calls)}, "bound_usd": round(upper, 2), "timeout": timeout}))
+    write_json(ROOT / "runs" / f"{name}.spawn.json", {"name": name, "calls": {j.label: c.object_id for j, c in zip(jobs, calls)}, "bound_usd": round(upper, 2), "timeout": timeout})
     print(f"spawned study {name}: {len(jobs)} independent trial(s) on {gpu}, bound ${upper:.2f}. Pull later: modal run modal_app.py::pull --name {name}", flush=True)
 
 
@@ -346,8 +348,9 @@ def pull(name: str):
 @app.local_entrypoint()
 def locked_test(trial: str, name: str, decision: str = "evals/v4/decision-v4", transfer: str = "evals/v4/transfer-v4", gpu: str = GPU, redo_interrupted: bool = False):
     """One locked-test read for a promoted trial (path under the runs volume, e.g. v4-4b-baseline/01-trial-1)."""
+    from kev.suite import read_json
     target = ROOT / "runs/locked" / name
-    if (target / "summary.json").exists() and all(k in json.loads((target / "summary.json").read_text())["suites"] for k in ("decision", "transfer")):
+    if (target / "summary.json").exists() and all(k in read_json(target / "summary.json")["suites"] for k in ("decision", "transfer")):
         raise FileExistsError(f"{target} is complete; the locked test is read once per candidate")
     fn = modal.Function.from_name(APP_NAME, "run_locked_test").with_options(gpu=gpu)
     summary = fn.remote(trial, name, {"decision": decision, "transfer": transfer}, local_git_commit(), redo_interrupted)

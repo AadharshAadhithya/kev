@@ -368,7 +368,7 @@ def load_records(path, source="custom"):
     Labels: the option name for choice, true/false for noul, the level index (from 0) for score. `_meta` and per-question
     `src` are filled in so the records behave like a frozen suite's (source = `source`, id = line number)."""
     records = []
-    for n, line in enumerate(Path(path).read_text().splitlines()):
+    for n, line in enumerate(Path(path).read_text(encoding="utf-8").splitlines()):
         if not line.strip(): continue
         r = json.loads(line)
         if "state" not in r or not isinstance(r.get("questions"), dict) or not r["questions"]:

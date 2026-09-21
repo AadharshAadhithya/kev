@@ -101,18 +101,18 @@ def test_encode_positions_restart_per_branch(tok):
 
 def test_load_records_jsonl(tmp_path):
     """The fine-tuning input format from the README: API-shaped requests with a label per question, one per line."""
-    import json
     from kev.data import load_records, materialize
+    from kev.suite import write_jsonl
     rows = [{"state": {"subject": "Charged twice", "body": "Two charges for order 4411."},
              "questions": {"team": {"type": "choice", "instructions": "Which team?", "criteria": {"billing": "Payments", "shipping": None}, "label": "billing"},
                            "angry": {"type": "noul", "instructions": "Is the customer angry?", "label": False},
                            "priority": {"type": "score", "instructions": "How urgent?", "criteria": ["low", "normal", "high"], "label": 1}}}]
-    p = tmp_path / "train.jsonl"; p.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    p = tmp_path / "train.jsonl"; write_jsonl(p, rows)
     recs = load_records(p)
     assert recs[0]["_meta"]["source"] == "custom" and recs[0]["_meta"]["variant"] == "clean"
     rec = materialize(recs[0])
     assert [q["label"] for q in rec["questions"]] == [0, 0, 1] and rec["questions"][0]["src"] == "custom_choice"
-    bad = tmp_path / "bad.jsonl"; bad.write_text(json.dumps({"state": "x", "questions": {"q": {"type": "noul", "instructions": "?"}}}) + "\n")
+    bad = tmp_path / "bad.jsonl"; write_jsonl(bad, [{"state": "x", "questions": {"q": {"type": "noul", "instructions": "?"}}}])
     try: load_records(bad); assert False
     except ValueError as e: assert "no label" in str(e)
 

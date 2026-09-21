@@ -94,6 +94,8 @@ See README.md (deep dive) and docs/model-cards/ (one card per checkpoint: recipe
 - `tests/test_api.py` conformance against the docs' example requests + official SDK
 
 ## Notes
+- All JSON/JSONL is UTF-8 with LF endings regardless of platform locale: read/write through `kev.suite.read_json/read_jsonl/write_json/write_jsonl`
+  (or pass `encoding=`), and `.gitattributes` pins `*.json`/`*.jsonl` to LF so sha256-checked partitions survive a Windows checkout (issue #12).
 - Delimiters reuse existing Qwen special tokens (`<|fim_prefix|>` etc.) to avoid resizing embeddings;
   peft `trainable_token_indices` leaked memory on MPS.
 - `output_hidden_states=True` on MPS blows memory; use the bare `.model` backbone's `last_hidden_state`.

@@ -13,6 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import matplotlib.pyplot as plt
 import chartstyle as cs
+from kev.suite import read_json
 from chartstyle import HOLLOW, JEV, KEV, body, display, heading, hbars, rule, stat, use_style
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -29,7 +30,7 @@ JEV_T = "runs/jev-transfer-v4/report.json"
 
 
 def clean(path):
-    r = json.loads((ROOT / path).read_text())
+    r = read_json(ROOT / path)
     if "transfer" in r: r = r["transfer"]
     return r["clean"]
 
@@ -55,12 +56,12 @@ def main():
           emphasize=[i for i, r in enumerate(rows) if r[0].startswith("kev")], sublabels=[r[1] for r in rows], ticks=range(0, 101, 25), label_size=13, value_size=14)
     for bar, r in zip(ax.patches, rows):                                   # the prototype: outlined bar in the family hue
         if r[0] in HOLLOW: bar.set_facecolor(cs.BG); bar.set_edgecolor(KEV[r[0]]); bar.set_linewidth(1.6); bar.set_hatch("////"); bar._hatch_color = __import__("matplotlib").colors.to_rgba(KEV[r[0]])
-    n_records = json.loads((ROOT / MODELS[0][2]).read_text())["transfer"]["coverage"]["evaluated_records"]
+    n_records = read_json(ROOT / MODELS[0][2])["transfer"]["coverage"]["evaluated_records"]
     body(fig, .05, .115, f"Bars: {n_records} frozen out-of-domain records from QNLI, SciQ, PAWS, MMLU, Emotion, TweetEval and held-out policy rules; the same development items for every row.\n"
          "Gray rows: zero-shot letter logits, no Kev fine-tuning. Right: locked tests, read once per release; Jev has not been evaluated on these partitions.", size=11)
 
     for i, (name, path) in enumerate(LOCKED):
-        locked = json.loads((ROOT / path).read_text())["suites"]["transfer"]["clean"]
+        locked = read_json(ROOT / path)["suites"]["transfer"]["clean"]
         stat(fig, .70, .76 - .195 * i, f"{display(name)}, out of domain, locked test", f"{100 * locked['acc']:.1f}%",
              f"Brier {locked['brier']:.3f}  ·  ECE {100 * locked['ece']:.1f}%", color=KEV[name])
 

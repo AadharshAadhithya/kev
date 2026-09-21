@@ -21,7 +21,7 @@ from kev.data import api_request, load_records
 from kev.device import default_device
 from kev.metrics import EPSILON, grouped_metrics, metrics, unknowable_report
 from kev.predictors import LocalPredictor, RemotePredictor
-from kev.suite import digest, load_split, read_manifest, record_digest, write_json
+from kev.suite import ENCODING, digest, load_split, read_manifest, record_digest, write_json
 
 
 def labels(q):
@@ -108,7 +108,7 @@ def evaluate_records(records, predictor, directory, temperature=1.0, heldout_sou
     coverage = {"requested_records": len(records), "requested_questions": sum(len(r["questions"]) for r in records),
                 "evaluated_records": 0, "evaluated_questions": 0, "rejected_records": 0, "truncated_records": 0}
     rows, latencies, rejected = [], [], []
-    with (directory / "predictions.jsonl").open("w") as output:
+    with (directory / "predictions.jsonl").open("w", encoding=ENCODING) as output:
         for record in records:
             try:
                 pred = predictor(record)

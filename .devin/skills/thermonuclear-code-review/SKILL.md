@@ -33,7 +33,7 @@ standards to *this* repository.
 | option keys for a question (choice/noul/score) | `kev.api.question_keys` |
 | does a record fit the training context (`MAX_STATE/MAX_BRANCH/MAX_PACKED`) | `kev.model.fits(rec, *tokenizers)`; manifests write `kev.suite.CONTEXT` |
 | default device / sync / empty_cache / allocated_bytes | `kev/device.py` |
-| read a manifest, sha256 a file, load a split, trainable/eval-only policy (`validate_training`), `semantic_hash`, `SYNTHETIC_SOURCES` | `kev/suite.py` |
+| read/write JSON and JSONL as UTF-8 (`read_json`, `read_jsonl`, `write_json`, `write_jsonl`), read a manifest, sha256 a file, load a split, trainable/eval-only policy (`validate_training`), `semantic_hash`, `SYNTHETIC_SOURCES` | `kev/suite.py` |
 | labelled request -> API request / internal record | `kev.data.api_request`, `kev.data.materialize` |
 | selective-prediction metrics, temperature fit, paired bootstrap | `kev/metrics.py` |
 | predictors (local checkpoint, remote System One endpoint, Jev) | `kev/predictors.py` |

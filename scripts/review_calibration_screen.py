@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from kev.metrics import grouped_metrics, metrics, paired_bootstrap
-from kev.suite import digest, write_json
+from kev.suite import digest, read_json, write_json
 from scripts.calibration_audit import describe, read_rows, tempered
 
 LOSS_KEYS = ("label_smoothing", "brier_w", "focal_gamma")
@@ -37,7 +37,7 @@ def screen_checks(candidate, controls, rule):
 
 
 def load_trial(path):
-    result = json.loads((path / "result.json").read_text())
+    result = read_json(path / "result.json")
     if result.get("test_evaluated"):
         raise ValueError("screen cannot select using a trial marked test-evaluated")
     rows = read_rows(path / "transfer/rows.json")
@@ -60,7 +60,7 @@ def main():
     ap.add_argument("--samples", type=int, default=2000)
     args = ap.parse_args()
     protocol_path = ROOT / args.protocol
-    protocol = json.loads(protocol_path.read_text())
+    protocol = read_json(protocol_path)
     study = ROOT / "runs" / args.study
     trials = sorted(p for p in study.iterdir() if (p / "result.json").exists())
     if len(trials) != len(protocol["screen"]["arms"]) + 1:

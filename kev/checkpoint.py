@@ -112,7 +112,7 @@ class Checkpoint:
         return Path(self.path) / name
 
     def adapter_config(self):
-        return json.loads(self.file("adapter_config.json").read_text())
+        return json.loads(self.file("adapter_config.json").read_text(encoding="utf-8"))
 
     def load(self, device, opts=LoadOptions()):
         """-> (tokenizer, DecisionModel) in eval mode with the LoRA applied and the pointer head loaded."""

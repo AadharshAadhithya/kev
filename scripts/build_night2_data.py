@@ -19,7 +19,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from kev import contrastive                              # noqa: E402
-from kev.api import date_facts, render                   # noqa: E402
+from kev.api import date_facts, question_keys, render    # noqa: E402
 from kev.suite import digest, load_split, write_json     # noqa: E402
 from kev.transfer_v9 import unknowable                   # noqa: E402
 
@@ -78,7 +78,7 @@ def unknowable_file(pairs_per_family):
     for r in recs:
         if r["_meta"]["source"] == "unknowable":
             for q in r["questions"].values():
-                keys = list(q["criteria"]) if q["type"] == "choice" else ["false", "true"] if q["type"] == "noul" else [str(i) for i in range(len(q["criteria"]))]
+                keys = question_keys(q["type"], q.get("criteria"))
                 q["target"] = {k: 1.0 / len(keys) for k in keys}
             r["_meta"]["source"] = "night2_unknowable"
         else:

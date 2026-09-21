@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from .checkpoint import Checkpoint, Meta, write_meta
 from .data import EVAL_ONLY, build, augment, load_records, materialize, none_pair, source_seed
 from .suite import digest, load_split, write_json
-from .model import MAX_BRANCH, MAX_STATE, DecisionModel, load_tokenizer, encode
+from .model import MAX_BRANCH, MAX_PACKED, MAX_STATE, DecisionModel, fits, load_tokenizer
 
 
 def permuted_copy(rec, rng):
@@ -50,14 +50,6 @@ def anchor_loss(z, q, target, dev):
     if target is None or set(target) != set(q["keys"]): return None
     t = torch.tensor([target[k] for k in q["keys"]], device=dev, dtype=torch.float32).clamp_min(1e-6); t = t / t.sum()
     return F.kl_div(F.log_softmax(z, -1), t, reduction="sum")
-
-
-def fits_context(tok, req):
-    """True when the clean record encodes within the training limits (the rule frozen suites are filtered by)."""
-    try:
-        return len(encode(tok, materialize(req), strict=True)["ids"]) <= 2048
-    except ValueError:
-        return False
 
 
 def accumulation_records(n, batch, accum, microbatch):
@@ -173,10 +165,10 @@ def main():
     if not manifest or a.data:
         # frozen suites are filtered to the training context when they are frozen (kev.suite.select_unique); records built
         # on the fly here are not, so apply the same rule instead of letting the strict encoder abort the run (issue #5)
-        kept = [r for r in reqs if fits_context(tok, r)]
+        kept = [r for r in reqs if fits(materialize(r), tok)]
         if len(kept) < len(reqs):
             print(f"dropped {len(reqs) - len(kept)} of {len(reqs)} records that exceed the training context "
-                  f"({MAX_STATE} state / {MAX_BRANCH} branch / 2048 packed tokens)", flush=True)
+                  f"({MAX_STATE} state / {MAX_BRANCH} branch / {MAX_PACKED} packed tokens)", flush=True)
         reqs = kept
     if not reqs:
         raise ValueError("empty training set")
@@ -235,8 +227,8 @@ def main():
                 for v in variants:
                     rec = materialize(v)
                     enc = model.encode(tok, rec, strict=True)
-                    if len(enc["ids"]) > 2048:
-                        raise ValueError("training request exceeds 2048 packed tokens")
+                    if len(enc["ids"]) > MAX_PACKED:
+                        raise ValueError(f"training request exceeds {MAX_PACKED} packed tokens")
                     recs.append(rec); encs.append(enc); tokens_seen += len(enc["ids"])
                     rec_ids.append(req["_meta"]["id"]); rec_sources.append(req["_meta"]["source"])
                 if a.perm_kl > 0 and item_rng.random() < a.perm_frac and any(q["qtype"] == "choice" and len(q["options"]) >= 3 for q in rec["questions"]):

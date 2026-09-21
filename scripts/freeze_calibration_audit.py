@@ -13,7 +13,7 @@ sys.path.insert(0, str(ROOT))
 from kev.composition import DEV_SHAPES, check_group, generate as compose
 from kev.contrastive import generate as contrastive
 from kev.data import ALL_REPOS, ALL_SOURCES, build, materialize
-from kev.model import encode, load_tokenizer
+from kev.model import fits, load_tokenizer
 from kev.study_v3 import semantic_hash, validate_training
 from kev.suite import SPLITS, digest, load_split, record_digest, write_json
 from kev.transfer_v9 import QWEN35, unknowable
@@ -58,13 +58,6 @@ def reserve_existing(evals):
     return states, origins, files
 
 
-def fits(record, tokenizers):
-    try:
-        return all(len(encode(tok, materialize(record), strict=True)["ids"]) <= 2048 for tok in tokenizers)
-    except ValueError:
-        return False
-
-
 def new_public(source, count, seed, revisions, states, origins, tokenizers):
     rows = build(3000, "test", seed, sources={source: ALL_SOURCES[source]}, repos={source: ALL_REPOS[source]}, revisions=revisions)
     kept, admission = [], Counter()
@@ -76,7 +69,7 @@ def new_public(source, count, seed, revisions, states, origins, tokenizers):
         if fingerprint in states or origin in origins:
             admission["reserved_overlap"] += 1
             continue
-        if not fits(r, tokenizers):
+        if not fits(materialize(r), *tokenizers):
             admission["context_rejected"] += 1
             continue
         r["_meta"].update(variant="clean", group_id=f"{source}/{fingerprint}")
@@ -98,7 +91,7 @@ def fresh_generated(seed, states, tokenizers, composition_groups, policy_pairs, 
         family = group[0]["_meta"]["family"]
         check_group(group)
         keys = {state_fingerprint(r) for r in group}
-        if counts[family] >= composition_groups or keys & states or not all(fits(r, tokenizers) for r in group):
+        if counts[family] >= composition_groups or keys & states or not all(fits(materialize(r), *tokenizers) for r in group):
             continue
         selected.extend(group)
         states.update(keys)
@@ -110,7 +103,7 @@ def fresh_generated(seed, states, tokenizers, composition_groups, policy_pairs, 
     for a, b in zip(records[::2], records[1::2]):
         family = a["_meta"]["family"]
         keys = {state_fingerprint(a), state_fingerprint(b)}
-        if counts[family] >= policy_pairs or keys & states or not all(fits(r, tokenizers) for r in (a, b)):
+        if counts[family] >= policy_pairs or keys & states or not all(fits(materialize(r), *tokenizers) for r in (a, b)):
             continue
         for r in (a, b):
             r["_meta"].update(source="legacy_holdout", variant="clean", group_id=r["_meta"]["pair_id"])
@@ -128,7 +121,7 @@ def fresh_generated(seed, states, tokenizers, composition_groups, policy_pairs, 
     for group in groups.values():
         family = group[0]["_meta"]["family"]
         keys = {state_fingerprint(r) for r in group}
-        if counts[family] >= unknown_pairs or keys & states or not all(fits(r, tokenizers) for r in group):
+        if counts[family] >= unknown_pairs or keys & states or not all(fits(materialize(r), *tokenizers) for r in group):
             continue
         selected.extend(group)
         states.update(keys)
@@ -177,7 +170,7 @@ def main():
     delta = [json.loads(line) for line in (ROOT / "evals/night2/dates_unknowable.jsonl").read_text().splitlines()]
     replay = random.Random(a.seed).sample(load_split(parents[0], "train"), 2000)
     training = delta + replay
-    if not all(fits(r, tokenizers) for r in training):
+    if not all(fits(materialize(r), *tokenizers) for r in training):
         raise ValueError("training corpus contains overlong records")
     for r in training:
         r["_meta"].setdefault("group_id", r["_meta"]["id"])

@@ -90,22 +90,29 @@ def with_date_facts(state):
     return f"{state}\n\ndate_facts: {facts}"
 
 
+def question_keys(qtype: str, criteria) -> list[str]:
+    """The keys a question's probabilities are reported under, in option order: the criteria names (choice),
+    ["false", "true"] (noul), the level indices as strings (score). Labels, targets and anchors use the same keys."""
+    if qtype == "choice": return list(criteria)
+    if qtype == "noul": return ["false", "true"]
+    return [str(i) for i in range(len(criteria))]
+
+
 def to_record(req: SystemOneRequest):
-    """-> internal record for encode(), plus per-question metadata to map probabilities back."""
+    """-> internal record for encode(), plus per-question metadata ({"id", "type", "keys", "legend" for score}) to map
+    probabilities back."""
     qs, meta = [], []
     for qid, q in req.questions.items():
-        instr = render(q.instructions)
+        m = {"id": qid, "type": q.type, "keys": question_keys(q.type, q.criteria)}
         if q.type == "noul":
             c = q.criteria or {}
             opts = [option_text("no", c.get("false")), option_text("yes", c.get("true"))]
-            meta.append({"id": qid, "type": "noul"})
         elif q.type == "choice":
             opts = [option_text(k, v) for k, v in q.criteria.items()]
-            meta.append({"id": qid, "type": "choice", "keys": list(q.criteria.keys())})
         else:
             opts = [render(x) for x in q.criteria]
-            meta.append({"id": qid, "type": "score", "legend": {str(i): render(x) for i, x in enumerate(q.criteria)}})
-        qs.append({"instr": instr, "options": opts, "label": 0})
+            m["legend"] = dict(zip(m["keys"], opts))
+        qs.append({"instr": render(q.instructions), "options": opts, "label": 0}); meta.append(m)
     return {"state": render(req.state), "questions": qs}, meta
 
 

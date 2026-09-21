@@ -66,7 +66,8 @@ See README.md (deep dive) and docs/model-cards/ (one card per checkpoint: recipe
   - React Compiler lint forbids sync setState in effects; schedule via setTimeout or move into handlers.
   - Next 16 dev only trusts `localhost`; other hostnames need `allowedDevOrigins` or the page SSRs but never hydrates
     (no console errors). `127.0.0.1` is allowed in `next.config.ts`. Verify hydration with `agent-browser` (CDP), not curl.
-- Unit tests (no weights, CI): `uv run --extra serve python -m pytest tests/test_unit.py tests/test_research.py -q`
+- Unit tests (no weights, CI): `uv run --extra serve python -m pytest tests/test_unit.py tests/test_research.py tests/test_conventions.py -q`. `test_conventions.py` is a
+  table of "one canonical home" rules (head.pt via `kev.checkpoint`, option keys via `api.question_keys`, context via `model.fits`/`MAX_PACKED`, ...); add a row when a new helper becomes canonical.
 - API tests (server must be up): `KEV_BASE_URL=http://127.0.0.1:8009 uv run --extra serve python -m pytest tests/test_api.py -q`
 
 ## Layout

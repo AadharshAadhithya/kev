@@ -20,7 +20,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from kev.composition import POLICY_WRAPPERS, evaluate_rule, render_rule
 from kev.data import materialize
-from kev.model import encode, load_tokenizer
+from kev.model import fits, load_tokenizer
 from kev.suite import digest, load_split
 
 NAMES = ["Mira", "Noah", "Aiko", "Ravi", "Sana", "Elin", "Tomas", "Kofi"]
@@ -112,7 +112,7 @@ def main():
     for r in recs:
         h = hashlib.sha256(json.dumps(r["state"], sort_keys=True).encode()).hexdigest()
         if h in seen: continue
-        if any(len(encode(t, materialize(r), strict=True)["ids"]) > 2048 for t in toks): continue
+        if not fits(materialize(r), *toks): continue
         r["_meta"]["text_sha256"] = h; seen.add(h); kept.append(r)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in kept))

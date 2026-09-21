@@ -25,6 +25,8 @@ from pathlib import Path
 from huggingface_hub import HfApi
 
 from . import contrastive
+from .data import materialize
+from .model import fits, load_tokenizer
 from .suite import digest, record_digest, write_json
 
 PARENT = Path("evals/v4/transfer-v4")
@@ -32,17 +34,6 @@ MMLU_PRO = "TIGER-Lab/MMLU-Pro"
 BURIED_SOURCES = ("paws", "qnli", "tweet_offensive", "emotion")
 QWEN35 = {"Qwen/Qwen3.5-4B-Base": "1001bb4d826a52d1f399e183466143f4da7b741b", "Qwen/Qwen3.5-9B-Base": "68c46c4b3498877f3ef123c856ecfde50c39f404",
           "Qwen/Qwen3.5-0.8B-Base": "dc7cdfe2ee4154fa7e30f5b51ca41bfa40174e68"}
-
-
-def fits(record, tokenizers):
-    from .data import materialize
-    from .model import encode
-    try:
-        for tok in tokenizers:
-            if len(encode(tok, materialize(record), strict=True)["ids"]) > 2048: return False
-        return True
-    except ValueError:
-        return False
 
 
 def mmlu_pro(n, seed, revision, tokenizers, exclude_ids=()):
@@ -61,7 +52,7 @@ def mmlu_pro(n, seed, revision, tokenizers, exclude_ids=()):
                     "_meta": {"row": ex["question_id"], "text_sha256": hashlib.sha256(text.encode()).hexdigest(), "source": "mmlu_pro", "repo": MMLU_PRO,
                               "revision": revision, "split": "test", "id": f"mmlu_pro/test/{ex['question_id']}", "group_id": f"mmlu_pro/test/{ex['question_id']}", "variant": "clean"}})
         out[-1]["_meta"]["row_sha256"] = record_digest({k: v for k, v in out[-1].items() if k != "_meta"})
-        if not fits(out[-1], tokenizers): out.pop(); continue          # same context rule as every frozen suite
+        if not fits(materialize(out[-1]), *tokenizers): out.pop(); continue          # same context rule as every frozen suite
         if len(out) == n: break
     if len(out) < n: raise ValueError(f"mmlu_pro: only {len(out)}/{n} usable")
     return out
@@ -132,7 +123,6 @@ def main():
     if out.exists(): raise FileExistsError(out)
     pm = json.loads((parent / "manifest.json").read_text())
     revision = HfApi().dataset_info(MMLU_PRO).sha
-    from .model import load_tokenizer
     tokenizers = [load_tokenizer("Qwen/Qwen3-4B-Base", revision=pm["base_revisions"].get("Qwen/Qwen3-4B-Base")), load_tokenizer("Qwen/Qwen3.5-4B-Base", revision=QWEN35["Qwen/Qwen3.5-4B-Base"])]
     files, counts = {}, {}
     out.mkdir(parents=True)

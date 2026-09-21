@@ -14,7 +14,8 @@ from pathlib import Path
 
 import numpy as np
 
-from kev.suite import digest, record_digest, write_json
+from kev.benchmark import labels
+from kev.suite import CONTEXT, digest, record_digest, write_json
 
 QUESTIONS = {"choice": ("queue", "unknowable_none"), "score": ("priority", "org_rule"), "noul": ("angry", "text")}
 
@@ -47,9 +48,8 @@ def main():
         rec["_meta"]["row_sha256"] = record_digest({k: v for k, v in rec.items() if k != "_meta"}); records.append(rec)
         for qid, q in t["questions"].items():
             j = t["jev"][qid]
-            if q["type"] == "choice": keys = j["option_keys"]; label = keys.index(q["label"])
-            elif q["type"] == "score": keys = [str(i) for i in range(len(q["criteria"]))]; label = q["label"]
-            else: keys = ["false", "true"]; label = int(q["label"])
+            keys, label = labels(q)
+            if q["type"] == "choice": keys = j["option_keys"]; label = keys.index(q["label"])   # Jev's own option order for this ticket
             p = np.array(j["probs"], dtype=float)
             if q["type"] == "noul": p = np.array([p[j["option_keys"].index("no")], p[j["option_keys"].index("yes")]])   # theirs are [yes, no]; ours [false, true]
             total = float(p.sum()); p = p / total if total > 0 else np.ones(len(keys)) / len(keys)
@@ -61,7 +61,7 @@ def main():
     write_json(out / "manifest.json", {"version": 1, "external": {"repo": "https://github.com/scienthoon/jev-ood-calibration", "commit": commit, "license": "MIT",
                                                                    "files": {"data/val.jsonl": digest(repo / "data/val.jsonl"), "results/jev_synth.jsonl": digest(repo / "results/jev_synth.jsonl")}},
                                        "base_revisions": {}, "dataset_revisions": {}, "holdout_sources": [], "trainable_sources": [], "eval_only_sources": ["scienthoon"],
-                                       "context": {"max_state": 384, "max_branch": 1024, "max_packed": 2048, "truncate": False}, "files": files, "eval_only": True,
+                                       "context": CONTEXT, "files": files, "eval_only": True,
                                        "protocol": {"note": "priority is an org rule absent from the text (template urgency + angry + gold/enterprise tier): unknowable from the state; "
                                                             "their live Jev read (2026-09-19): queue 0.890, angry 0.917, priority 0.447, overall ECE 0.107"}})
     from kev.benchmark import summarize

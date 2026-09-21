@@ -7,10 +7,15 @@ from collections import Counter
 from pathlib import Path
 
 from kev.data import ALL_REPOS, ALL_SOURCES, EVAL_ONLY, REPOS, SOURCES, TRAINABLE, TRANSFER_REPOS, TRANSFER_SOURCES, build, dataset_ref, materialize, source_seed
-from kev.model import encode, load_tokenizer
+from kev.model import MAX_BRANCH, MAX_PACKED, MAX_STATE, fits, load_tokenizer
 
 SPLITS = ("train", "calibration", "development", "test")
 BASES = ("Qwen/Qwen2.5-0.5B", "Qwen/Qwen3-0.6B-Base")
+# the encoder limits every frozen record satisfies, as written into manifests ("context")
+CONTEXT = {"max_state": MAX_STATE, "max_branch": MAX_BRANCH, "max_packed": MAX_PACKED, "truncate": False}
+# Clean records are admitted with this many branch tokens to spare, so the variants that add an option (contrast_cases'
+# none-of-these, training-time none/distractor augmentation) still encode under MAX_BRANCH.
+ADMISSION_BRANCH_HEADROOM = 64
 # Frozen suites are mirrored on the Hub. Manifests (with the sha256 of every partition) and the development/test
 # partitions live in git; large training partitions are fetched from this dataset on first use and verified against
 # the manifest, so the suite hash and every provenance record stay unchanged.
@@ -116,13 +121,8 @@ def select_unique(records, count, seen, tokenizers, report):
         if key in seen:
             report["duplicate_state"] += 1
             continue
-        try:
-            rec = materialize(record)
-            for tokenizer in tokenizers:
-                enc = encode(tokenizer, rec, max_branch=960, strict=True)
-                if len(enc["ids"]) > 2048:
-                    raise ValueError("packed request exceeds 2048 tokens")
-        except ValueError:
+        rec = materialize(record)   # a record that fails request validation is a converter bug: let it abort the freeze
+        if not fits(rec, *tokenizers, max_branch=MAX_BRANCH - ADMISSION_BRANCH_HEADROOM):
             report["context_rejected"] += 1
             continue
         record["_meta"].update(group_id=record["_meta"]["id"], variant="clean")
@@ -165,7 +165,7 @@ def freeze(directory, train=300, calibration=40, development=80, test=80, seed=2
         "trainable_sources": trainable_here, "eval_only_sources": [x for x in sources if x in holdout],
         "policy": {"trainable": list(TRAINABLE), "eval_only": list(EVAL_ONLY)},
         "dataset_revisions": revisions, "base_revisions": base_revisions,
-        "context": {"max_state": 384, "max_branch": 1024, "max_packed": 2048, "truncate": False},
+        "context": {**CONTEXT, "admission_branch_headroom": ADMISSION_BRANCH_HEADROOM},
         "selection": "Normalized exact-state deduplication across partitions; common tokenizer context admission; no fuzzy decontamination or pretraining-contamination claim.",
         "legacy_checkpoints": "Training/calibration overlap for pre-manifest checkpoints is unknown; exploratory only.",
         "objective": "Negative macro-average clean development NLL, equal weight per task; raw probabilities.",
@@ -225,8 +225,8 @@ def freeze(directory, train=300, calibration=40, development=80, test=80, seed=2
             if per_source[source] < 12:
                 variants = contrast_cases(record, seed)
                 for variant in variants:
-                    for tok in tokenizers:
-                        encode(tok, materialize(variant), strict=True)
+                    if not fits(materialize(variant), *tokenizers):
+                        raise ValueError(f"variant of {record['_meta']['id']} exceeds the training context")
                 extras.extend(variants)
                 per_source[source] += bool(variants)
         partitions[split].extend(extras)

@@ -10,7 +10,7 @@ from huggingface_hub import HfApi
 from kev.composition import DEV_SHAPES, HELD_OUT_KEYS, TEST_SHAPES, TRAIN_SHAPES, canonical, check_group, generate as compose, sample_trees
 from kev.contrastive import ORDINAL_FAMILIES, generate
 from kev.data import materialize
-from kev.model import encode, load_tokenizer
+from kev.model import fits, load_tokenizer
 from kev.suite import SPLITS, digest, load_split, record_digest, write_json
 
 BASES = ("Qwen/Qwen3-0.6B-Base", "Qwen/Qwen3-4B-Base")
@@ -120,11 +120,8 @@ def freeze(out, source="evals/decision-v2", transfer="evals/transfer-v2", public
             if hashes & reserved:
                 raise ValueError("semantic state collision across groups; choose a new generation seed")
             for r in group:
-                rec = materialize(r)
-                for tok in tokenizers:
-                    e = encode(tok, rec, strict=True)
-                    if len(e["ids"]) > 2048:
-                        raise ValueError("packed token limit")
+                if not fits(materialize(r), *tokenizers):
+                    raise ValueError("synthetic record exceeds the training context")
             reserved.update(hashes)
         return records
 

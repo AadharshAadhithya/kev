@@ -201,6 +201,7 @@ def test_eval_only_sources_cannot_be_trained(tmp_path):
 
 def test_contrastive_pairs_are_checked_and_labelled_by_code():
     from kev import contrastive
+    from kev.benchmark import labels
     from kev.contrastive import FAMILIES, UNDETERMINED, check_pair, generate, label_of, paired_flip
     records, report = generate(5, seed=7)
     assert len(records) == 2 * 5 * len(FAMILIES) and all(v["pairs"] == 5 for v in report.values())
@@ -225,8 +226,7 @@ def test_contrastive_pairs_are_checked_and_labelled_by_code():
     # paired_flip: a constant model never flips; a perfect model flips every pair and gets both right
     rows = []
     for rec in records[:8]:
-        q = rec["questions"]["decision"]; keys = list(q["criteria"]) if q["type"] == "choice" else (["false", "true"] if q["type"] == "noul" else [str(i) for i in range(len(q["criteria"]))])
-        y = keys.index(q["label"]) if q["type"] == "choice" else int(q["label"])
+        keys, y = labels(rec["questions"]["decision"])
         rows.append({"pair_id": rec["_meta"]["pair_id"], "sibling": rec["_meta"]["sibling"], "keys": keys, "label": y, "p": [1.0 if i == y else 0.0 for i in range(len(keys))]})
     assert paired_flip(rows) == {"pairs": 4, "flip_rate": 1.0, "both_correct_rate": 1.0}
     constant = [{**r, "p": [1.0] + [0.0] * (len(r["keys"]) - 1)} for r in rows]

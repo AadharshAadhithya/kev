@@ -8,7 +8,9 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 # Reuse existing rarely-used Qwen special tokens as delimiters (state, q, opt, /opt, decide) so no
 # embedding rows need to be added/trained; LoRA adapts their meaning.
 SPECIAL = ["<|fim_prefix|>", "<|fim_middle|>", "<|box_start|>", "<|box_end|>", "<|fim_suffix|>"]
-MAX_STATE, MAX_BRANCH = 384, 1024
+# training context: state tokens, tokens per question branch, and the whole packed record. Frozen suites are admitted with
+# this rule (kev.suite) and training applies it to records built on the fly, so train and eval see the same population.
+MAX_STATE, MAX_BRANCH, MAX_PACKED = 384, 1024, 2048
 
 
 def load_tokenizer(name, revision=None):
@@ -65,6 +67,15 @@ def encode(tok, rec, max_state=MAX_STATE, max_branch=MAX_BRANCH, strict=False, o
         decide_idx.append(base + len(br) - 1); opt_idx.append([base + e for e in ends])
     return {"ids": ids, "seg": seg, "pos": pos, "opt": opt, "option_isolation": option_isolation, "decide_idx": decide_idx, "opt_idx": opt_idx,
             "labels": [q["label"] for q in rec["questions"]], "state_truncated": len(state_tokens) + 1 > max_state}
+
+
+def fits(rec, *tokenizers, max_state=MAX_STATE, max_branch=MAX_BRANCH, max_packed=MAX_PACKED):
+    """True when the internal record encodes strictly (no truncation) within the training context under every tokenizer
+    given (frozen suites are admitted against the tokenizers of all their pinned bases)."""
+    try:
+        return all(len(encode(tok, rec, max_state=max_state, max_branch=max_branch, strict=True)["ids"]) <= max_packed for tok in tokenizers)
+    except ValueError:
+        return False
 
 
 def branch_mask(seg, device, dtype=torch.float32):

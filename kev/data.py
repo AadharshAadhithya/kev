@@ -383,9 +383,8 @@ def materialize(req):
     rec, meta = to_record(SystemOneRequest.model_validate(clean))
     for q, m, (qid, src_q) in zip(rec["questions"], meta, req["questions"].items()):
         y = src_q["label"]
-        q["label"] = int(y) if m["type"] == "noul" else m["keys"].index(y) if m["type"] == "choice" else int(y)
-        q["src"] = src_q["src"]; q["qtype"] = m["type"]; q["qid"] = qid
-        q["keys"] = m["keys"] if m["type"] == "choice" else ["false", "true"] if m["type"] == "noul" else [str(i) for i in range(len(q["options"]))]
+        q["label"] = m["keys"].index(y) if m["type"] == "choice" else int(y)   # noul labels are bools, score labels level indices
+        q["src"] = src_q["src"]; q["qtype"] = m["type"]; q["qid"] = qid; q["keys"] = m["keys"]
         if src_q.get("target") is not None:
             # soft target keyed by option name (choice), "false"/"true" (noul) or level index as a string (score); options the
             # target does not name get 0, then the vector is normalised. Used for unknowable records (uniform over the options).

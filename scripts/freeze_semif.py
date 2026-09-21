@@ -13,7 +13,7 @@ import json
 import subprocess
 from pathlib import Path
 
-from kev.suite import digest, record_digest, write_json
+from kev.suite import CONTEXT, digest, record_digest, write_json
 
 
 def convert(row, source, variant="clean", parent=None):
@@ -45,7 +45,7 @@ def main():
     write_json(out / "manifest.json", {"version": 1, "external": {"repo": "https://github.com/TheoLeeCJ/SemIf", "commit": commit, "license": "MIT",
                                                                    "files": {p.name: digest(p) for p in [repo / "benchmarks/data/authored144.jsonl", repo / "benchmarks/data/perturbations108.jsonl"]}},
                                        "base_revisions": {}, "dataset_revisions": {}, "holdout_sources": [], "trainable_sources": [], "eval_only_sources": ["semif_authored", "semif_perturbation"],
-                                       "context": {"max_state": 384, "max_branch": 1024, "max_packed": 2048, "truncate": False}, "files": files, "eval_only": True,
+                                       "context": CONTEXT, "files": files, "eval_only": True,
                                        "protocol": {"note": "SemIf reports mean family balanced accuracy on the 144 (direct Qwen3.5-4B logits 0.813) and on the 36 perturbation bases (0.723); "
                                                             "perturbation rows carry their variant in _meta.variant and the base row in parent_id"}})
     print({s: sum(r["_meta"]["source"] == s for r in records) for s in ("semif_authored", "semif_perturbation")})

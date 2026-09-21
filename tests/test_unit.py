@@ -29,7 +29,7 @@ def test_to_record_maps_all_three_types():
     assert rec["state"] == "document: I was charged twice."
     assert [q["options"] for q in rec["questions"]] == [["no: Not charges", "yes: Charges"], ["calm", "angry: Hostile"], ["can wait", "today"]]
     assert [m["type"] for m in meta] == ["noul", "choice", "score"]
-    assert meta[1]["keys"] == ["calm", "angry"] and meta[2]["legend"] == {"0": "can wait", "1": "today"}
+    assert [m["keys"] for m in meta] == [["false", "true"], ["calm", "angry"], ["0", "1"]] and meta[2]["legend"] == {"0": "can wait", "1": "today"}
 
 
 def test_to_answers_shapes_and_formulas():

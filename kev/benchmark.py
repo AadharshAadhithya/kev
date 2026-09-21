@@ -8,9 +8,11 @@ from pathlib import Path
 import numpy as np
 import torch
 
+from kev.api import question_keys
 from kev.checkpoint import Checkpoint, LoadOptions
 from kev.data import materialize
 from kev.evaluate import ece
+from kev.model import MAX_PACKED
 from kev.suite import digest, load_split, record_digest, write_json
 
 EPSILON = 1e-9
@@ -27,12 +29,9 @@ def api_request(record):
 
 
 def labels(q):
-    if q["type"] == "choice":
-        keys = list(q["criteria"])
-        return keys, keys.index(q["label"])
-    if q["type"] == "noul":
-        return ["false", "true"], int(q["label"])
-    return [str(i) for i in range(len(q["criteria"]))], int(q["label"])
+    """(option keys, label index) of a labelled request question."""
+    keys = question_keys(q["type"], q.get("criteria"))
+    return keys, keys.index(q["label"]) if q["type"] == "choice" else int(q["label"])
 
 
 def validate_distribution(raw, keys):
@@ -361,8 +360,8 @@ class LocalPredictor:
     @torch.no_grad()
     def __call__(self, record):
         enc = self.model.encode(self.tok, materialize(record), strict=True)
-        if len(enc["ids"]) > 2048:
-            raise ValueError("packed request exceeds frozen 2048-token limit")
+        if len(enc["ids"]) > MAX_PACKED:
+            raise ValueError(f"packed request exceeds frozen {MAX_PACKED}-token limit")
         sync(self.device)
         start = time.perf_counter()
         logits = self.model.forward(enc)
@@ -411,8 +410,8 @@ class RemotePredictor:
 
 
 def evaluate_records(records, predictor, directory, temperature=1.0, heldout_sources=("mnli", "sst5"), skip_overlong=False):
-    """skip_overlong: for external data that was not frozen to Kev's context, records the model cannot encode (state > 384
-    tokens or > 2048 packed) are counted in coverage["rejected_records"] and listed in rejected.json instead of aborting.
+    """skip_overlong: for external data that was not frozen to Kev's context, records the model cannot encode (kev.model
+    MAX_STATE / MAX_PACKED) are counted in coverage["rejected_records"] and listed in rejected.json instead of aborting.
     Frozen suites never need this; reports must state that rejected records count as wrong in any headline number."""
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=False)

@@ -336,12 +336,12 @@ def test_shape_bucket_padding_is_exact_in_fp32():
 def test_train_path_drops_records_that_exceed_the_context():
     """Issue #5: training without --suite built records straight from the datasets and the strict encoder aborted on the
     first long passage. The on-the-fly path now applies the same context filter that suite freezing applies."""
-    from kev.model import load_tokenizer
-    from kev.train import fits_context
+    from kev.data import materialize
+    from kev.model import fits, load_tokenizer
     tok = load_tokenizer("Qwen/Qwen2.5-0.5B")
     short = {"state": "s " * 10, "questions": {"q": {"type": "noul", "instructions": "i", "label": True, "src": "t"}}, "_meta": {"id": "a", "source": "t"}}
     long = {**short, "state": "word " * 600}
-    assert fits_context(tok, short) and not fits_context(tok, long)
+    assert fits(materialize(short), tok) and not fits(materialize(long), tok)
 
 
 def test_rows_match_packed():
@@ -393,8 +393,9 @@ def test_init_from_warm_start_and_compatibility_checks(tmp_path):
     subprocess.run(base + ["--out", str(tmp_path / "a")], check=True, capture_output=True, env=env)
     r = subprocess.run(base + ["--out", str(tmp_path / "b"), "--init_from", str(tmp_path / "a")], check=True, capture_output=True, text=True, env=env)
     assert "delta: warm start" in r.stdout
-    ha, hb = torch.load(tmp_path / "a/head.pt", map_location="cpu"), torch.load(tmp_path / "b/head.pt", map_location="cpu")
-    assert all((ha["head"][k] - hb["head"][k]).abs().max() < 1e-6 for k in ha["head"]), "a warm start at a negligible lr must keep the source head"
-    assert hb["init_source"]["adapter_sha256"] and json.load(open(tmp_path / "b/training_config.json"))["init_source"]["resolved"] == str(tmp_path / "a")
+    from kev.checkpoint import read_meta
+    ha, hb = read_meta(tmp_path / "a"), read_meta(tmp_path / "b")
+    assert all((ha.head[k] - hb.head[k]).abs().max() < 1e-6 for k in ha.head), "a warm start at a negligible lr must keep the source head"
+    assert hb.extra["init_source"]["adapter_sha256"] and json.load(open(tmp_path / "b/training_config.json"))["init_source"]["resolved"] == str(tmp_path / "a")
     bad = subprocess.run(base + ["--out", str(tmp_path / "c"), "--init_from", str(tmp_path / "a"), "--lora", "8"], capture_output=True, text=True, env=env)
     assert bad.returncode != 0 and "lora is 16 there and 8 here" in bad.stderr

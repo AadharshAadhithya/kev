@@ -262,17 +262,26 @@ class RemotePredictor:
         return {"probabilities": probs, "latency_ms": latency, "input_tokens": (body.get("usage") or {}).get("input_tokens")}
 
 
-def evaluate_records(records, predictor, directory, temperature=1.0, heldout_sources=("mnli", "sst5")):
+def evaluate_records(records, predictor, directory, temperature=1.0, heldout_sources=("mnli", "sst5"), skip_overlong=False):
+    """skip_overlong: for external data that was not frozen to Kev's context, records the model cannot encode (state > 384
+    tokens or > 2048 packed) are counted in coverage["rejected_records"] and listed in rejected.json instead of aborting.
+    Frozen suites never need this; reports must state that rejected records count as wrong in any headline number."""
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=False)
     coverage = {"requested_records": len(records), "requested_questions": sum(len(r["questions"]) for r in records),
                 "evaluated_records": 0, "evaluated_questions": 0, "rejected_records": 0, "truncated_records": 0}
-    rows, latencies = [], []
+    rows, latencies, rejected = [], [], []
     with (directory / "predictions.jsonl").open("w") as output:
         for record in records:
             try:
                 pred = predictor(record)
                 new_rows = prediction_rows(record, pred)
+            except ValueError as error:
+                if skip_overlong and ("exceeds" in str(error) or "tokens" in str(error)):
+                    coverage["rejected_records"] += 1; rejected.append({"id": record["_meta"]["id"], "error": str(error)}); continue
+                coverage["rejected_records"] += 1
+                write_json(directory / "failure.json", {"coverage": coverage, "record_id": record["_meta"]["id"], "error_type": type(error).__name__})
+                raise
             except Exception as error:
                 coverage["rejected_records"] += 1
                 write_json(directory / "failure.json", {"coverage": coverage, "record_id": record["_meta"]["id"], "error_type": type(error).__name__})
@@ -287,6 +296,7 @@ def evaluate_records(records, predictor, directory, temperature=1.0, heldout_sou
             if coverage["evaluated_records"] % 50 == 0:
                 print(f"evaluated {coverage['evaluated_records']}/{len(records)}", flush=True)
     write_json(directory / "rows.json", rows)
+    if rejected: write_json(directory / "rejected.json", rejected)
     report = summarize(rows, temperature, heldout_sources)
     report.update(coverage=coverage, latency_ms={"median": float(np.median(latencies)), "p95": float(np.quantile(latencies, .95))})
     write_json(directory / "report.json", report)
@@ -319,7 +329,7 @@ def main():
         records = [{**r, "state": with_date_facts(r["state"])} for r in records]
     import os
     predictor = RemotePredictor(a.remote, a.remote_model, os.environ.get("KEV_REMOTE_API_KEY", "local")) if a.remote else LocalPredictor(a.run, a.device)
-    report, _ = evaluate_records(records, predictor, a.out, heldout_sources=tuple(heldout))
+    report, _ = evaluate_records(records, predictor, a.out, heldout_sources=tuple(heldout), skip_overlong=bool(a.data))
     report.update(suite_sha256=source_hash, data=a.data, date_facts=a.date_facts, run=a.run or a.remote, split=split, calibration_applied=False,
                   remote={"base_url": a.remote, "requested_model": a.remote_model, "served_model": predictor.served_model} if a.remote else None)
     write_json(Path(a.out) / "report.json", report)

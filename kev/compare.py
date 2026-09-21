@@ -6,7 +6,7 @@ from pathlib import Path
 
 import numpy as np
 
-from kev.benchmark import paired_bootstrap
+from kev.metrics import paired_bootstrap
 from kev.suite import write_json
 
 

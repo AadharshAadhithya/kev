@@ -82,7 +82,7 @@ def test_calibration_covers_every_family_without_splitting_groups():
 
 
 def test_selective_metrics_include_confidence_ties():
-    from kev.benchmark import metrics
+    from kev.metrics import metrics
     rows = [{"p": [0.99, 0.01], "label": y, "type": "noul"} for y in [0, 1]]
     report = metrics(rows)
     assert report["confident_error_rate"] == .5
@@ -226,7 +226,7 @@ def test_ordinal_threshold_families_are_balanced_minimal_pairs():
 
 def test_remote_predictor_maps_system_one_answers_and_retries(monkeypatch):
     import io, json
-    from kev.benchmark import RemotePredictor
+    from kev.predictors import RemotePredictor
     rec = {"state": "s", "questions": {"q": {"type": "choice", "instructions": "i", "criteria": {"a": "A", "b": "B"}, "label": "a", "src": "t"},
                                        "y": {"type": "noul", "instructions": "i", "label": True, "src": "t"}}}
     calls = []
@@ -246,7 +246,7 @@ def test_remote_predictor_maps_system_one_answers_and_retries(monkeypatch):
 
 
 def test_top_bins_and_confidence_bias():
-    from kev.benchmark import metrics
+    from kev.metrics import metrics
     rows = [{"p": [0.99, 0.01], "label": 0, "type": "noul"}, {"p": [0.99, 0.01], "label": 1, "type": "noul"}, {"p": [0.6, 0.4], "label": 0, "type": "noul"}]
     m = metrics(rows)
     assert m["top_bins"]["0.99"] == {"n": 2, "errors": 1, "error_rate": 0.5} and m["top_bins"]["0.9"]["n"] == 2

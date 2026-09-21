@@ -13,6 +13,7 @@ from pathlib import Path
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+from kev.device import default_device
 from kev.suite import load_split
 
 
@@ -21,7 +22,7 @@ def main():
     ap.add_argument("--base", default="Qwen/Qwen3-4B-Base")
     ap.add_argument("--suite", default="evals/v4/transfer-v4")
     ap.add_argument("--tasks", default="mmlu,sciq")
-    ap.add_argument("--device", default="mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu")
+    ap.add_argument("--device", default=default_device())
     ap.add_argument("--out", help="write benchmark-compatible rows.json/report.json here (comparable with paired bootstraps)")
     ap.add_argument("--prompt", choices=["plain", "semif"], default="plain",
                     help="semif: SemIf's readout (github.com/TheoLeeCJ/SemIf core.direct_messages): chat template, system instruction, JSON {evidence, criterion, options} payload, letter logits; for instruct models")

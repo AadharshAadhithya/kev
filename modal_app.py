@@ -109,8 +109,9 @@ def run_trial(study, index, label, config, suite, expected_sources, git_commit, 
 def run_locked_test(trial_path, name, suites, git_commit, redo_interrupted=False):
     """Read the locked test partitions ONCE for a promoted trial. Writes /runs/locked/<name>/... ; refuses to rerun."""
     import json
-    from kev.benchmark import LocalPredictor, evaluate_records
+    from kev.benchmark import evaluate_records
     from kev.checkpoint import LoadOptions
+    from kev.predictors import LocalPredictor
     from kev.suite import digest, load_split, write_json
     os.environ["KEV_GIT_COMMIT"] = git_commit
     trial = Path(RUNS_MOUNT) / trial_path

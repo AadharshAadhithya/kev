@@ -118,7 +118,7 @@ def test_locked_split_and_hash_verification(tmp_path):
 
 
 def test_api_payload_excludes_answers_and_metadata():
-    from kev.benchmark import api_request
+    from kev.data import api_request
     clean = api_request(frozen_request())
     assert set(clean) == {"state", "questions"}
     assert set(clean["questions"]["reason"]) == {"type", "instructions", "criteria"}
@@ -152,7 +152,8 @@ def test_missing_answers_and_nonfinite_probabilities_fail():
 
 
 def test_task_macro_and_record_bootstrap():
-    from kev.benchmark import prediction_rows, summarize, paired_bootstrap
+    from kev.benchmark import prediction_rows, summarize
+    from kev.metrics import paired_bootstrap
     pred = {"probabilities": {"reason": {"size": 0.8, "damage": 0.1, "color": 0.1}}}
     rows = prediction_rows(frozen_request(), pred)
     report = summarize(rows)
@@ -262,7 +263,7 @@ def test_contrastive_eval_split_is_stratified_by_family():
 
 
 def test_coverage_cannot_split_equal_confidence_ties():
-    from kev.benchmark import coverage_at_error
+    from kev.metrics import coverage_at_error
     correct = [True] * 90 + [False] * 10
     assert coverage_at_error([0.99] * 100, correct, 0.05) == 0.0
     assert coverage_at_error([0.99] * 100, correct[::-1], 0.05) == 0.0
@@ -271,7 +272,7 @@ def test_coverage_cannot_split_equal_confidence_ties():
 
 
 def test_risk_curve_thresholds_and_nonmonotone_risk():
-    from kev.benchmark import coverage_at_error, risk_coverage_curve
+    from kev.metrics import coverage_at_error, risk_coverage_curve
     curve = risk_coverage_curve([0.99, 0.99, 0.9, 0.8], [True, False, True, True])
     assert [p["accepted"] for p in curve] == [2, 3, 4]
     assert [p["threshold"] for p in curve] == [0.99, 0.9, 0.8]
@@ -284,13 +285,13 @@ def test_risk_curve_thresholds_and_nonmonotone_risk():
     ([0.5], [], 0.05), ([[0.5]], [True], 0.05), ([0.5], [True], -0.1),
 ])
 def test_selective_metrics_reject_invalid_inputs(confidence, correct, budget):
-    from kev.benchmark import coverage_at_error
+    from kev.metrics import coverage_at_error
     with pytest.raises(ValueError):
         coverage_at_error(confidence, correct, budget)
 
 
 def test_fixed_threshold_does_not_reselect_using_evaluation_labels():
-    from kev.benchmark import select_threshold, evaluate_threshold
+    from kev.metrics import select_threshold, evaluate_threshold
     threshold = select_threshold([0.99, 0.98, 0.97, 0.6], [True, True, True, False], 0.05)
     assert threshold == 0.97
     result = evaluate_threshold([0.99, 0.7, 0.6], [False, True, True], threshold)
@@ -301,7 +302,7 @@ def test_fixed_threshold_does_not_reselect_using_evaluation_labels():
 
 
 def test_global_coverage_bootstrap_recomputes_full_statistic():
-    from kev.benchmark import metrics, paired_bootstrap
+    from kev.metrics import metrics, paired_bootstrap
     candidate, reference = [], []
     for i in range(20):
         common = {"id": str(i), "group": "one-cluster", "source": "fixture", "task": "fixture",
@@ -317,7 +318,8 @@ def test_global_coverage_bootstrap_recomputes_full_statistic():
 
 
 def test_bootstrap_rejects_duplicate_or_inconsistent_pairs():
-    from kev.benchmark import paired_bootstrap, prediction_rows
+    from kev.benchmark import prediction_rows
+    from kev.metrics import paired_bootstrap
     rows = prediction_rows(frozen_request(), {"probabilities": {"reason": {"size": 0.8, "damage": 0.1, "color": 0.1}}})
     with pytest.raises(ValueError, match="duplicate"):
         paired_bootstrap(rows + rows, rows)
@@ -327,7 +329,7 @@ def test_bootstrap_rejects_duplicate_or_inconsistent_pairs():
 
 def test_temperature_preserves_argmax_but_not_cross_question_ranking():
     import numpy as np
-    from kev.benchmark import probabilities_at_temperature
+    from kev.metrics import probabilities_at_temperature
     rows = [{"p": [0.6, 0.2, 0.2]}, {"p": [0.55, 0.449, 0.001]}]
     calibrated = [probabilities_at_temperature(r, 2.0) for r in rows]
     assert max(rows[0]["p"]) > max(rows[1]["p"])
@@ -337,7 +339,7 @@ def test_temperature_preserves_argmax_but_not_cross_question_ranking():
 
 def test_calibration_uses_logits_without_probability_floor_distortion():
     import numpy as np
-    from kev.benchmark import probabilities_at_temperature
+    from kev.metrics import probabilities_at_temperature
     p = probabilities_at_temperature({"p": [1.0, 0.0], "logits": [0.0, -100.0]}, 2.0)
     assert p[1] == pytest.approx(np.exp(-50), rel=1e-6, abs=0)
     for temperature in (0, -1, float("nan"), float("inf")):
@@ -366,7 +368,7 @@ def test_logits_are_recorded_in_option_order():
 
 
 def test_risk_curve_area_has_explicit_tie_policy():
-    from kev.benchmark import area_under_risk_coverage
+    from kev.metrics import area_under_risk_coverage
     assert area_under_risk_coverage([0.99, 0.9, 0.8], [True, True, False]) == pytest.approx(1 / 9)
     assert area_under_risk_coverage([0.99] * 10, [True] * 9 + [False]) == pytest.approx(0.1)
     assert area_under_risk_coverage([0.99] * 10, [False] + [True] * 9) == pytest.approx(0.1)
@@ -422,7 +424,7 @@ def test_trial_accepts_one_registered_loss_change():
 
 
 def test_temperature_fit_requires_raw_rows_and_uses_true_logit_nll():
-    from kev.benchmark import fit_temperature, nll_at_temperature
+    from kev.metrics import fit_temperature, nll_at_temperature
     row = {"variant": "clean", "source": "fixture", "task": "fixture", "p": [1.0, 0.0],
            "logits": [0.0, -100.0], "label": 1, "inference_temperature": 1.0}
     assert nll_at_temperature(row, 2.0) == pytest.approx(50.0)
@@ -488,7 +490,7 @@ def test_final_audit_partition_remains_bound_to_registration():
 
 def test_tempered_replay_records_effective_temperature():
     from scripts.calibration_audit import tempered
-    from kev.benchmark import fit_temperature
+    from kev.metrics import fit_temperature
     raw = {"variant": "clean", "source": "fixture", "task": "fixture", "p": [0.9, 0.1],
            "logits": [2.197224577, 0.0], "label": 0, "inference_temperature": 1.0}
     rows = tempered([raw], 2.0)

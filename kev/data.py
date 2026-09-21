@@ -377,10 +377,17 @@ def load_records(path, source="custom"):
     return records
 
 
+def api_request(record):
+    """The /v1/systemone request body for a labelled record: state and typed questions only, never labels, targets or
+    metadata (this is what leaves the machine when a remote predictor is scored)."""
+    return {"state": record["state"], "questions": {
+        qid: {k: v for k, v in q.items() if k in ("type", "instructions", "criteria")}
+        for qid, q in record["questions"].items()}}
+
+
 def materialize(req):
     """Labelled request -> internal record via the serving path (api.to_record), attaching int labels and src."""
-    clean = {"state": req["state"], "questions": {qid: {k: v for k, v in q.items() if k not in ("label", "src")} for qid, q in req["questions"].items()}}
-    rec, meta = to_record(SystemOneRequest.model_validate(clean))
+    rec, meta = to_record(SystemOneRequest.model_validate(api_request(req)))
     for q, m, (qid, src_q) in zip(rec["questions"], meta, req["questions"].items()):
         y = src_q["label"]
         q["label"] = m["keys"].index(y) if m["type"] == "choice" else int(y)   # noul labels are bools, score labels level indices

@@ -4,6 +4,7 @@ from collections import Counter
 import torch
 import torch.nn.functional as F
 from .checkpoint import Checkpoint, Meta, write_meta
+from .device import allocated_bytes, default_device, empty_cache
 from .data import EVAL_ONLY, build, augment, load_records, materialize, none_pair, source_seed
 from .suite import digest, load_split, write_json
 from .model import MAX_BRANCH, MAX_PACKED, MAX_STATE, DecisionModel, fits, load_tokenizer
@@ -124,7 +125,7 @@ def main():
         ap.error("refusing to overwrite an existing run")
     out_dir.mkdir(parents=True)
     torch.manual_seed(a.seed); rng = random.Random(a.seed)
-    dev = a.device or ("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+    dev = a.device or default_device()
     if dev == "cuda":
         torch.backends.cuda.matmul.allow_tf32 = True; torch.backends.cudnn.allow_tf32 = True
     autocast = torch.autocast("cuda", dtype=torch.bfloat16) if a.dtype == "bf16" else contextlib.nullcontext()
@@ -257,12 +258,11 @@ def main():
             # weight by source records in the accumulation group so none-pair siblings do not inflate a record's share
             group_records = accumulation_records(len(reqs), a.batch, a.accum, mb) * (len(recs) / len(chunk))
             (loss / group_records).backward(); run["n"] += len(recs); seen += len(recs)
-            if dev == "mps": peak_mem = max(peak_mem, torch.mps.current_allocated_memory())
-            elif dev == "cuda": peak_mem = max(peak_mem, torch.cuda.max_memory_allocated())
+            peak_mem = max(peak_mem, allocated_bytes(dev))
             if (mb + 1) % a.accum == 0 or mb + 1 == micro_per_epoch:
                 torch.nn.utils.clip_grad_norm_(model.trainable_parameters(), 1.0)
                 opt.step(); sched.step(); opt.zero_grad(); step += 1
-                if dev == "mps": torch.mps.empty_cache()
+                if dev == "mps": empty_cache(dev)   # MPS only: per-step cache release keeps the unified-memory footprint down; on CUDA it would just slow the step
                 if step % 10 == 0:
                     print(f"ep{ep} step {step}/{steps} loss {run['ce']/run['n']:.3f} kl {run['kl']/max(run['kl_n'],1):.3f} anchor {run['anchor']/max(run['anchor_n'],1):.3f} {(time.time()-t0)/seen:.3f}s/rec", flush=True)
                     run = Counter()

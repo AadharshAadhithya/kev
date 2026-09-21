@@ -10,7 +10,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from kev.benchmark import metrics, paired_bootstrap, probabilities_at_temperature, risk_coverage_curve
+from kev.metrics import metrics, paired_bootstrap, probabilities_at_temperature, risk_coverage_curve
 from kev.checkpoint import read_meta
 from kev.suite import digest, load_split, write_json
 

@@ -75,7 +75,11 @@ See README.md (deep dive) and docs/model-cards/ (one card per checkpoint: recipe
 - `kev/model.py`     encode(), branch_mask(), PointerHead, DecisionModel
 - `kev/train.py`     LoRA fine-tune, batch size 1 with grad accumulation (variable-length custom masks)
 - `kev/checkpoint.py` Checkpoint (resolve run dir or Hub id, `head.pt` schema = `Meta`, load with `LoadOptions`, `warm_start` for deltas)
-- `kev/evaluate.py`  acc/ECE, permutation stability, IIA shift, isolation probe, packed-vs-separate
+- `kev/evaluate.py`  acc/ECE, permutation stability, IIA shift, isolation probe, packed-vs-separate (legacy prototype eval)
+- `kev/device.py`    default_device / sync / empty_cache / allocated_bytes for cuda, mps, cpu
+- `kev/metrics.py`   pure-numpy scoring of benchmark rows: ECE, Brier, NLL, selective prediction (coverage@error, AURC), temperature fit, paired bootstrap
+- `kev/predictors.py` LocalPredictor (checkpoint), RemotePredictor (System One endpoint), JevPredictor (AI SDK worker)
+- `kev/benchmark.py` rows from predictions, summarize(), evaluate_records(), CLI
 - `kev/plot.py`      loss curve(s) from train logs + accuracy-vs-baselines bars from eval.json
 - `kev/api.py`       TypeSafe request/response models; Noul/Choice/Score -> pointer options; confidence formulas
 - `kev/serve.py`     FastAPI: /v1/systemone (+ /v1/models) and /api/* playground routes

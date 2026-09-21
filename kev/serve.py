@@ -4,13 +4,13 @@ Run: uv run --extra serve python -m kev.serve --run runs/kev --port 8008
 """
 import argparse, json, os, random, threading, time
 from dataclasses import replace
-import torch
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from .api import SystemOneRequest, to_record, to_answers, output_tokens, with_date_facts
 from .checkpoint import Checkpoint, LoadOptions, is_hub_id
 from .data import DISTRACTORS, NONE
+from .device import default_device, sync
 
 # inference limits (training used 384/640); per-branch cap mirrors Jev's ~32k, bounded by the base model window
 INFER_MAX_STATE, INFER_MAX_BRANCH = 8192, 8192
@@ -44,11 +44,6 @@ def _rec(r: Record):
     return {"state": r.state, "questions": [{"instr": q.instr, "options": q.options, "label": 0} for q in r.questions]}
 
 
-def _sync(dev):
-    if dev == "mps": torch.mps.synchronize()
-    elif dev == "cuda": torch.cuda.synchronize()
-
-
 def _probs(rec):
     """One forward pass; the state prefix (tokens up to the first question) is cached across requests, so a repeated state
     only pays for its question branches. Exactness: the state's activations do not depend on the branches."""
@@ -58,7 +53,7 @@ def _probs(rec):
     Ls = enc["seg"].count(0); key = (tuple(enc["ids"][:Ls]), bool(enc.get("option_isolation")))
     cache = STATE["prefix_cache"]
     with STATE["lock"]:
-        _sync(dev); t = time.time()
+        sync(dev); t = time.time()
         eligible = PREFIX_CACHE_SIZE and Ls >= PREFIX_MIN_TOKENS
         if eligible and key in cache:
             prefix = cache.pop(key)                       # pop + reinsert = LRU order
@@ -71,7 +66,7 @@ def _probs(rec):
             STATE["prefix_misses"] += 1; hit = False
         else:
             ps = model.probs(enc); hit = False
-        _sync(dev); dt = time.time() - t
+        sync(dev); dt = time.time() - t
     return [p.tolist() for p in ps], {"tokens": len(enc["ids"]), "state_tokens": Ls, "latency_ms": round(dt * 1000, 1), "prefix_cache_hit": hit}
 
 
@@ -182,7 +177,7 @@ def main():
     a = ap.parse_args()
     run = a.run if is_hub_id(a.run) or os.path.exists(f"{a.run}/head.pt") else a.fallback
     if run != a.run: print(f"{a.run} not found, falling back to {run}")
-    dev = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+    dev = default_device()
     opts = LoadOptions.from_env()
     if dev == "mps" and opts.attn is None: opts = replace(opts, attn="sdpa")   # serving default on Apple GPUs (parity measured)
     ck = Checkpoint(run)

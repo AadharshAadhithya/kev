@@ -26,8 +26,11 @@ from pathlib import Path
 
 import torch
 
-from kev.benchmark import LocalPredictor, default_device, evaluate_records, fit_temperature, paired_bootstrap
+from kev.benchmark import evaluate_records
 from kev.checkpoint import LoadOptions
+from kev.device import default_device, empty_cache
+from kev.metrics import fit_temperature, paired_bootstrap
+from kev.predictors import LocalPredictor
 from kev.suite import digest, load_split, record_digest, write_json
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -102,12 +105,6 @@ def git_commit():
         return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True, stderr=subprocess.DEVNULL).strip()
     except (subprocess.CalledProcessError, FileNotFoundError):
         return "unknown"
-
-
-def free_device_memory(device):
-    gc.collect()
-    if device == "mps": torch.mps.empty_cache()
-    elif device == "cuda": torch.cuda.empty_cache()
 
 
 @contextmanager
@@ -242,7 +239,7 @@ def execute_trial(config, suite, output, expected_sources, device, existing=None
             transfer["suite_sha256"] = digest(Path(transfer_suite) / "manifest.json")
     finally:
         del predictor
-        free_device_memory(device)
+        gc.collect(); empty_cache(device)
     if source_hashes() != expected_sources or digest(Path(suite) / "manifest.json") != suite_hash:
         raise ValueError("source or suite changed during the trial; result cannot be ranked")
     report["transfer"] = transfer

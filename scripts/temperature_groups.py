@@ -13,7 +13,7 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from kev.benchmark import metrics  # noqa: E402
+from kev.metrics import metrics  # noqa: E402
 
 RUNS = {"Kev-9B": "q35-9b/01-trial-1", "Kev-4B": "q35-4b-s23/00-trial-0", "Kev-0.8B": "q35-08b/02-trial-2"}
 GRID = np.exp(np.linspace(np.log(0.25), np.log(4), 81))

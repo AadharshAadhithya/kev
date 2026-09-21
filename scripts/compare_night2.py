@@ -2,7 +2,7 @@
 import json, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from kev.benchmark import paired_bootstrap
+from kev.metrics import paired_bootstrap
 ROOT = Path(__file__).resolve().parents[1]
 REF = {"9b": ("Kev-9B", "q35-9b/01-trial-1"), "4b": ("Kev-4B", "q35-4b-s23/00-trial-0")}
 NAMES = ["dates", "unknowable", "assertion", "all"]

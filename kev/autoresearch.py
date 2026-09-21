@@ -246,7 +246,7 @@ def plan_section():
 def compare(studies, reference, tasks=("mmlu", "paws", "qnli", "emotion", "tweet_offensive", "contrastive_deadline")):
     """Print every trial of the given studies with a record-clustered paired bootstrap on transfer accuracy vs `reference`
     (a runs/<study>/<trial> path). Development-set selection only."""
-    from kev.benchmark import paired_bootstrap
+    from kev.metrics import paired_bootstrap
     def rows(p): return json.loads((ROOT / p / "transfer/rows.json").read_text())
     ref_rows = rows(reference)
     print(f"reference: {reference}")

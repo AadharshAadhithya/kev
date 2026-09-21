@@ -16,6 +16,7 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from kev.api import question_keys
+from kev.device import default_device
 from kev.suite import load_split, write_json
 
 LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -32,7 +33,7 @@ def question_prompt(state, q):
 
 
 def build(base, suite, out, split="train", device=None, revision=None, max_options=26, batch=16):
-    device = device or ("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+    device = device or default_device()
     tok = AutoTokenizer.from_pretrained(base, revision=revision); tok.padding_side = "left"
     if tok.pad_token is None: tok.pad_token = tok.eos_token
     model = AutoModelForCausalLM.from_pretrained(base, revision=revision, dtype=torch.bfloat16 if device != "cpu" else torch.float32).to(device).eval()

@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from kev.benchmark import metrics  # noqa: E402
+from kev.metrics import metrics  # noqa: E402
 from kev.checkpoint import read_meta, write_meta  # noqa: E402
 
 GRID = np.exp(np.linspace(np.log(0.25), np.log(4), 121))

@@ -6,7 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from kev.benchmark import grouped_metrics, metrics, paired_bootstrap
+from kev.metrics import grouped_metrics, metrics, paired_bootstrap
 from kev.suite import digest, write_json
 from scripts.calibration_audit import describe, read_rows, tempered
 

@@ -9,7 +9,7 @@ criteria from PLAN_Qwen35.md section 7 evaluated mechanically.
 import json
 from pathlib import Path
 
-from kev.benchmark import paired_bootstrap
+from kev.metrics import paired_bootstrap
 
 ROOT = Path(__file__).resolve().parents[1]
 RELEASED = {"4b": ("Kev-4B", "v7-rc3/01-trial-1"), "9b": ("Kev-8B", "v7-final/00-trial-0")}

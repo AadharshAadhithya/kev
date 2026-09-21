@@ -20,6 +20,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 STATE = {"run": None, "tok": None, "model": None, "dev": None, "lock": threading.Lock(), "prefix_cache": {}, "prefix_hits": 0, "prefix_misses": 0}
 PREFIX_CACHE_SIZE = int(os.environ.get("KEV_PREFIX_CACHE", "4"))          # states kept (KV + hidden); 0 disables
 PREFIX_MIN_TOKENS = int(os.environ.get("KEV_PREFIX_MIN_TOKENS", "384"))
+TEMPERATURE = float(os.environ.get("KEV_TEMPERATURE", "1.0"))               # opt-in: probabilities ^ (1/T), renormalised; 2.0 is the value fitted in-distribution for the Qwen3.5 family (scripts/temperature_groups.py)
 DATE_FACTS = os.environ.get("KEV_DATE_FACTS", "0") == "1"                  # opt-in: append day counts between absolute dates in the state (api.with_date_facts)   # below this the branch-only pass is not faster on MPS (per-op overhead dominates)
 
 
@@ -72,6 +73,8 @@ def _probs(rec):
         else:
             ps = model.probs(enc); hit = False
         _sync(dev); dt = time.time() - t
+    if TEMPERATURE != 1.0:                      # opt-in calibration: same as scaling the pointer logits by 1/T (argmax unchanged)
+        ps = [(lambda q: q / q.sum())(p.clamp_min(1e-9) ** (1.0 / TEMPERATURE)) for p in ps]
     return [p.tolist() for p in ps], {"tokens": len(enc["ids"]), "state_tokens": Ls, "latency_ms": round(dt * 1000, 1), "prefix_cache_hit": hit}
 
 

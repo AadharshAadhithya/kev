@@ -47,6 +47,11 @@ def load(run, dev, dtype=None, merge=True, attn=None):
     run = resolve_run(run)
     meta = torch.load(f"{run}/head.pt", map_location="cpu")
     dtype = dtype or {"bf16": torch.bfloat16, "fp16": torch.float16}.get(os.environ.get("KEV_DTYPE", ""), torch.float32)
+    if meta.get("weights_dtype") == "bf16":
+        # trained with a bf16 backbone (--weights_dtype bf16, e.g. the 35B-A3B MoE whose fused experts need bf16): load it the same
+        # way, and keep the fp32 adapter unmerged rather than folding it into bf16 weights. fp32 would double the memory and is not
+        # what was trained.
+        dtype, merge = torch.bfloat16, False
     import json as _json
     adapter_cfg = _json.loads(open(f"{run}/adapter_config.json").read())
     merge = merge and os.environ.get("KEV_MERGE", "1") != "0" and not adapter_cfg.get("trainable_token_indices")   # token-trained adapters stay unmerged

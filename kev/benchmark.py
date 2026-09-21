@@ -298,19 +298,25 @@ def main():
     ap.add_argument("--run", help="checkpoint dir or Hub id (local scoring)")
     ap.add_argument("--remote", help="base URL of a System One-compatible endpoint to score instead of a local checkpoint")
     ap.add_argument("--remote-model", default="kev-latest")
-    ap.add_argument("--suite", required=True)
+    ap.add_argument("--suite", help="frozen suite directory (scores its development partition)")
+    ap.add_argument("--data", help="your own labelled requests, one JSON object per line (kev.data.load_records); an alternative to --suite")
     ap.add_argument("--out", required=True)
     ap.add_argument("--device", choices=["cpu", "mps", "cuda"], default=default_device())
     ap.add_argument("--allow-test", action="store_true")
     a = ap.parse_args()
     if bool(a.run) == bool(a.remote): ap.error("give exactly one of --run or --remote")
-    split = "test" if a.allow_test else "development"
-    records = load_split(a.suite, split, allow_test=a.allow_test)
-    heldout = json.loads((Path(a.suite) / "manifest.json").read_text())["holdout_sources"]
+    if bool(a.suite) == bool(a.data): ap.error("give exactly one of --suite or --data")
+    if a.data:
+        from kev.data import load_records
+        records, heldout, split, source_hash = load_records(a.data), [], "custom", digest(Path(a.data))
+    else:
+        split = "test" if a.allow_test else "development"
+        records = load_split(a.suite, split, allow_test=a.allow_test)
+        heldout = json.loads((Path(a.suite) / "manifest.json").read_text())["holdout_sources"]; source_hash = digest(Path(a.suite) / "manifest.json")
     import os
     predictor = RemotePredictor(a.remote, a.remote_model, os.environ.get("KEV_REMOTE_API_KEY", "local")) if a.remote else LocalPredictor(a.run, a.device)
     report, _ = evaluate_records(records, predictor, a.out, heldout_sources=tuple(heldout))
-    report.update(suite_sha256=digest(Path(a.suite) / "manifest.json"), run=a.run or a.remote, split=split, calibration_applied=False,
+    report.update(suite_sha256=source_hash, data=a.data, run=a.run or a.remote, split=split, calibration_applied=False,
                   remote={"base_url": a.remote, "requested_model": a.remote_model, "served_model": predictor.served_model} if a.remote else None)
     write_json(Path(a.out) / "report.json", report)
     print(json.dumps({"objective": report["objective"], "clean": report["clean"], "coverage": report["coverage"]}, indent=2))

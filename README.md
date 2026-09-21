@@ -249,14 +249,34 @@ uv run python -m kev.train --suite evals/v7/decision-v7 --base Qwen/Qwen3.5-4B-B
 
 ### Fine-tuning on your own data
 
-Start from a released checkpoint instead of the base model, or the fine-tune will erase what Kev already knows. With `--init_from`, the LoRA and pointer head are loaded before training and checked for compatibility (base, revision, rank, head size, adapter coverage):
+The released models were trained on public datasets and generated policy examples. If your questions look different — your own routing categories, your own escalation rules, another language — a short fine-tune on a few hundred labelled examples usually helps more than any prompt change.
 
-```bash
-uv run python -m kev.train --suite path/to/your-suite --base Qwen/Qwen3.5-4B-Base --init_from jaredpalmer/kev-4b \
-    --epochs 2 --lr 2e-5 --batch 1 --accum 8 --dtype bf16 --checkpointing 1 --device cuda --out runs/mine
+Put your examples in a JSONL file, one request per line. It's the same shape as an API request, plus a `label` on every question:
+
+```jsonl
+{"state": {"subject": "Charged twice", "body": "I see two charges for order #4411. Please refund one."},
+ "questions": {
+   "team":     {"type": "choice", "instructions": "Which team should handle this ticket?",
+                "criteria": {"billing": "Payments and refunds", "shipping": "Delivery problems", "access": "Login and account access"}, "label": "billing"},
+   "angry":    {"type": "noul",   "instructions": "Is the customer angry?", "label": false},
+   "priority": {"type": "score",  "instructions": "How urgent is this ticket?", "criteria": ["low", "normal", "high"], "label": 1}}}
 ```
 
-Measured by the contributor who added this ([#9](https://github.com/jaredpalmer/kev/pull/9), 836 records of tool-call decisions in Polish and English, Kev-0.6B): training from the base scored 0.331 on Kev's own evaluation suite against 0.835 for the released model; warm-starting kept 0.825 there and reached 0.875 on the new domain (0.630 from the base). Use a lower learning rate than the from-scratch recipe. `--batch 1 --accum 8` in bf16 fits a 4 GB GPU for the 0.8B model. The source checkpoint's hashes are recorded in `training_config.json` and `head.pt`.
+For `choice` the label is the option name, for `noul` it's `true` or `false`, and for `score` it's the level's position starting at 0. Keep 10–20% of the file aside for evaluation.
+
+Then start from a released checkpoint with `--init_from`:
+
+```bash
+uv run python -m kev.train --data train.jsonl --base Qwen/Qwen3.5-4B-Base --init_from jaredpalmer/kev-4b \
+    --epochs 2 --lr 2e-5 --batch 1 --accum 8 --dtype bf16 --checkpointing 1 --device cuda --out runs/mine
+
+uv run python -m kev.benchmark --run runs/mine --data heldout.jsonl --out runs/mine-eval
+KEV_DTYPE=bf16 uv run --extra serve python -m kev.serve --run runs/mine --port 8009
+```
+
+`--init_from` loads the adapter and pointer head from the released model before training, so you keep what Kev already knows and add your domain on top. Starting from the base model instead throws that away: in one user's test on 836 support-tool decisions, a fine-tune from the base scored 0.33 on Kev's own evaluation set, against 0.84 for the released model; the same data with `--init_from` kept 0.83 there and reached 0.88 on the new domain. Use a smaller learning rate than the from-scratch recipe (`2e-5` is a good start), and pick `--base` to match the checkpoint you start from; the trainer checks that the base, revision, LoRA rank, and head size agree before it loads anything.
+
+`--batch 1 --accum 8` in bf16 fits the 0.8B model on a 4 GB GPU. The benchmark reports accuracy, Brier score, and calibration per question type, so you can see which of your questions the fine-tune helped. The checkpoint you started from is recorded in `runs/mine/training_config.json`.
 
 Use `uv run python -m kev.train --help` for all training options. The released models don't use the optional `--perm_kl` or `--ord_w` losses. The [model cards](docs/model-cards/) have the training settings and dataset lists; [PLAN.md](PLAN.md) records what was tried and what helped.
 
@@ -332,7 +352,7 @@ The API tests run TypeSafe's example requests and the official SDK against your 
 
 - Jared Palmer ([@jaredpalmer](https://github.com/jaredpalmer))
 
-Built with [Devin](https://devin.ai). Thanks to [Archer Hume](https://archerhume.com/posts/jevs-architecture-unmasked) for the architecture write-up, [TypeSafe](https://docs.typesafe.ai/api) for the API design, [Qwen](https://huggingface.co/Qwen/Qwen3.5-9B-Base) for the base models, [3x3xX3N0N](https://github.com/jaredpalmer/kev/issues/8) for showing where the date-arithmetic failure really is, and [Radexito](https://github.com/jaredpalmer/kev/pull/9) for `--init_from`.
+Built with [Devin](https://devin.ai). Thanks to [Archer Hume](https://archerhume.com/posts/jevs-architecture-unmasked) for the architecture write-up, [TypeSafe](https://docs.typesafe.ai/api) for the API design, [Qwen](https://huggingface.co/Qwen/Qwen3.5-9B-Base) for the base models, [3x3xX3N0N](https://github.com/jaredpalmer/kev/issues/8) for showing where the date-arithmetic failure really is, and [Radexito](https://github.com/Radexito) for `--init_from`.
 
 Related work: [Hydragen](https://arxiv.org/abs/2402.05099), [DeFT](https://arxiv.org/abs/2404.00242), [FIRST](https://arxiv.org/abs/2406.15657).
 

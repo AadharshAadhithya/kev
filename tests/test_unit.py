@@ -97,3 +97,21 @@ def test_encode_positions_restart_per_branch(tok):
     assert all(enc["pos"][i] == S for i in starts)
     assert enc["labels"] == [0, 1] and [len(o) for o in enc["opt_idx"]] == [2, 3]
     assert all(enc["ids"][d] == tok.convert_tokens_to_ids(SPECIAL[4]) for d in enc["decide_idx"])
+
+
+def test_load_records_jsonl(tmp_path):
+    """The fine-tuning input format from the README: API-shaped requests with a label per question, one per line."""
+    import json
+    from kev.data import load_records, materialize
+    rows = [{"state": {"subject": "Charged twice", "body": "Two charges for order 4411."},
+             "questions": {"team": {"type": "choice", "instructions": "Which team?", "criteria": {"billing": "Payments", "shipping": None}, "label": "billing"},
+                           "angry": {"type": "noul", "instructions": "Is the customer angry?", "label": False},
+                           "priority": {"type": "score", "instructions": "How urgent?", "criteria": ["low", "normal", "high"], "label": 1}}}]
+    p = tmp_path / "train.jsonl"; p.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    recs = load_records(p)
+    assert recs[0]["_meta"]["source"] == "custom" and recs[0]["_meta"]["variant"] == "clean"
+    rec = materialize(recs[0])
+    assert [q["label"] for q in rec["questions"]] == [0, 0, 1] and rec["questions"][0]["src"] == "custom_choice"
+    bad = tmp_path / "bad.jsonl"; bad.write_text(json.dumps({"state": "x", "questions": {"q": {"type": "noul", "instructions": "?"}}}) + "\n")
+    try: load_records(bad); assert False
+    except ValueError as e: assert "no label" in str(e)

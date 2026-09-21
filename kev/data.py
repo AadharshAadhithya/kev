@@ -7,6 +7,7 @@ materialize() -> internal record {"state": str, "questions": [{"instr", "options
 """
 import hashlib
 import json
+from pathlib import Path
 import random
 from datasets import load_dataset
 from .api import SystemOneRequest, to_record
@@ -345,6 +346,33 @@ def none_pair(req, rng):
     present = {**q, "criteria": {k: (nd if k == nk else q["criteria"][k]) for k in keys}}
     absent = {**present, "criteria": {k: v for k, v in present["criteria"].items() if k != q["label"]}, "label": nk}
     return [{"state": req["state"], "questions": {qid: present}}, {"state": req["state"], "questions": {qid: absent}}]
+
+
+def load_records(path, source="custom"):
+    """Labelled requests from a JSONL file, one per line, in the API's request shape plus a `label` on every question:
+
+        {"state": "...", "questions": {"team": {"type": "choice", "instructions": "...", "criteria": {"billing": "...", "other": null}, "label": "billing"},
+                                       "urgent": {"type": "noul", "instructions": "...", "label": true},
+                                       "priority": {"type": "score", "instructions": "...", "criteria": ["low", "medium", "high"], "label": 2}}}
+
+    Labels: the option name for choice, true/false for noul, the level index (from 0) for score. `_meta` and per-question
+    `src` are filled in so the records behave like a frozen suite's (source = `source`, id = line number)."""
+    import hashlib
+    records = []
+    for n, line in enumerate(Path(path).read_text().splitlines()):
+        if not line.strip(): continue
+        r = json.loads(line)
+        if "state" not in r or not isinstance(r.get("questions"), dict) or not r["questions"]:
+            raise ValueError(f"{path}:{n + 1}: a record needs a state and a non-empty questions object")
+        for qid, q in r["questions"].items():
+            if "label" not in q: raise ValueError(f"{path}:{n + 1}: question {qid!r} has no label")
+            q.setdefault("src", f"{source}_{q['type']}")
+        text = json.dumps(r["state"], sort_keys=True, ensure_ascii=False) if not isinstance(r["state"], str) else r["state"]
+        r["_meta"] = {**{"source": source, "variant": "clean", "id": f"{source}/{n}", "group_id": f"{source}/{n}", "row": n, "split": "custom",
+                         "text_sha256": hashlib.sha256(" ".join(text.casefold().split()).encode()).hexdigest()}, **r.get("_meta", {})}
+        records.append(r)
+    if not records: raise ValueError(f"{path}: no records")
+    return records
 
 
 def materialize(req):

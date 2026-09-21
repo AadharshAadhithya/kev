@@ -3,7 +3,7 @@ from pathlib import Path
 from collections import Counter
 import torch
 import torch.nn.functional as F
-from .data import EVAL_ONLY, build, augment, materialize, none_pair, source_seed
+from .data import EVAL_ONLY, build, augment, load_records, materialize, none_pair, source_seed
 from .suite import digest, load_split, write_json
 from .model import MAX_BRANCH, MAX_STATE, DecisionModel, load_tokenizer, encode
 
@@ -87,6 +87,7 @@ def main():
     ap.add_argument("--anchor_w", type=float, default=0.0, help="weight of KL(base || model) toward the frozen base model's zero-shot distribution, per anchored question")
     ap.add_argument("--anchor_sources", default="", help="comma-separated sources to anchor (default: every record with a target)")
     ap.add_argument("--out", default="runs/kev")
+    ap.add_argument("--data", default="", help="your own labelled requests, one JSON object per line (see kev.data.load_records); an alternative to --suite for fine-tuning")
     ap.add_argument("--init_from", default="", help="delta mode: warm-start LoRA and the pointer head from an existing run "
                                                    "(local directory or hub id) instead of starting from the base model; keeps the "
                                                    "released model's in-domain skill while adapting to a new domain")
@@ -156,7 +157,8 @@ def main():
     print(f"device={dev} trainable params={sum(p.numel() for p in model.trainable_parameters())/1e6:.1f}M", flush=True)
 
     holdout = manifest["holdout_sources"] if manifest else [s for s in a.holdout.split(",") if s]
-    reqs = load_split(a.suite, "train") if manifest else build(a.n_per_source, "train", a.seed, exclude=holdout)
+    if a.data and a.suite: ap.error("give --data or --suite, not both")
+    reqs = load_records(a.data) if a.data else load_split(a.suite, "train") if manifest else build(a.n_per_source, "train", a.seed, exclude=holdout)
     if not manifest:
         # frozen suites are filtered to the training context when they are frozen (kev.suite.select_unique); records built
         # on the fly here are not, so apply the same rule instead of letting the strict encoder abort the run (issue #5)

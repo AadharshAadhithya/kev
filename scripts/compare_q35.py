@@ -4,7 +4,7 @@
 
 Prints, per trial: transfer accuracy with the record-clustered paired bootstrap against the matched released checkpoint,
 the deadline family, held-out pairs, MMLU/PAWS retention, Brier, confident errors, dev accuracy; then the decision
-criteria from PLAN_Qwen35.md section 7 evaluated mechanically.
+criteria from PLAN.md ("Qwen3.5 port", section 7) evaluated mechanically.
 """
 import json
 from pathlib import Path

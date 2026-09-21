@@ -50,7 +50,7 @@ Kev-0.8B is a **decision model**: one document (the *state*) and a set of typed 
 
 - Hub: `jaredpalmer/kev-0.8b` (this repo; trial `night2-08b-du2/00-trial-0`). The pre-delta checkpoint is at revision `v7-base`.
 - Demo: [huggingface.co/spaces/jaredpalmer/kev](https://huggingface.co/spaces/jaredpalmer/kev) runs Kev-4B and Kev-0.8B on ZeroGPU with the same encoder and API code as `kev.serve`.
-- Code, suites, results, and the full research log: [github.com/jaredpalmer/kev](https://github.com/jaredpalmer/kev) — `PLAN_Qwen35.md`, `PLAN.md`, `runs/leaderboard.md`
+- Code, suites, results, and the full research log: [github.com/jaredpalmer/kev](https://github.com/jaredpalmer/kev) — `PLAN.md` (the Qwen3.5 port is under History), `runs/leaderboard.md`
 
 ## Results (same frozen items for every row)
 

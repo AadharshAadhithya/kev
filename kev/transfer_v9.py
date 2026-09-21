@@ -1,4 +1,4 @@
-"""transfer-v9 (the plan draft called it transfer-v5; v5-v8 are taken by decision-data versions): transfer-v4 byte-for-byte, plus three eval-only additions (PLAN_Qwen35.md, Phase 0).
+"""transfer-v9 (the plan draft called it transfer-v5; v5-v8 are taken by decision-data versions): transfer-v4 byte-for-byte, plus three eval-only additions (PLAN.md, "Qwen3.5 port" Phase 0).
 
     uv run python -m kev.transfer_v9 --out evals/v9/transfer-v9
 

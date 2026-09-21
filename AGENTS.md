@@ -40,7 +40,7 @@ See README.md (deep dive) and docs/model-cards/ (one card per checkpoint: recipe
   0.8B 2.41) is applied by `PointerHead` in eval mode; `KEV_TEMPERATURE=1.0` overrides to raw. Re-run the script after any new checkpoint before publishing. Opt-in: `KEV_DATE_FACTS=1` (day counts). Delta data: evals/night2/ (scripts/build_night2_data.py). Previous generation, kept for Mac latency: `kev-8b`, `kev-0.6b`, `kev-4b@qwen3` (cards `*-qwen3.md`). Qwen3.5 backbones are hybrid (Gated DeltaNet): `DecisionModel.hybrid`
   routes them through `forward_rows_batch` (one causal row per question, state repeated) and `_branch_rows_from_prefix` for serving; the packed
   block-causal mask is only valid on attention-only bases. Needs transformers>=5.17, peft>=0.21; CUDA wants `flash-linear-attention` + `triton>=3.7.1`
-  (in the Modal image). MPS has no fast DeltaNet kernels (Kev-4B 0.78 s vs 0.17 s for the Qwen3 one); MLX is the planned fix. Plan and results: PLAN_Qwen35.md.
+  (in the Modal image). MPS has no fast DeltaNet kernels (Kev-4B 0.78 s vs 0.17 s for the Qwen3 one); MLX is the planned fix. Plan and results: PLAN.md, History > "Qwen3.5 port".
 - Delta fine-tuning: `kev.train --init_from <run dir | Hub id[@rev]>` warm-starts LoRA + head (compatibility checked before load; source hashes in
   provenance; allowlisted in `kev/experiment.py` so studies can run cheap delta trials from a released checkpoint). Use lr <= 2e-5 for deltas.
 - Publish: `uv run python -m kev.publish --run runs/<run> --repo jaredpalmer/kev-<size> --card docs/model-cards/<name>.md` (needs `hf auth login`). Repos are named by

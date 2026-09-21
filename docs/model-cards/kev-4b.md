@@ -55,7 +55,7 @@ Kev-4B is a **decision model**: one document (the *state*) and a set of typed qu
 
 - Hub: `jaredpalmer/kev-4b` (this repo; trial `night2-4b-du/00-trial-0`). The pre-delta checkpoint is at revision `v7-base`; the Qwen3 generation at `qwen3` ([its card](kev-4b-qwen3.md)).
 - Demo: [huggingface.co/spaces/jaredpalmer/kev](https://huggingface.co/spaces/jaredpalmer/kev) runs Kev-4B and Kev-0.8B on ZeroGPU with the same encoder and API code as `kev.serve`.
-- Code, suites, every trial with hashes and paired bootstraps: [github.com/jaredpalmer/kev](https://github.com/jaredpalmer/kev) — `PLAN_Qwen35.md` (the port and this experiment), `PLAN.md`, `runs/leaderboard.md`
+- Code, suites, every trial with hashes and paired bootstraps: [github.com/jaredpalmer/kev](https://github.com/jaredpalmer/kev) — `PLAN.md` (the Qwen3.5 port and this experiment are under History), `runs/leaderboard.md`
 
 ## Results (same frozen items for every row)
 
@@ -87,7 +87,7 @@ Per-source out-of-domain accuracy (Kev-4B / Jev): QNLI 0.91 / 0.93, SciQ 0.97 / 
 ## How it was built
 
 - **Base model**: Qwen3.5-4B-Base, a hybrid of 24 Gated DeltaNet (linear attention) layers and 8 full-attention layers. Because the recurrent layers cannot honour a block-causal mask, questions run as separate causal rows that continue from the shared state (`kev/model.py: forward_rows_batch`); isolation is exact by construction (together vs alone within 1e-5) and on attention-only models this form is bit-identical to the packed one.
-- **Recipe**: `decision-v7`, two epochs, LoRA r=16 (attention, MLP and DeltaNet projections), lr 5e-5 — the same data and settings as every other Kev, so the Qwen3 → Qwen3.5 difference is the base (`PLAN_Qwen35.md` §10: locked test +7.3 pp [+2.8, +11.7] over Kev-8B).
+- **Recipe**: `decision-v7`, two epochs, LoRA r=16 (attention, MLP and DeltaNet projections), lr 5e-5 — the same data and settings as every other Kev, so the Qwen3 → Qwen3.5 difference is the base (`PLAN.md`, Qwen3.5 port §10: locked test +7.3 pp [+2.8, +11.7] over Kev-8B).
 - **Delta**: `kev.train --init_from jaredpalmer/kev-4b@v7-base --data evals/night2/dates_unknowable.jsonl --replay 2000 --lr 2e-5 --epochs 1`. The 1,425 new records are generated (no public dataset): 900 date-bearing policy cases, a third rendered plainly, a third with a relational day-count sentence, a third with a `date_facts` field; 255 cases with the deciding sentence removed and a uniform soft target over the options, plus their 270 intact controls. Record hashes are in `evals/night2/manifest.json`; the source checkpoint's hashes are in `training_config.json`.
 - Why a delta and not a retrain: it is a controlled change (one fixed checkpoint, one data addition, 9 minutes), and the results section shows exactly what it moved.
 

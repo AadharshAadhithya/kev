@@ -55,12 +55,12 @@ See README.md (deep dive) and docs/model-cards/ (one card per checkpoint: recipe
   `.to("cuda")` once at module scope; a restart reloads both models (~3 min). Check with `hf spaces logs jaredpalmer/kev` and the
   gradio_client `/decide` endpoint; the Space is also in the Kev collection and needs PRO to exist.
 - Serve: `uv run --extra serve python -m kev.serve --run runs/kev --port 8008` (falls back to runs/smoke)
-  - TypeSafe-compatible: `POST /v1/systemone`, `GET /v1/models` (no auth). Playground routes under `/api/*`.
+  - TypeSafe-compatible: `POST /v1/systemone`, `GET /v1/models` (no auth; also reports device, temperature and prefix-cache stats).
   - SDK: `TypeSafeClient(api_key="local", base_url="http://127.0.0.1:8008", model="kev-latest")`
 - Extra endpoints for the demo: `POST /v1/systemone/permute` (one Choice under n option orders), `POST /v1/systemone/separate`
   (each question alone; packed-vs-separate comparison). `/v1/systemone` also returns `latency_ms`.
 - Web demo: `cd playground && npm run dev -- -p 3001` (:3000 is used by another project). Next 16 app router; `/kev/*` is
-  rewritten to the FastAPI server (`KEV_API`, default http://127.0.0.1:8009). Presets live in `playground/src/lib/kev.ts`.
+  rewritten to the FastAPI server (`KEV_API`, default http://127.0.0.1:8009); it uses only the `/v1/*` routes. Presets live in `playground/src/lib/kev.ts`.
   - `/chess` (`src/components/chess-game.tsx`, `src/lib/chess.ts`, chess.js): legal moves -> Choice options, board -> state, Score for eval;
     games in localStorage key `kev.chess.v1`.
   - React Compiler lint forbids sync setState in effects; schedule via setTimeout or move into handlers.
@@ -84,7 +84,7 @@ See README.md (deep dive) and docs/model-cards/ (one card per checkpoint: recipe
 - `kev/benchmark.py` rows from predictions, summarize(), evaluate_records(), CLI
 - `kev/plot.py`      loss curve(s) from train logs + accuracy-vs-baselines bars from eval.json
 - `kev/api.py`       TypeSafe request/response models; Noul/Choice/Score -> pointer options; confidence formulas
-- `kev/serve.py`     FastAPI: /v1/systemone (+ /v1/models) and /api/* playground routes
+- `kev/serve.py`     FastAPI: /v1/systemone (+ permute, separate) and /v1/models; `Server` holds the checkpoint and the prefix cache
 - `tests/test_api.py` conformance against the docs' example requests + official SDK
 
 ## Notes

@@ -1,9 +1,9 @@
 """Decision model: causal LM backbone + block-causal branch mask + pointer readout."""
-import math, re
+import copy, math, os, re
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, DynamicCache
 
 # Reuse existing rarely-used Qwen special tokens as delimiters (state, q, opt, /opt, decide) so no
 # embedding rows need to be added/trained; LoRA adapts their meaning.
@@ -183,23 +183,29 @@ class DecisionModel(nn.Module):
     def hidden(self, enc):
         return self.hidden_batch([enc])[0, : len(enc["ids"])]
 
-    SHAPE_BUCKET = int(__import__("os").environ.get("KEV_SHAPE_BUCKET", "64"))   # MPS: pad the sequence to a multiple of this (per-shape kernel warm-up); 1 disables
+    SHAPE_BUCKET = int(os.environ.get("KEV_SHAPE_BUCKET", "64"))   # MPS: pad the sequence to a multiple of this (per-shape kernel warm-up); 1 disables
+
+    def _pad_rows(self, rows):
+        """Right-pad (ids, pos) token rows into [N, L] id / position tensors and a [N, L] attention mask (1 = real token).
+        Pads sit after every real token and are masked keys, so they never change a real token's hidden state (parity
+        measured exact). On MPS in eval mode L is rounded up to a SHAPE_BUCKET multiple so kernels are warmed per bucket."""
+        L = max(len(ids) for ids, _ in rows)
+        if str(self.device) == "mps" and not self.training: L = -(-L // self.SHAPE_BUCKET) * self.SHAPE_BUCKET
+        ids = torch.full((len(rows), L), self.pad_id, device=self.device)
+        pos = torch.zeros((len(rows), L), dtype=torch.long, device=self.device)
+        att = torch.zeros((len(rows), L), dtype=torch.long, device=self.device)
+        for i, (rid, rpos) in enumerate(rows):
+            ids[i, : len(rid)] = torch.tensor(rid, device=self.device); pos[i, : len(rpos)] = torch.tensor(rpos, device=self.device); att[i, : len(rid)] = 1
+        return ids, pos, att
 
     def hidden_batch(self, encs):
-        """[B, L_max, d] hidden states for a right-padded batch of encoded records. Pads are masked keys and sit after every
-        real token, so padding never changes a real token's hidden state (parity measured exact)."""
-        L = max(len(e["ids"]) for e in encs)
-        if str(self.device) == "mps" and not self.training: L = -(-L // self.SHAPE_BUCKET) * self.SHAPE_BUCKET
-        ids = torch.full((len(encs), L), self.pad_id, device=self.device)
-        pos = torch.zeros((len(encs), L), dtype=torch.long, device=self.device)
-        for b, e in enumerate(encs):
-            ids[b, : len(e["ids"])] = torch.tensor(e["ids"], device=self.device)
-            pos[b, : len(e["pos"])] = torch.tensor(e["pos"], device=self.device)
+        """[B, L_max, d] hidden states for a right-padded batch of encoded records under the packed block-causal mask."""
+        ids, pos, _ = self._pad_rows([(e["ids"], e["pos"]) for e in encs])
         isolate = any(e.get("option_isolation") for e in encs)
         if isolate and not all(e.get("option_isolation") for e in encs):
             raise ValueError("cannot mix option-isolated and plain encodings in one batch")
         lm_dtype = next(self.lm.parameters()).dtype
-        mask = branch_mask_batch([e["seg"] for e in encs], self.device, dtype=lm_dtype, opts=[e["opt"] for e in encs] if isolate else None, length=L)
+        mask = branch_mask_batch([e["seg"] for e in encs], self.device, dtype=lm_dtype, opts=[e["opt"] for e in encs] if isolate else None, length=ids.shape[1])
         return self.lm(input_ids=ids, position_ids=pos, attention_mask=mask).last_hidden_state.float()   # head stays fp32
 
     def _readout(self, h, enc):
@@ -210,31 +216,25 @@ class DecisionModel(nn.Module):
         into a single batch. Returns the same nested logits as forward_batch. Exact isolation by construction (rows are
         independent); the state is recomputed per row (Q x state tokens), which training accepts; serving uses the
         prefix cache instead."""
-        rows, owners = [], []
+        rows, readouts = [], []   # one causal row per question; readouts[i] = (record, <decide> offset, option offsets)
         for b, e in enumerate(encs):
             S, Sp, brs = rows_of(e)
             for r in brs:
-                rows.append((S + r["ids"], Sp + r["pos"], len(S) + r["decide"], [len(S) + o for o in r["opts"]])); owners.append(b)
-        L = max(len(ids) for ids, *_ in rows)
-        if str(self.device) == "mps" and not self.training: L = -(-L // self.SHAPE_BUCKET) * self.SHAPE_BUCKET
-        ids = torch.full((len(rows), L), self.pad_id, device=self.device)
-        pos = torch.zeros((len(rows), L), dtype=torch.long, device=self.device)
-        att = torch.zeros((len(rows), L), dtype=torch.long, device=self.device)
-        for i, (rid, rpos, _, _) in enumerate(rows):
-            ids[i, : len(rid)] = torch.tensor(rid, device=self.device); pos[i, : len(rpos)] = torch.tensor(rpos, device=self.device); att[i, : len(rid)] = 1
+                rows.append((S + r["ids"], Sp + r["pos"])); readouts.append((b, len(S) + r["decide"], [len(S) + o for o in r["opts"]]))
+        ids, pos, att = self._pad_rows(rows)
         h = self.lm(input_ids=ids, position_ids=pos, attention_mask=att).last_hidden_state.float()
         out = [[] for _ in encs]
-        for i, (b, (_, _, d, oi)) in enumerate(zip(owners, rows)):
+        for i, (b, d, oi) in enumerate(readouts):
             out[b].append(self.head(h[i, d], h[i, torch.tensor(oi, device=self.device)]))
         return out
 
     def forward(self, enc):
         """Returns list of logits tensors, one per question."""
-        if self.hybrid: return self.forward_rows_batch([enc])[0]
-        return self._readout(self.hidden(enc), enc)
+        return self.forward_batch([enc])[0]
 
     def forward_batch(self, encs):
-        """List (per record) of lists (per question) of logits, from one padded forward pass."""
+        """List (per record) of lists (per question) of logits, from one padded forward pass. Hybrid backbones take the
+        row form; attention-only ones the packed block-causal mask (the two agree, tests/test_v3.py::test_rows_match_packed)."""
         if self.hybrid: return self.forward_rows_batch(encs)
         hs = self.hidden_batch(encs)
         return [self._readout(hs[b], e) for b, e in enumerate(encs)]
@@ -249,22 +249,17 @@ class DecisionModel(nn.Module):
 
     def _branch_rows_from_prefix(self, enc, cache):
         """Hybrid serving: replicate the cached state once per question and run the branches as causal rows (exactly the
-        forward_rows_batch layout, minus the recomputed state). The cache is consumed (replicated, then extended)."""
+        forward_rows_batch layout, minus the recomputed state). Works on a copy: the caller's prefix stays pristine."""
         S, Sp, rows = rows_of(enc); Q = len(rows)
-        cache.reorder_cache(torch.zeros(Q, dtype=torch.long, device=self.device))
-        W = max(len(r["ids"]) for r in rows)
-        if str(self.device) == "mps": W = -(-W // self.SHAPE_BUCKET) * self.SHAPE_BUCKET
-        ids = torch.full((Q, W), self.pad_id, device=self.device); pos = torch.zeros((Q, W), dtype=torch.long, device=self.device)
-        att = torch.zeros((Q, len(S) + W), dtype=torch.long, device=self.device)
-        for i, r in enumerate(rows):
-            ids[i, : len(r["ids"])] = torch.tensor(r["ids"], device=self.device); pos[i, : len(r["pos"])] = torch.tensor(r["pos"], device=self.device); att[i, : len(S) + len(r["ids"])] = 1
+        cache = copy.deepcopy(cache); cache.reorder_cache(torch.zeros(Q, dtype=torch.long, device=self.device))
+        ids, pos, att = self._pad_rows([(r["ids"], r["pos"]) for r in rows])
+        att = torch.cat([torch.ones((Q, len(S)), dtype=torch.long, device=self.device), att], 1)   # the cached state tokens are all real
         h = self.lm(input_ids=ids, position_ids=pos, attention_mask=att, past_key_values=cache, use_cache=True).last_hidden_state.float()
         return [F.softmax(self.head(h[i, r["decide"]], h[i, torch.tensor(r["opts"], device=self.device)]), -1).cpu() for i, r in enumerate(rows)]
 
     @torch.no_grad()
     def prefix(self, enc):
         """Run the state tokens only. Returns (n_state_tokens, kv cache, state hidden states [Ls, d])."""
-        from transformers import DynamicCache
         Ls = enc["seg"].count(0)
         ids = torch.tensor([enc["ids"][:Ls]], device=self.device); pos = torch.tensor([enc["pos"][:Ls]], device=self.device)
         # the cache must know the layer types (hybrid backbones keep recurrent + conv states per DeltaNet layer)
@@ -275,14 +270,12 @@ class DecisionModel(nn.Module):
     def probs_and_prefix(self, enc):
         """One full pass that also returns the state prefix (KV cropped to the state, state hidden states): a cache miss
         costs a single forward pass, not two."""
-        from transformers import DynamicCache
         Ls = enc["seg"].count(0)
         if self.hybrid:
-            # recurrent layers cannot be cropped back to the state, so a hybrid miss is state pass + branch rows (the
-            # state pass is kept as the reusable prefix by running it twice? no: copy the cache before consuming it)
+            # recurrent layers cannot be cropped back to the state, so a hybrid miss is a state pass (kept as the prefix)
+            # plus the branch rows
             Ls, cache, h_state = self.prefix(enc)
-            import copy
-            return self._branch_rows_from_prefix(enc, copy.deepcopy(cache)), (Ls, cache, h_state)
+            return self._branch_rows_from_prefix(enc, cache), (Ls, cache, h_state)
         ids = torch.tensor([enc["ids"]], device=self.device); pos = torch.tensor([enc["pos"]], device=self.device)
         dt = next(self.lm.parameters()).dtype
         mask = branch_mask_batch([enc["seg"]], self.device, dtype=dt, opts=[enc["opt"]] if enc.get("option_isolation") else None)
@@ -298,8 +291,7 @@ class DecisionModel(nn.Module):
         Ls, cache, h_state = prefix
         if enc["seg"].count(0) != Ls: raise ValueError("prefix does not match this record's state")
         if self.hybrid:
-            import copy
-            return self._branch_rows_from_prefix(enc, copy.deepcopy(cache))   # the stored prefix stays pristine
+            return self._branch_rows_from_prefix(enc, cache)
         ids = torch.tensor([enc["ids"][Ls:]], device=self.device); pos = torch.tensor([enc["pos"][Ls:]], device=self.device)
         dt = next(self.lm.parameters()).dtype
         mask = branch_mask_batch([enc["seg"]], self.device, dtype=dt, opts=[enc["opt"]] if enc.get("option_isolation") else None)[:, :, Ls:, :]

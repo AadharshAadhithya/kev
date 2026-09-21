@@ -36,6 +36,14 @@ ROOT = Path(__file__).resolve().parent
 RUNS_MOUNT, HF_MOUNT = "/runs", "/hf"
 GPU = os.environ.get("KEV_GPU", "H100")   # H100 needs a payment method on the workspace; KEV_GPU=T4 for the free tier
 
+def worker_environment(app_name, gpu, secret_name=None):
+    env = {"HF_HOME": HF_MOUNT, "HF_HUB_DISABLE_PROGRESS_BARS": "1", "TOKENIZERS_PARALLELISM": "false", "PYTHONUNBUFFERED": "1",
+           "KEV_APP_NAME": app_name, "KEV_GPU": gpu}
+    if secret_name:
+        env["KEV_HF_SECRET"] = secret_name
+    return env
+
+
 app = modal.App(APP_NAME)
 image = (
     modal.Image.debian_slim(python_version="3.13")
@@ -44,7 +52,7 @@ image = (
     # Gated DeltaNet kernels for the Qwen3.5 hybrid backbones (transformers falls back to slow reference code without them)
     # fla refuses its gated chunk backward on Hopper with Triton 3.4-3.7.0 (incorrect results, fla#640); torch 2.8 pins 3.4
     .uv_pip_install("flash-linear-attention", "triton>=3.7.1")
-    .env({"HF_HOME": HF_MOUNT, "HF_HUB_DISABLE_PROGRESS_BARS": "1", "TOKENIZERS_PARALLELISM": "false", "PYTHONUNBUFFERED": "1"})
+    .env(worker_environment(APP_NAME, GPU, os.environ.get("KEV_HF_SECRET")))
     .add_local_python_source("kev")
     .add_local_file(ROOT / "uv.lock", "/root/uv.lock")
     .add_local_file(ROOT / "pyproject.toml", "/root/pyproject.toml")

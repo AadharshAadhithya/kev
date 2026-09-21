@@ -109,3 +109,17 @@ SOLOMON / BONSAI / QWEN3.8-27B RESEARCH (2026-09-21 morning)
 - Bonsai 2 27B (PrismML): ternary Qwen3.8-27B, 5.9 GB, 98.2% retention, WebGPU demo. Serving-side idea for a laptop Kev-27B (LoRA side-path on ternary base), not a training base.
 - Qwen3.8-27B is our DecisionModel's architecture already (qwen3_5_text). Fits H200 (54 GB + LoRA); H100 80 GB tight.
 IDEAS RANKED: (1) question-side LoRA ablation at 4B/9B — may fix the base-skill erosion AND makes prefix cache adapter-agnostic; (2) Kev-27B probe+trial on H200; (3) long-context real-document track (our MAX_STATE=384 is the real product gap vs Solomon/Jev); (4) evidence pointers from <decide> attention over state tokens (zero training); (5) multi-label + explicit not-stated output.
+
+CALIBRATION AUDIT — research/calibration-audit
+- Approved order: metrics -> failure audit -> matched screen -> conditional replication -> new final audit -> larger-model decision.
+- Reproduced tie bug: identical 0.99 confidences returned 94% versus 0% coverage depending on row order. Corrected to whole confidence groups; regression-tested.
+- Reproduced invalid per-row bootstrap for coverage; replaced with full-statistic paired group resampling. Explicit micro/macro aggregation.
+- Saved-row re-score: Jev coverage@5% 0.704 -> 0.695; Kev-4B 0.573 and Kev-9B 0.447 unchanged. Endpoint CIs are wide; report AURC and full curves too.
+- Correction: positive temperature preserves per-question argmax, not confidence ranking across multiclass questions. Historical probability replay is approximate; all new local evaluations save logits and effective temperature.
+- Reviewed 26 confident errors + 26 matched controls. Mixed semantic failures, ambiguous wording, and possible annotation issues. AI-assisted, not human validation; no evaluation labels changed or used for training.
+- Fresh transfer-r3: 580 threshold-calibration records and 1260 final records; disjoint from recorded old states/origins. Final predictions must stay unread until a selected candidate record exists.
+- Protocol: experiments/calibration-audit-protocol.json, frozen before jobs. Matched 3425 training records, CE control / epsilon=.05 smoothing / CE+.5 Brier / focal gamma=1, all seed 11.
+- Parent Kev-4B pinned @485ace8703592fcf405488b262449990824cfed1. Unchanged parent is a fifth scoring job, with the same raw-logit calibration procedure.
+- Running: calibration-screen-4b-s11 on the separate kev-calibration-audit app. Five H100 calls; 2400s timeout each, conservative compute bound $18.92. Spawn IDs in runs/calibration-screen-4b-s11.spawn.json.
+- Billing before new jobs: $392.14 metered. User raised total authorization to $1000; retain $60 initial-stage cap and gate further spend. No production app, releases, old results, or checkpoints changed.
+- Earlier statements that cross-entropy or label noise were the demonstrated root cause, that teacher disagreement proves bad labels, and that attention heatmaps are faithful evidence were too strong. They are hypotheses, not conclusions.

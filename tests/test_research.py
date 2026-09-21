@@ -452,3 +452,22 @@ def test_modal_compute_bound_includes_requested_memory_and_cpu():
     assert compute_bound("H100", 3600, 1) == pytest.approx(expected)
     with pytest.raises(ValueError):
         compute_bound("unknown", 3600, 1)
+
+
+def test_modal_worker_preserves_object_dependency_environment():
+    from modal_app import worker_environment
+    env = worker_environment("kev-calibration-audit", "H100", "named-secret")
+    assert env["KEV_APP_NAME"] == "kev-calibration-audit"
+    assert env["KEV_GPU"] == "H100" and env["KEV_HF_SECRET"] == "named-secret"
+    assert "HF_TOKEN" not in env
+    assert "KEV_HF_SECRET" not in worker_environment("kev-research", "H100")
+
+
+def test_screen_requires_beating_continuation_control_not_just_parent():
+    from scripts.review_calibration_screen import screen_checks
+    def result(cov):
+        return {"micro": {"coverage_at_5pct_error": cov, "acc": 0.8, "aurc": 0.05}, "sources": {"x": {"acc": 0.8}}}
+    rule = {"coverage_delta_vs_ce_control_min": 0.05, "coverage_delta_vs_recalibrated_parent_min": 0.05,
+            "accuracy_delta_vs_each_min": -0.01, "aurc_delta_vs_each_max": 0, "per_source_accuracy_delta_min": -0.05}
+    checks = screen_checks(result(0.6), {"parent": result(0.5), "ce-control": result(0.59)}, rule)
+    assert checks["coverage_vs_parent"] and not checks["coverage_vs_ce-control"]

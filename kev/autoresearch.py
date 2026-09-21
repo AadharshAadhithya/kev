@@ -15,7 +15,7 @@ Selection happens on development partitions only. A round's winner becomes the i
 mutations; a config is never re-run with the same seed.
 
 Budget: before each round, `modal billing summary` is read; the loop stops when metered spend since `--spend-start`
-exceeds `--spend-cap`. Per-round admission bounds still apply in modal_app.launch.
+exceeds `--spend-cap`. Per-round admission bounds still apply in modal_app.admit_study.
 """
 import argparse
 import json
@@ -27,14 +27,25 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-from kev.experiment import CHOICES, DEFAULTS, RANGES, validated_trial
-from kev.suite import write_json
+from kev.data import source_seed
+from kev.experiment import CHOICE_DEFAULTS, DEFAULTS, validated_trial
+from kev.suite import digest, write_json
 
 
-def record_digest(value):
+def config_digest(value):
     """Canonical (key-sorted) digest for config identity; kev.suite.record_digest keeps insertion order for provenance."""
     import hashlib
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+# per-backbone execution shape, not part of a recipe: hidden from knob summaries
+INFRA_KEYS = ("base", "seed", "base_revision", "dtype", "checkpointing", "batch", "accum", "perm_frac")
+ALL_DEFAULTS = {**DEFAULTS, **CHOICE_DEFAULTS}   # what kev.train does when a knob is not given
+
+
+def knobs(cfg):
+    """The recipe a config expresses: every non-default, non-infrastructure parameter."""
+    return {k: v for k, v in sorted(cfg.items()) if k not in INFRA_KEYS and v != ALL_DEFAULTS.get(k)}
 
 ROOT = Path(__file__).resolve().parents[1]
 SUITE, TRANSFER = "evals/v4/decision-v4", "evals/v4/transfer-v4"
@@ -136,15 +147,14 @@ def propose(rows, base, n, seed, suite_manifest, incumbent_cfg=None, rng_seed=0)
     rng = random.Random(rng_seed)
     parent = dict(incumbent_cfg or {**DEFAULTS, **BASE_DEFAULTS[base], "base": base, "epochs": 2})
     parent.pop("seed", None); parent.pop("train_sources", None)
-    tried = {record_digest(validated_trial({**strip_seed(r["config"]), "seed": seed}, suite_manifest)) for r in rows if r["config"] and r["base"] == base}
+    tried = {config_digest(validated_trial({**strip_seed(r["config"]), "seed": seed}, suite_manifest)) for r in rows if r["config"] and r["base"] == base}
     candidates, seen = [], set()
-    knobs = list(SPACE)
     for _ in range(400):
         if len(candidates) >= n: break
-        k = rng.sample(knobs, rng.choice([1, 1, 1, 2]))
+        k = rng.sample(list(SPACE), rng.choice([1, 1, 1, 2]))
         cfg = dict(parent)
         for knob in k:
-            current = parent.get(knob, DEFAULTS.get(knob, 0 if knob in ("option_isolation", "special_embeddings") else 256 if knob == "head_dim" else "all" if knob == "lora_targets" else None))
+            current = parent.get(knob, ALL_DEFAULTS.get(knob))
             choices = [v for v in SPACE[knob] if v != current]
             if not choices: continue
             cfg[knob] = rng.choice(choices)
@@ -152,12 +162,12 @@ def propose(rows, base, n, seed, suite_manifest, incumbent_cfg=None, rng_seed=0)
         cfg["seed"] = seed
         try: full = validated_trial(cfg, suite_manifest)
         except ValueError: continue
-        h = record_digest(full)
+        h = config_digest(full)
         if h in tried or h in seen: continue
         seen.add(h); candidates.append(cfg)
     # always include the incumbent itself at this seed if it has not been run at this seed (replication)
     inc = {**parent, "seed": seed}
-    if record_digest(validated_trial(inc, suite_manifest)) not in tried and len(candidates) < n + 1:
+    if config_digest(validated_trial(inc, suite_manifest)) not in tried and len(candidates) < n + 1:
         candidates.insert(0, inc)
     return candidates[: n + 1]
 
@@ -168,20 +178,16 @@ def leaderboard_md(rows, incumbents):
     for base, inc in incumbents.items():
         if inc: lines.append(f"- **{base}** incumbent: transfer {inc['transfer_acc']:.3f}, dev {inc['dev_acc']:.3f}, seeds {inc['seeds']} ({', '.join(inc['trials'])})")
     lines += ["", "| study/trial | base | seed | dev acc | transfer acc | Brier | conf-err | held-out pairs | none_present | perm flip | gates | $ | knobs |", "|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
-    def knobs(cfg):
-        return ", ".join(f"{k}={v}" for k, v in sorted(cfg.items()) if k not in ("base", "seed", "base_revision", "dtype", "checkpointing", "batch") and v != DEFAULTS.get(k) and not (k == "accum" and v in (1, 2))) or "defaults"
     for r in sorted(rows, key=lambda r: (r["transfer_acc"] is None, -(r["transfer_acc"] or 0))):
         b = (r["base"] or "legacy").split("/")[-1]
         f = lambda x, p=3: "" if x is None else f"{x:.{p}f}"
-        lines.append(f"| {r['study']}/{r['trial']} | {b} | {r['seed'] if r['seed'] is not None else ''} | {f(r['dev_acc'])} | {f(r['transfer_acc'])} | {f(r['transfer_brier'])} | {f(r['transfer_conf_err'])} | {f(r['heldout_pairs'],2)} | {f(r['none_present'],2)} | {f(r['perm_flip'],2)} | {'pass' if r['gates_passed'] else 'fail'} | {r['est_usd'] or ''} | {knobs(r['config'])} |")
+        lines.append(f"| {r['study']}/{r['trial']} | {b} | {r['seed'] if r['seed'] is not None else ''} | {f(r['dev_acc'])} | {f(r['transfer_acc'])} | {f(r['transfer_brier'])} | {f(r['transfer_conf_err'])} | {f(r['heldout_pairs'],2)} | {f(r['none_present'],2)} | {f(r['perm_flip'],2)} | {'pass' if r['gates_passed'] else 'fail'} | {r['est_usd'] or ''} | {', '.join(f'{k}={v}' for k, v in knobs(r['config']).items()) or 'defaults'} |")
     return "\n".join(lines) + "\n"
 
 
 def refresh_leaderboard():
     rows = collect()
-    suite_hash = json.loads((ROOT / SUITE / "manifest.json").read_text())
-    dv4 = __import__("kev.suite", fromlist=["digest"]).digest(ROOT / SUITE / "manifest.json")
-    tv4 = __import__("kev.suite", fromlist=["digest"]).digest(ROOT / TRANSFER / "manifest.json")
+    dv4, tv4 = digest(ROOT / SUITE / "manifest.json"), digest(ROOT / TRANSFER / "manifest.json")
     incumbents = {b: incumbent(rows, b, dv4, tv4) for b in BASE_DEFAULTS}
     (ROOT / "runs/leaderboard.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
     (ROOT / "runs/leaderboard.md").write_text(leaderboard_md(rows, incumbents))
@@ -202,7 +208,7 @@ def run_round(base, n, name, seeds, spend_start, spend_cap, timeout=None):
     inc = incumbents.get(base)
     plan = []
     for seed in seeds:
-        plan += propose(rows, base, n, seed, manifest, inc and inc["config"], rng_seed=hash((name, seed)) & 0xFFFF)
+        plan += propose(rows, base, n, seed, manifest, inc and inc["config"], rng_seed=source_seed(seed, name))   # reproducible from the round's name and seed
     plan = plan[:8]
     if not plan: raise SystemExit("nothing new to try in the space at these seeds")
     plan_path = ROOT / "experiments/auto" / f"{name}.json"; plan_path.parent.mkdir(exist_ok=True)
@@ -235,11 +241,11 @@ def plan_section():
     log = [json.loads(l) for l in (ROOT / "runs/autoresearch.jsonl").read_text().splitlines()] if (ROOT / "runs/autoresearch.jsonl").exists() else []
     lines = ["Maintained by `kev.autoresearch`; full table in [`runs/leaderboard.md`](runs/leaderboard.md). Selection uses development partitions only.", ""]
     for b, inc in incumbents.items():
-        lines.append(f"- **{b.split('/')[-1]}** incumbent (v4 suites): transfer {inc['transfer_acc']:.3f}, dev {inc['dev_acc']:.3f}, seeds {inc['seeds']}, knobs `{json.dumps({k: v for k, v in strip_seed(inc['config']).items() if v != DEFAULTS.get(k) and k not in ('base', 'dtype', 'batch', 'accum', 'checkpointing', 'base_revision')})}`" if inc else f"- **{b.split('/')[-1]}**: no eligible trial yet")
+        lines.append(f"- **{b.split('/')[-1]}** incumbent (v4 suites): transfer {inc['transfer_acc']:.3f}, dev {inc['dev_acc']:.3f}, seeds {inc['seeds']}, knobs `{json.dumps(knobs(inc['config']))}`" if inc else f"- **{b.split('/')[-1]}**: no eligible trial yet")
     lines += ["", "| round | base | trials | best transfer | best knobs | incumbent after | spend |", "|---|---|---|---|---|---|---|"]
     for e in log:
         b = e["best"] or {}; ia = e["incumbent_after"] or {}
-        lines.append(f"| {e['round']} | {e['base'].split('/')[-1]} | {e['completed']}/{e['trials']} | {b.get('transfer_acc', float('nan')):.3f} | `{json.dumps({k: v for k, v in (b.get('knobs') or {}).items() if v != DEFAULTS.get(k) and k not in ('base','dtype','batch','checkpointing','base_revision')})}` | {ia.get('transfer_acc', float('nan')):.3f} | ${e['spend_since_start']} |")
+        lines.append(f"| {e['round']} | {e['base'].split('/')[-1]} | {e['completed']}/{e['trials']} | {b.get('transfer_acc', float('nan')):.3f} | `{json.dumps(knobs(b.get('knobs') or {}))}` | {ia.get('transfer_acc', float('nan')):.3f} | ${e['spend_since_start']} |")
     return "\n".join(lines)
 
 
@@ -257,12 +263,11 @@ def compare(studies, reference, tasks=("mmlu", "paws", "qnli", "emotion", "tweet
             r = json.loads((d / "result.json").read_text()); tr = r.get("transfer")
             if not tr: continue
             cfg = r["provenance"]["config"]
-            knobs = {k: v for k, v in cfg.items() if k not in ("base", "dtype", "seed", "batch", "checkpointing", "accum", "base_revision", "perm_frac") and DEFAULTS.get(k) != v and not (k == "epochs" and v == 2) and not (k == "p_none_pair" and v == 0.25)}
             try:
                 b = paired_bootstrap(rows(f"runs/{study}/{d.name}"), ref_rows, metric="acc"); delta, ci = b["macro_acc_delta"], [round(x, 3) for x in b["ci95"]]
             except ValueError:
                 delta, ci = float("nan"), "n/a (different suite)"
-            print(f"{study + '/' + d.name:34} {r['clean']['acc']:6.3f} {tr['clean']['acc']:6.3f} {tr['clean']['brier']:6.3f} {tr['clean']['confident_error_rate']:6.3f} {tr['paired_flip']['both_correct_rate']:6.2f} {delta:+7.3f} {str(ci):>18}  {knobs} {({k: round(tr['tasks'][k]['acc'], 2) for k in tasks if k in tr['tasks']})}")
+            print(f"{study + '/' + d.name:34} {r['clean']['acc']:6.3f} {tr['clean']['acc']:6.3f} {tr['clean']['brier']:6.3f} {tr['clean']['confident_error_rate']:6.3f} {tr['paired_flip']['both_correct_rate']:6.2f} {delta:+7.3f} {str(ci):>18}  {knobs(cfg)} {({k: round(tr['tasks'][k]['acc'], 2) for k in tasks if k in tr['tasks']})}")
 
 
 def release_check(study):
@@ -270,7 +275,7 @@ def release_check(study):
     held-out-pair screen) - a single seed clearing the bar is not enough. Prints the verdict per config."""
     rows = [r for r in collect() if r["study"] == study]
     by_cfg = defaultdict(list)
-    for r in rows: by_cfg[record_digest(strip_seed(r["config"]))].append(r)
+    for r in rows: by_cfg[config_digest(strip_seed(r["config"]))].append(r)
     verdicts = {}
     for h, group in by_cfg.items():
         seeds = sorted(r["seed"] for r in group)

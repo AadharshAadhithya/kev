@@ -19,6 +19,7 @@ import re
 import subprocess
 import sys
 from pathlib import Path
+from typing import NamedTuple
 
 import modal
 
@@ -202,77 +203,23 @@ def base_probe(base: str, name: str, suite: str = "evals/v4/transfer-v4", tasks:
     print(f"spawned probe {name}: call {call.object_id}; pull with: modal volume get kev-runs /probes/{name} runs/probes/")
 
 
-@app.function(image=image, cpu=1, memory=2048, retries=0, timeout=10 * 3600, volumes={RUNS_MOUNT: runs_volume})
-def run_study(name, suite, jobs, gpu):
-    """Server-side fan-out: runs every trial of a study and records the outcome on the volume. Spawned by `launch_detached`
-    so the study survives the local client disconnecting; pull results later with `modal run modal_app.py::pull`."""
-    import time
-    study_dir = Path(RUNS_MOUNT) / name; study_dir.mkdir(parents=True, exist_ok=True)
-    lock = study_dir / "study.lock"
-    runs_volume.reload()
-    if lock.exists():   # a second execution of the same spawn (retry/duplicate) must not launch or overwrite anything
-        return {"study": name, "duplicate_execution": True, "started_by": lock.read_text()}
-    lock.write_text(json.dumps({"started": time.time(), "trials": len(jobs)})); runs_volume.commit()
-    fn = run_trial.with_options(gpu=gpu, retries=0, max_containers=8)
-    started = time.time()
-    results = list(fn.starmap(jobs, return_exceptions=True))
-    summary = {"study": name, "suite": suite, "gpu": gpu, "wall_seconds": time.time() - started,
-               "trials": [{"label": j[2], "ok": not isinstance(r, Exception), "result": None if isinstance(r, Exception) else r, "error": str(r) if isinstance(r, Exception) else None}
-                          for j, r in zip(jobs, results)]}
-    (Path(RUNS_MOUNT) / name).mkdir(parents=True, exist_ok=True)
-    (Path(RUNS_MOUNT) / name / "launch.json").write_text(json.dumps(summary, indent=1))
-    runs_volume.commit()
-    return summary
+class Job(NamedTuple):
+    """The arguments of one run_trial call (spawned or starmapped as *job)."""
+    study: str
+    index: int
+    label: str
+    config: dict
+    suite: str
+    expected_sources: dict
+    git_commit: str
+    existing: str | None
+    transfer: str | None
 
 
-def launch_detached(suite, plan_path, name, gpu, existing=(), transfer=None, budget=20.0, timeout=1800):
-    """Validate locally, then spawn run_study and return immediately. Same admission checks as launch()."""
+def admit_study(suite, plan_path, name, gpu, existing, transfer, budget, timeout):
+    """Validate a study locally before anything is spawned (name, budget bound against the timeout, plan, uncommitted
+    changes) and build the run_trial jobs. Returns (jobs, bound_usd)."""
     from kev.experiment import load_plan
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,79}", name): raise ValueError("study name must be a simple unique identifier")
-    if (ROOT / "runs" / name).exists(): raise FileExistsError("choose a new study name; existing results are immutable")
-    if not 60 <= timeout <= 14400 or not 0 < budget <= 250: raise ValueError("timeout must be 60..14400 seconds and study budget <= $250")
-    trials = load_plan(ROOT / suite, ROOT / plan_path) if plan_path else []
-    upper = compute_bound(gpu, timeout, len(trials) + len(existing))
-    if upper > budget: raise ValueError(f"timeout-based compute bound ${upper:.2f} exceeds budget ${budget:.2f}")
-    commit, sources = local_git_commit(), local_source_hashes()
-    if subprocess.run(["git", "status", "--porcelain", "kev", "evals"], cwd=ROOT, capture_output=True, text=True).stdout.strip():
-        print("warning: kev/ or evals/ has uncommitted changes; provenance records the last commit, not the working tree", flush=True)
-    entries = [(None, p) for p in existing] + [(t, None) for t in trials]
-    jobs = [(name, i, Path(ex).name if ex else f"trial-{i}", cfg or {}, suite, sources, commit, ex, transfer) for i, (cfg, ex) in enumerate(entries)]
-    # Every trial is its own independent function call on the *deployed* app (modal deploy modal_app.py): no long-lived
-    # parent whose loss would cancel children, nothing tied to this client. Results land on the volume; `pull` collects them.
-    try:
-        target = modal.Function.from_name(APP_NAME, "run_trial"); target.hydrate()
-        deployed_sources = modal.Function.from_name(APP_NAME, "remote_source_hashes").remote()
-        if deployed_sources != sources:
-            changed = sorted(k for k in set(deployed_sources) | set(sources) if deployed_sources.get(k) != sources.get(k))
-            raise SystemExit(f"deployed app has different kev/*.py than this checkout ({', '.join(changed)}); run `uv run modal deploy modal_app.py` first")
-    except SystemExit:
-        raise
-    except Exception as error:
-        raise SystemExit(f"deployed app not usable ({type(error).__name__}: {str(error)[:120]}); run `uv run modal deploy modal_app.py` first - spawns on the ephemeral app die with this client")
-    fn = target.with_options(gpu=gpu, timeout=timeout, retries=0)
-    calls = [fn.spawn(*job) for job in jobs]
-    (ROOT / "runs").mkdir(exist_ok=True)
-    (ROOT / "runs" / f"{name}.spawn.json").write_text(json.dumps({"name": name, "calls": {j[2]: c.object_id for j, c in zip(jobs, calls)}, "bound_usd": round(upper, 2), "timeout": timeout}))
-    print(f"spawned study {name}: {len(jobs)} independent trial(s) on {gpu}, bound ${upper:.2f}. Pull later: modal run modal_app.py::pull --name {name}", flush=True)
-
-
-def pull_study(study):
-    """Download a study directory from the runs volume into runs/<study> and rank it."""
-    target = ROOT / "runs" / study
-    if target.exists():
-        raise FileExistsError(f"refusing to overwrite local study: {target}")
-    target.parent.mkdir(exist_ok=True)
-    # `modal volume get <vol> /<study> runs/` recreates runs/<study>/... locally, checkpoints included (gitignored)
-    subprocess.run([sys.executable, "-m", "modal", "volume", "get", "kev-runs", f"/{study}", str(target.parent)], check=True)
-    subprocess.run([sys.executable, "-m", "kev.experiment", "--aggregate", "--out", str(target)], check=True, cwd=ROOT)
-    return target
-
-
-def launch(suite, plan_path, name, gpu, existing=(), transfer=None, budget=20.0, timeout=1800):
-    from kev.experiment import load_plan
-
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,79}", name):
         raise ValueError("study name must be a simple unique identifier")
     if (ROOT / "runs" / name).exists():
@@ -288,12 +235,42 @@ def launch(suite, plan_path, name, gpu, existing=(), transfer=None, budget=20.0,
     if subprocess.run(["git", "status", "--porcelain", "kev", "evals"], cwd=ROOT, capture_output=True, text=True).stdout.strip():
         print("warning: kev/ or evals/ has uncommitted changes; provenance records the last commit, not the working tree", flush=True)
     entries = [(None, p) for p in existing] + [(t, None) for t in trials]
-    jobs = [(name, i, Path(ex).name if ex else f"trial-{i}", cfg or {}, suite, sources, commit, ex, transfer) for i, (cfg, ex) in enumerate(entries)]
+    return [Job(name, i, Path(ex).name if ex else f"trial-{i}", cfg or {}, suite, sources, commit, ex, transfer) for i, (cfg, ex) in enumerate(entries)], upper
+
+
+def deployed_run_trial(sources):
+    """run_trial on the *deployed* app (modal deploy modal_app.py), after checking it ships this checkout's kev/*.py.
+    Spawns on the ephemeral app die with the local client; the deployed app has no parent to lose."""
+    try:
+        target = modal.Function.from_name(APP_NAME, "run_trial"); target.hydrate()
+        deployed_sources = modal.Function.from_name(APP_NAME, "remote_source_hashes").remote()
+    except Exception as error:
+        raise SystemExit(f"deployed app not usable ({type(error).__name__}: {str(error)[:120]}); run `uv run modal deploy modal_app.py` first")
+    if deployed_sources != sources:
+        changed = sorted(k for k in set(deployed_sources) | set(sources) if deployed_sources.get(k) != sources.get(k))
+        raise SystemExit(f"deployed app has different kev/*.py than this checkout ({', '.join(changed)}); run `uv run modal deploy modal_app.py` first")
+    return target
+
+
+def launch_detached(suite, plan_path, name, gpu, existing=(), transfer=None, budget=20.0, timeout=1800):
+    """Validate locally, spawn every trial as its own call on the deployed app, record the call ids and return. Results
+    land on the volume; `pull --name` collects and ranks them."""
+    jobs, upper = admit_study(suite, plan_path, name, gpu, existing, transfer, budget, timeout)
+    fn = deployed_run_trial(local_source_hashes()).with_options(gpu=gpu, timeout=timeout, retries=0)
+    calls = [fn.spawn(*job) for job in jobs]
+    (ROOT / "runs").mkdir(exist_ok=True)
+    (ROOT / "runs" / f"{name}.spawn.json").write_text(json.dumps({"name": name, "calls": {j.label: c.object_id for j, c in zip(jobs, calls)}, "bound_usd": round(upper, 2), "timeout": timeout}))
+    print(f"spawned study {name}: {len(jobs)} independent trial(s) on {gpu}, bound ${upper:.2f}. Pull later: modal run modal_app.py::pull --name {name}", flush=True)
+
+
+def launch(suite, plan_path, name, gpu, existing=(), transfer=None, budget=20.0, timeout=1800):
+    """Attached variant: run the trials on this app, wait, then pull and rank. Dies with the local client."""
+    jobs, _ = admit_study(suite, plan_path, name, gpu, existing, transfer, budget, timeout)
     fn = run_trial.with_options(gpu=gpu, timeout=timeout, retries=0, max_containers=8)
     print(f"launching {len(jobs)} trial(s) on {gpu} for study {name}", flush=True)
     results = list(fn.starmap(jobs, return_exceptions=True))
     for job, result in zip(jobs, results):
-        print(job[2], result if isinstance(result, Exception) else json.dumps(result), flush=True)
+        print(job.label, result if isinstance(result, Exception) else json.dumps(result), flush=True)
     failures = [r for r in results if isinstance(r, Exception)]
     if len(failures) == len(results):
         raise SystemExit(f"all {len(results)} trial(s) failed; nothing to pull")
@@ -303,10 +280,29 @@ def launch(suite, plan_path, name, gpu, existing=(), transfer=None, budget=20.0,
         raise SystemExit(1)
 
 
+def pull_study(study):
+    """Download a study directory from the runs volume into runs/<study> and rank it."""
+    target = ROOT / "runs" / study
+    if target.exists():
+        raise FileExistsError(f"refusing to overwrite local study: {target}")
+    target.parent.mkdir(exist_ok=True)
+    # `modal volume get <vol> /<study> runs/` recreates runs/<study>/... locally, checkpoints included (gitignored)
+    subprocess.run([sys.executable, "-m", "modal", "volume", "get", "kev-runs", f"/{study}", str(target.parent)], check=True)
+    subprocess.run([sys.executable, "-m", "kev.experiment", "--aggregate", "--out", str(target)], check=True, cwd=ROOT)
+    return target
+
+
+def volume_names(path):
+    """Names of the entries directly under `path` on the runs volume, by kind: (directories, files)."""
+    from modal.volume import FileEntryType
+    entries = runs_volume.listdir(path)
+    return ({Path(e.path).name for e in entries if e.type == FileEntryType.DIRECTORY}, {Path(e.path).name for e in entries if e.type == FileEntryType.FILE})
+
+
 @app.local_entrypoint()
 def study(suite: str, plan: str, name: str, gpu: str = GPU, existing: str = "", transfer: str = "", budget: float = 20.0, timeout: int = 1800, detached: bool = True):
-    """detached (default): spawn the fan-out server-side and return; `pull --name` afterwards. detached=False keeps the old
-    attached behaviour (pulls automatically, but dies with the local client)."""
+    """detached (default): every trial is spawned on the deployed app and the command returns; `pull --name` afterwards.
+    detached=False runs attached (pulls automatically, but dies with the local client)."""
     if detached: launch_detached(suite, plan, name, gpu, [e for e in existing.split(",") if e], transfer or None, budget, timeout)
     else: launch(suite, plan, name, gpu, [e for e in existing.split(",") if e], transfer or None, budget, timeout)
 
@@ -315,12 +311,12 @@ def study(suite: str, plan: str, name: str, gpu: str = GPU, existing: str = "", 
               volumes={RUNS_MOUNT: runs_volume, HF_MOUNT: hf_cache}, secrets=secrets)
 def run_resume(study, trial, suite, transfer, expected_sources, git_commit):
     """Finish calibration/development/transfer scoring for an interrupted trial whose checkpoint is complete."""
-    from kev.experiment import execute_trial
+    from kev.experiment import resume_trial
     os.environ["KEV_GIT_COMMIT"] = git_commit
     out = Path(RUNS_MOUNT) / study / trial
     runs_volume.reload()
     try:
-        report, _ = execute_trial(None, Path("/root") / suite, out, expected_sources, "cuda", None, Path("/root") / transfer if transfer else None, resume=True)
+        report, _ = resume_trial(Path("/root") / suite, out, expected_sources, "cuda", Path("/root") / transfer if transfer else None)
     finally:
         runs_volume.commit()
     return {"trial": trial, "objective": report["objective"], "transfer_acc": (report.get("transfer") or {}).get("clean", {}).get("acc")}
@@ -329,24 +325,20 @@ def run_resume(study, trial, suite, transfer, expected_sources, git_commit):
 @app.local_entrypoint()
 def resume(study: str, suite: str, transfer: str = "evals/v4/transfer-v4", gpu: str = GPU):
     """Spawn evaluation for every trial in a study that has checkpoint/head.pt but no result.json."""
-    entries = json.loads(subprocess.run([sys.executable, "-m", "modal", "volume", "ls", "kev-runs", f"/{study}", "--json"], capture_output=True, text=True, cwd=ROOT).stdout or "[]")
-    trials = sorted(Path(e["filename"]).name for e in entries if e.get("type") == "dir")
     fn = modal.Function.from_name(APP_NAME, "run_resume").with_options(gpu=gpu)
-    for t in trials:
-        files = {Path(e["filename"]).name for e in json.loads(subprocess.run([sys.executable, "-m", "modal", "volume", "ls", "kev-runs", f"/{study}/{t}", "--json"], capture_output=True, text=True, cwd=ROOT).stdout or "[]")}
-        ck = {Path(e["filename"]).name for e in json.loads(subprocess.run([sys.executable, "-m", "modal", "volume", "ls", "kev-runs", f"/{study}/{t}/checkpoint", "--json"], capture_output=True, text=True, cwd=ROOT).stdout or "[]")} if "checkpoint" in files else set()
-        if "head.pt" in ck and "result.json" not in files:
-            c = fn.spawn(study, t, suite, transfer, local_source_hashes(), local_git_commit()); print(f"resuming {study}/{t}: call {c.object_id}")
+    sources, commit = local_source_hashes(), local_git_commit()
+    for t in sorted(volume_names(f"/{study}")[0]):
+        dirs, files = volume_names(f"/{study}/{t}")
+        finished = "checkpoint" in dirs and "head.pt" in volume_names(f"/{study}/{t}/checkpoint")[1]
+        if finished and "result.json" not in files:
+            c = fn.spawn(study, t, suite, transfer, sources, commit); print(f"resuming {study}/{t}: call {c.object_id}")
         else:
             print(f"skip {study}/{t}: {'has result' if 'result.json' in files else 'no finished checkpoint'}")
 
 
 @app.local_entrypoint()
 def pull(name: str):
-    """Pull a finished (or partially finished) study from the volume and rank it."""
-    entries = json.loads(subprocess.run([sys.executable, "-m", "modal", "volume", "ls", "kev-runs", f"/{name}", "--json"], capture_output=True, text=True, cwd=ROOT).stdout or "[]")
-    if not any(e.get("filename", "").endswith("launch.json") for e in entries):
-        print(f"{name}: launch.json not on the volume yet (study still running or never finished); pulling what exists", flush=True)
+    """Pull a finished (or partially finished) study from the volume and rank the trials that have a result.json."""
     target = pull_study(name)
     print(f"pulled {target}", flush=True)
 

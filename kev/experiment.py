@@ -44,6 +44,7 @@ RANGES = {"epochs": (1, 5), "seed": (0, 10000), "lr": (1e-6, 0.001), "lora": (1,
           "p_none": (0, 0.4), "p_none_distract": (0, 0.4), "p_distract": (0, 0.4), "p_none_pair": (0, 1), "synthetic_repeat": (1, 6), "public_frac": (0.05, 1.0), "head_lr": (0, 0.01), "weight_decay": (0, 0.3), "anchor_w": (0, 5)}
 CHOICES = {"dtype": ("fp32", "bf16"), "checkpointing": (0, 1), "option_isolation": (0, 1), "special_embeddings": (0, 1), "head_dim": (128, 256, 512, 1024),
            "lora_targets": ("all", "dense", "attn", "qv"), "weights_dtype": ("fp32", "bf16")}
+CHOICE_DEFAULTS = {"dtype": "fp32", "checkpointing": 0, "option_isolation": 0, "special_embeddings": 0, "head_dim": 256, "lora_targets": "all", "weights_dtype": "fp32"}   # kev.train's defaults for the categorical knobs
 
 
 def validated_trial(value, manifest):
@@ -163,50 +164,64 @@ def gate_report(report, checks, baseline=None):
     return {"passed": all(gates.values()), "checks": gates, "policy": "Research screening only: 1e-3 isolation; 5pp task regression; 70% heldout pair correctness; <=10% confident errors; no automatic release."}
 
 
-def execute_trial(config, suite, output, expected_sources, device, existing=None, transfer_suite=None, resume=False):
+def execute_trial(config, suite, output, expected_sources, device, existing=None, transfer_suite=None):
     """Train (unless `existing` points at a checkpoint), calibrate, score development, run mechanism checks.
-    Writes result.json (without cross-trial comparisons) and returns (report, rows). Safe to run in isolation.
-
-    resume=True: the trial directory already holds a finished checkpoint from an interrupted run (training provenance
-    is kept as written by the trainer); only the evaluation stages run here, on `device`, and partial evaluation
-    outputs are regenerated. Never touches the checkpoint."""
+    Writes result.json (without cross-trial comparisons) and returns (report, rows). Safe to run in isolation."""
     output = Path(output)
     started = time.perf_counter()
-    suite_hash = digest(Path(suite) / "manifest.json")
-    if resume:
-        if not (output / "checkpoint" / "head.pt").exists() or (output / "result.json").exists():
-            raise ValueError("resume needs a finished checkpoint and no result.json")
-        provenance = json.loads((output / "provenance.json").read_text())
-        changed = {k for k in set(provenance["source_hashes"]) | set(expected_sources) if provenance["source_hashes"].get(k) != expected_sources.get(k)}
-        if provenance["suite_sha256"] != suite_hash or changed & EVALUATOR_FILES:
-            raise ValueError(f"resume refused: suite or evaluator code differs from the interrupted trial: {sorted(changed & EVALUATOR_FILES)}")
-        provenance.update(eval_device=device, resumed_evaluation=True, resumed_source_hashes=expected_sources,
-                          resumed_with_changed_non_evaluator_files=sorted(changed), resumed_git_commit=git_commit())
-        expected_sources = expected_sources   # the post-trial drift check below compares against the current tree
-        for part in ("calibration", "development", "transfer"):
-            if (output / part).exists(): shutil.rmtree(output / part)   # partial evaluation output only
-        write_json(output / "provenance.json", provenance)
-    else:
-        output.mkdir(parents=True, exist_ok=False)
-        provenance = {"config": config, "config_sha256": record_digest(config), "suite_sha256": suite_hash,
-                      "source_hashes": expected_sources, "git_commit": git_commit(),
-                      "platform": platform.platform(), "torch": torch.__version__, "device": device,
-                      "gpu": torch.cuda.get_device_name(0) if device == "cuda" else None,
-                      "legacy_checkpoint": existing is not None}
-        write_json(output / "provenance.json", provenance)
+    output.mkdir(parents=True, exist_ok=False)
+    provenance = {"config": config, "config_sha256": record_digest(config), "suite_sha256": digest(Path(suite) / "manifest.json"),
+                  "source_hashes": expected_sources, "git_commit": git_commit(),
+                  "platform": platform.platform(), "torch": torch.__version__, "device": device,
+                  "gpu": torch.cuda.get_device_name(0) if device == "cuda" else None,
+                  "legacy_checkpoint": existing is not None}
+    write_json(output / "provenance.json", provenance)
     if source_hashes() != expected_sources:
         raise ValueError("source code changed during the study")
-    run = str(existing) if existing else str(output / "checkpoint")
-    if not existing and not resume:
-        args = [sys.executable, "-m", "kev.train", "--suite", str(suite), "--out", run, "--device", device]
-        for key, value in config.items():
-            args += ["--" + key, str(value)]
-        with (output / "train.log").open("w") as log, subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=ROOT) as proc:
-            for line in proc.stdout:            # tee: the file is the record, stdout gives live progress in containers
-                log.write(line); log.flush()
-                if line.startswith(("ep", "saved", "device", "ablation")) or "Error" in line: print(line.rstrip(), flush=True)
-        if proc.returncode:
-            raise subprocess.CalledProcessError(proc.returncode, args)
+    run = str(existing) if existing else train_checkpoint(config, suite, output, device)
+    return score_trial(run, suite, output, expected_sources, device, provenance, transfer_suite, started, legacy=existing is not None)
+
+
+def resume_trial(suite, output, expected_sources, device, transfer_suite=None):
+    """Finish a trial whose training completed but whose evaluation was interrupted: the checkpoint and the trainer's
+    provenance are kept, partial evaluation outputs are regenerated on `device`. Refuses if the suite or any evaluator
+    file differs from the interrupted trial."""
+    output = Path(output)
+    if not (output / "checkpoint" / "head.pt").exists() or (output / "result.json").exists():
+        raise ValueError("resume needs a finished checkpoint and no result.json")
+    provenance = json.loads((output / "provenance.json").read_text())
+    changed = {k for k in set(provenance["source_hashes"]) | set(expected_sources) if provenance["source_hashes"].get(k) != expected_sources.get(k)}
+    if provenance["suite_sha256"] != digest(Path(suite) / "manifest.json") or changed & EVALUATOR_FILES:
+        raise ValueError(f"resume refused: suite or evaluator code differs from the interrupted trial: {sorted(changed & EVALUATOR_FILES)}")
+    provenance.update(eval_device=device, resumed_evaluation=True, resumed_source_hashes=expected_sources,
+                      resumed_with_changed_non_evaluator_files=sorted(changed), resumed_git_commit=git_commit())
+    for part in ("calibration", "development", "transfer"):
+        if (output / part).exists(): shutil.rmtree(output / part)   # partial evaluation output only
+    write_json(output / "provenance.json", provenance)
+    if source_hashes() != expected_sources:
+        raise ValueError("source code changed during the study")
+    return score_trial(str(output / "checkpoint"), suite, output, expected_sources, device, provenance, transfer_suite, time.perf_counter(), legacy=False)
+
+
+def train_checkpoint(config, suite, output, device):
+    """Run kev.train as a subprocess on the suite's training partition; train.log is the record, stdout gets progress."""
+    run = str(Path(output) / "checkpoint")
+    args = [sys.executable, "-m", "kev.train", "--suite", str(suite), "--out", run, "--device", device]
+    for key, value in config.items():
+        args += ["--" + key, str(value)]
+    with (Path(output) / "train.log").open("w") as log, subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, cwd=ROOT) as proc:
+        for line in proc.stdout:
+            log.write(line); log.flush()
+            if line.startswith(("ep", "saved", "device", "ablation")) or "Error" in line: print(line.rstrip(), flush=True)
+    if proc.returncode:
+        raise subprocess.CalledProcessError(proc.returncode, args)
+    return run
+
+
+def score_trial(run, suite, output, expected_sources, device, provenance, transfer_suite, started, legacy):
+    """Calibrate on the calibration partition, score development (and the transfer suite), run the mechanism checks, and
+    write result.json. `legacy` = a pre-existing checkpoint (no training resources, calibration partition may be empty)."""
+    output = Path(output); suite_hash = provenance["suite_sha256"]
     # raw logits: the trial fits its own temperature on the calibration partition below. A backbone trained in bf16 weights
     # (weights_dtype) is loaded in bf16 by the checkpoint itself.
     predictor = LocalPredictor(run, device, LoadOptions(temperature=1.0))
@@ -225,7 +240,7 @@ def execute_trial(config, suite, output, expected_sources, device, existing=None
                                "suite_sha256": suite_hash, "n": sum(r["variant"] == "clean" for r in calibration_rows)}
             write_json(output / "calibration/temperature.json", calibration_fit)
         else:
-            if not existing:
+            if not legacy:
                 raise ValueError("training studies require a nonempty calibration partition")
             temperature, calibration_fit = 1.0, {"temperature": 1.0, "split": None, "n": 0}
         records = load_split(suite, "development")
@@ -245,7 +260,7 @@ def execute_trial(config, suite, output, expected_sources, device, existing=None
     report["transfer"] = transfer
     report.update(provenance=provenance, mechanism_checks=checks, gates=gate_report(report, checks), calibration_fit=calibration_fit,
                   wall_seconds=time.perf_counter() - started, promotable=False, test_evaluated=False)
-    if not existing:
+    if not legacy:
         report["training_resources"] = json.loads((Path(run) / "training_metrics.json").read_text())
     write_json(output / "result.json", report)
     return report, rows
@@ -296,14 +311,12 @@ def aggregate(study_dir):
 
 
 def load_plan(suite, plan_path):
-    from kev.data import EVAL_ONLY
+    """Validated trials of a study plan, after checking that the suite's partitions verify and its training partition
+    obeys the trainable / eval-only policy. The locked test is not read."""
     manifest = json.loads((Path(suite) / "manifest.json").read_text())
-    for split in ("train", "calibration", "development"):
-        load_split(suite, split)
-    forbidden = {r["_meta"]["source"] for r in load_split(suite, "train")} & set(EVAL_ONLY)
-    if forbidden:
-        raise ValueError(f"suite training partition contains eval-only sources: {sorted(forbidden)}")
     validate_training(load_split(suite, "train"), manifest)
+    for split in ("calibration", "development"):
+        load_split(suite, split)
     plan = json.loads(Path(plan_path).read_text())
     if not isinstance(plan, list) or not 1 <= len(plan) <= 8:
         raise ValueError("plan must contain 1..8 bounded trials")
@@ -327,11 +340,11 @@ def main():
         aggregate(a.out); return
     if a.resume:
         if not a.suite: ap.error("--suite is required with --resume")
-        suite = Path(a.suite).resolve(); expected = None
+        suite = Path(a.suite).resolve()
         for directory in sorted(Path(a.out).iterdir()):
             if (directory / "checkpoint" / "head.pt").exists() and not (directory / "result.json").exists():
                 print(f"Resuming evaluation for {directory.name}", flush=True)
-                execute_trial(None, suite, directory, source_hashes(), a.device, None, Path(a.transfer).resolve() if a.transfer else None, resume=True)
+                resume_trial(suite, directory, source_hashes(), a.device, Path(a.transfer).resolve() if a.transfer else None)
         if (Path(a.out) / "results.jsonl").exists(): (Path(a.out) / "results.jsonl").unlink()
         aggregate(a.out); return
     if not a.plan or not a.suite:

@@ -64,7 +64,7 @@ def remote_source_hashes():
     return source_hashes()
 
 
-@app.function(image=image, gpu=GPU, cpu=2, memory=(32768, 49152), max_containers=8, retries=0, timeout=14400,
+@app.function(image=image, gpu=GPU, cpu=4, memory=(65536, 196608), max_containers=8, retries=0, timeout=14400,   # a 35B-A3B bf16 checkpoint (70 GB) is staged through host memory while loading; the old 48 GB cap stalled the container
               volumes={RUNS_MOUNT: runs_volume, HF_MOUNT: hf_cache}, secrets=secrets)
 def run_trial(study, index, label, config, suite, expected_sources, git_commit, existing=None, transfer=None):
     """One trial in one container. `existing` is a checkpoint path on the runs volume or a Hub id (legacy scoring)."""

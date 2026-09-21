@@ -109,6 +109,30 @@ As registered, **no replication, fresh threshold-calibration read, final-test re
 
 Workspace metering initially showed $403.87 after the pass, then revised to **$398.32** on the final check: about **$6.18 above the $392.14 starting reading**, subject to billing lag and workspace attribution. Both observations are retained in the outcome summary; neither is an exact per-trial invoice. The authorized ceiling is $1,000, not a target to spend. The successful screen's conservative function-execution admission bound was $18.92, excluding startup/storage. No historical benchmark file or published checkpoint was overwritten.
 
+### Training-data investigation after the negative screen
+
+Analysis first, no training launched. Where the current checkpoints fail on the rule tasks ([`runs/binding-diagnostic-v1/report.json`](runs/binding-diagnostic-v1/report.json), [`scripts/build_binding_diagnostic.py`](scripts/build_binding_diagnostic.py)):
+
+- **Every Kev-4B rule error on `transfer-v4` development involves an `elapsed` (date-difference) atom**: 0.78 on structures with one, 1.00 on the 64 without; with `KEV_DATE_FACTS=1` 0.94. The 564 compositional training records with `elapsed` atoms never state a day count. Errors are not near the threshold (they occur at a +10-day margin too), so this is absent arithmetic, not off-by-one.
+- **Kev-9B's ten rule errors sit in four generated groups** (three renderings each), all confident `accept` on `reject` labels, all with `match` ("X is the same person as Y") or `elapsed` atoms. On the existing rows 9B scored 0/6 when a compared name recurred elsewhere in the case — but those six items are two groups.
+
+A fresh eval-only diagnostic (560 records, code labels, new seed, disjoint from every frozen suite; inference only, ~$2) tested both readings with real sample sizes:
+
+| stratum (n) | Kev-4B | Kev-9B |
+|---|---|---|
+| match true (120) | 0.992 | 0.992 |
+| mismatch, clean (120) | 0.975 | 0.967 |
+| mismatch, decoy name in another role (120) | 0.917 | 0.967 |
+| mismatch, second matching pair shares a name (120) | 0.967 | 1.000 |
+| elapsed rule, dates only (40) | 0.650 | 0.750 |
+| same cases with the day count stated (40) | **1.000** | **0.975** |
+
+**H1 (dates) confirmed:** 14 (4B) and 9 (9B) paired cases flip from wrong to right when the day count is stated; none flip back. The models already use a stated count; what they cannot do is subtract. That makes it a **serving question, not a training-data one**: training on day-count renderings would not change the plain case, and the earlier ablations showed fine-tuning erodes rather than teaches the arithmetic. The decision to take is whether `KEV_DATE_FACTS` becomes the serving default (development accuracy 0.797 → 0.820 at 4B, 0.822 → 0.828 at 9B, no observed harm elsewhere) — a product choice, still reported as preprocessing.
+
+**H2 (name-co-occurrence shortcut) not supported:** at 9B the decoy strata equal the clean stratum. The 0/6 was two correlated groups — exactly the small-sample trap the audit warned about. Kev-4B shows a small effect (0.917 vs 0.975, 9 of 10 errors answer `accept`), worth at most ~1 pp on rule tasks; decoy-augmented training data is not a priority.
+
+**Not pursued:** PAWS-style role binding in natural text. There is no permitted programmatic source that yields reliable labels for swapped-role paraphrases, and PAWS itself stays eval-only; this would need human-labelled data and its own registration.
+
 ### Superseded initial round-3 proposal (retained for the research record)
 
 The draft below predates the metric/failure audit. Its causal claims, teacher identity, budget and timing estimates, temperature-ordering argument, and test-selection procedure are superseded by the registered execution protocol above; they are not instructions for this run.

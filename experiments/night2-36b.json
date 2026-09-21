@@ -1,6 +1,6 @@
 [
  {
-  "epochs": 1,
+  "epochs": 2,
   "batch": 2,
   "accum": 4,
   "dtype": "bf16",
@@ -13,7 +13,7 @@
   "weights_dtype": "bf16"
  },
  {
-  "epochs": 1,
+  "epochs": 2,
   "batch": 2,
   "accum": 4,
   "dtype": "bf16",

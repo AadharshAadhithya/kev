@@ -2,14 +2,14 @@
 
 This file is the living plan: where Kev stands, what runs next and the criteria decided before the runs, and open questions. Completed plans stay as records ([`PLAN_Qwen35.md`](PLAN_Qwen35.md), the Qwen3.5 port, done 2026-09-20). The next proposal is [`PLAN_27b.md`](PLAN_27b.md) (Qwen3.8-27B, question-side LoRA, long documents; written 2026-09-21 after reviewing Solomon). Everything older is kept below under **History**, dated.
 
-## Where we stand (2026-09-20, evening)
+## Where we stand (2026-09-21, midday)
 
 - **Family:** Kev-0.8B / 4B / 9B on Qwen3.5 bases, one recipe (`decision-v7`, LoRA r=16, lr 1e-4 / 5e-5 / 5e-5) plus the 2026-09-21 dates + unknowable delta. Locked test, out of domain: 0.684 / 0.837 / **0.852**; Jev 0.857 on the development items. Pre-delta weights at Hub tag `v7-base`; Qwen3 checkpoints published as the previous generation.
 - **Gap to Jev (pre-delta Kev-9B, `transfer-v4` dev, 4.5 pp overall; 3.5 pp after the delta):** knowledge (MMLU 0.74 vs 0.90; MMLU-Pro 0.545 vs 0.84) — the untrained base scores the same, so this is base capacity; date arithmetic (`deadline` 0.72 vs 0.93) — any LoRA fine-tune on our format erodes the base's skill (0.82 → 0.72), while the readout is intact (giving the model the day count yields 0.93–1.0, issue #8); calibration — Brier 0.291 vs 0.211, **coverage at ≤ 5 % error 0.53 vs 0.70**, confident errors 7.5 % vs 3.7 %; robustness — assertion-style Noul instructions ("The customer sounds angry.") drove Kev-4B to 0.79 vs Jev 0.91 on scienthoon's tickets.
 - **Tools now available:** `--init_from` delta fine-tunes from a released checkpoint (minutes, not hours); `--data` JSONL for custom records; `transfer-v9` (MMLU-Pro, buried, unknowable) and the SemIf / scienthoon external suites; coverage-at-error-budget and unknowable metrics in `kev.benchmark`.
 - **Budget:** ~$475 of the $500 overnight authorization spent (family, Qwen3.5 port, night 2).
 
-## Tonight's autoresearch (2026-09-20 → 21)
+## Round 2 autoresearch (2026-09-20 → 21) — done; results below
 
 Ordered by expected value. Each trial is either a **delta** (warm start from the released checkpoint, new records mixed with a replay sample of `decision-v7`, lr 2e-5, 1 epoch) or a **probe** (no training). Selection on development partitions only; one locked read per adopted candidate.
 
@@ -52,11 +52,38 @@ Spend tonight ≈ $105 (probes $14, deltas 12 × ~$1.5, dense $5, benches ~$15, 
 3. **`date_facts` preprocessor** shipped opt-in (`KEV_DATE_FACTS=1`), documented as preprocessing with separate numbers.
 4. The Qwen3.6-35B-A3B checkpoint stays a research artifact.
 
+## Round 3 autoresearch — training-side calibration (proposed 2026-09-21; not started)
+
+**Why.** After the built-in temperature, Kev's probabilities have the right *scale* — Kev-9B out-of-domain ECE 0.042, confident errors 4.0 % ([card](docs/model-cards/kev-9b.md); Jev 0.049 / 3.7 % on the same items, [`runs/jev-transfer-v4/report.json`](runs/jev-transfer-v4/report.json)) — but not the right *order*. Coverage at a ≤ 5 % error budget, the share of decisions that can be accepted in confidence order before the accepted set exceeds 5 % error ([`kev/benchmark.py: coverage_at_error`](kev/benchmark.py), the metric from [AbdelStark/jev-benchmarks](https://github.com/AbdelStark/jev-benchmarks)), is **0.45 at 9B and 0.57 at 4B vs Jev's 0.70**. A temperature is monotone within a question, so it cannot move this ([`scripts/temperature_groups.py`](scripts/temperature_groups.py): coverage 0.53 → 0.52 at T = 2.0). The ceiling at Kev-9B's accuracy (0.822) is 0.86 if confidence ranked correctness perfectly; the gap to Jev is ordering, not accuracy.
+
+**Where the ordering fails** (served probabilities, `transfer-v4` development, [`runs/night2-9b-du/00-trial-0/transfer/rows.json`](runs/night2-9b-du/00-trial-0/transfer/rows.json)): 26 of 656 answers are wrong at ≥ 0.9, and **16 of them are PAWS** (adversarial paraphrase pairs); at 4B, 10 of 17. Across all errors, 59 % are on the three noisy-label sources (TweetEval, PAWS, Emotion), which are 37 % of the items. The training loss is hard-label cross-entropy ([`kev/train.py: question_loss`](kev/train.py)), which asks for certainty on items that are genuinely ambiguous — the textbook cause of over-confidence in fine-tuned classifiers ([Guo et al., 2017](https://arxiv.org/abs/1706.04599)).
+
+**What to try** — each is a flag on `question_loss`, run as a **delta** from the released checkpoint (`--init_from`, replay 2000, lr 2e-5, one epoch: ~15 min / ~$1.50 at 9B, [round-2 recipe](#round-2-autoresearch-2026-09-20--21--done-results-below)), then the temperature re-fitted with [`scripts/calibrate_checkpoint.py`](scripts/calibrate_checkpoint.py) because every loss below changes the logit scale.
+
+| # | change | mechanism | reference | cost |
+|---|---|---|---|---|
+| C1 | **Label smoothing** ε ∈ {0.05, 0.1} | soft target (1−ε) on the label, ε/K elsewhere; known to improve calibration, mostly by shrinking confidence uniformly — a baseline that may behave like the temperature | [Müller, Kornblith & Hinton, 2019](https://arxiv.org/abs/1906.02629) | 2 deltas × 2 sizes |
+| C2 | **Focal loss** γ ∈ {1, 2} | down-weights already-confident correct items so the gradient concentrates on hard ones; shown to yield calibrated networks without post-hoc scaling | [Mukhoti et al., 2020](https://arxiv.org/abs/2002.09437) | 2 × 2 |
+| C3 | **Cross-entropy + Brier term** λ ∈ {0.5, 1} | Brier is a proper scoring rule with bounded penalty for confident mistakes; the ordinal RPS term already in the trainer ([`--ord_w`](kev/train.py)) is its ordered cousin | [Gneiting & Raftery, 2007](https://doi.org/10.1198/016214506000001437) | 2 × 2 |
+| C4 | **Confidence penalty** β ∈ {0.05, 0.1} | adds −β·H(p) to the loss: rewards entropy where the label does not dominate | [Pereyra et al., 2017](https://arxiv.org/abs/1701.06548) | 2 × 2 |
+| C5 | **Ambiguity soft targets** on the public sources | where an open teacher (Qwen3.5-9B instruct, SemIf prompt — our strongest untrained readout, 0.747 on `transfer-v4`, [`runs/probes/qwen35-4b-semif-transfer-v4`](runs/probes/qwen35-4b-semif-transfer-v4/report.json)) disagrees with the label at ≥ 0.6, train toward a mixture of label and teacher instead of the hard label; the same mechanism as the unknowable records ([`evals/night2`](evals/night2/manifest.json), [`kev/data.py: materialize target`](kev/data.py)). Targets the actual cause; teacher outputs are open-weight, never Jev's. | [Hinton et al., 2015](https://arxiv.org/abs/1503.02531) (soft targets); our round-2 unknowable result | half a day of data work + 1 × 2 |
+| C6 | **Two-checkpoint averaging** at serve time | averaging two seeds' probabilities improves calibration reliably; doubles serving cost | [Lakshminarayanan et al., 2017](https://arxiv.org/abs/1612.01474) | $0 (existing seeds) |
+
+**Pre-registered rules.**
+- Metric: coverage at ≤ 5 % error on `transfer-v4` development, *served* probabilities (after re-fitting T on the trial's own development rows, never on transfer or test). Secondary: Brier, confident-error rate, `unknowable` share ≥ 0.9 on `transfer-v9` (must not rise above 0.05).
+- Adopt a change if coverage improves by **≥ +5 pp** with accuracy within 1 pp of the released checkpoint (paired, record-clustered bootstrap, [`kev.benchmark.paired_bootstrap`](kev/benchmark.py)); report every trial regardless.
+- If no delta clears the bar, one full retrain at 9B with the best-looking loss (~$7, 90 min) before concluding that calibration needs the full run rather than a touch-up.
+- Winners get one locked read and replace the released checkpoint under the same name, with the raw and served columns in the card.
+- Expectation stated in advance: partial — 9B 0.45 → 0.55–0.60. Closing to 0.70 probably needs accuracy gains too (coverage and accuracy are coupled).
+
+**Cost and time.** ~20 deltas ≈ $30, ~4 h wall; C5's data step half a day; locked reads and republish the next morning. Fits the remaining round-2 budget; does not draw on the 27B credits ([`PLAN_27b.md`](PLAN_27b.md)).
+
 ## Open questions
 
 - Why does LoRA fine-tuning on classification-shaped data erase multi-step latent computation (dates) while leaving recall (MMLU) intact? Freezing the DeltaNet layers does not help (trial 5), and on the post-trained 3.6 base the skill *survives* (0.88 → 0.95), so the erosion is specific to Base checkpoints. Layer-wise LoRA ablation and a post-trained 9B (Qwen3.5-9B instruct) are the next probes.
 - Answered for tonight: the 35B-A3B step buys knowledge (+7 MMLU) and dates, costs noisy-label classification and calibration, nets +1 pp. A post-trained *dense* 9B is the untested middle.
 - Does the unknowable-record training transfer to *unseen* kinds of missing evidence (scienthoon's org-rule priority is the external test)?
+- Is Kev's over-confidence on PAWS a label-noise problem (the pairs are adversarially close) or a capability one? C5 in round 3 separates them: if teacher-label disagreement predicts the confident errors, it is the former.
 
 ---
 

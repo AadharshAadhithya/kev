@@ -36,3 +36,5 @@ TRIAL 2a RESULT (temperature, no GPU) — 21:05
 - score-type OOD (deadline, 3-level) is where confident errors live: 9B conf-err 20%, 4B 40%, 0.8B 60%. Temperature can't fix it (T fitted on K5 doesn't apply). Date-facts delta is the fix.
 - ACTION: report "calibrated (single T=2.0, fitted in-distribution)" as a separate row in cards/README; add KEV_TEMPERATURE to kev.serve (opt-in) — after the deltas land.
 - night2-4b-dense failed (argparse choices lacked dense); relaunched as night2-4b-dense2 after fix
+- GPQA-diamond is gated (auto-approve on click); needs Jared to accept terms at hf.co/datasets/Idavidrein/gpqa before we can freeze it.
+- serve: KEV_TEMPERATURE added (opt-in). Cards to get a 'calibrated (T=2.0)' row.

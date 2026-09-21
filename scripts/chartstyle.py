@@ -38,6 +38,7 @@ AMBER = {1000: oklch_to_hex(0.3083, 0.099, 45.48), 900: oklch_to_hex(0.5279, 0.1
 GREEN = {900: oklch_to_hex(0.5175, 0.1453, 147.65), 700: oklch_to_hex(0.6458, 0.1746, 147.27)}
 RED = {900: oklch_to_hex(0.5499, 0.232, 25.29), 700: oklch_to_hex(0.6256, 0.2524, 23.03)}
 
+BG = "white"
 TEXT, TEXT2, RULE, GRID = GRAY[1000], GRAY[900], GRAY[500], GRAY[400]
 # series roles: the Kev family is one hue stepped by size; the hosted reference is a second hue; untrained bases neutral
 KEV = {"kev-9b": BLUE[1000], "kev-8b": BLUE[1000], "kev-4b": BLUE[900], "kev-0.8b": oklch_to_hex(0.72, 0.13, 256), "kev-0.6b": oklch_to_hex(0.72, 0.13, 256),
@@ -45,6 +46,13 @@ KEV = {"kev-9b": BLUE[1000], "kev-8b": BLUE[1000], "kev-4b": BLUE[900], "kev-0.8
 HOLLOW = {"kev-0.5b", "kev-8b-qwen3", "kev-4b-qwen3", "kev-0.6b-qwen3"}   # superseded checkpoints are drawn outlined / hatched so they read as "previous", not as extra sizes
 JEV = AMBER[700]
 NEUTRAL = GRAY[500]
+
+# dark theme: black background, the gray scale inverted, the Kev hue stepped the other way (largest = brightest) so it stays legible on black
+DARK = {"BG": "#000000", "TEXT": oklch_to_hex(0.93, 0, 0), "TEXT2": oklch_to_hex(0.72, 0, 0), "RULE": oklch_to_hex(0.38, 0, 0), "GRID": oklch_to_hex(0.27, 0, 0),
+        "NEUTRAL": oklch_to_hex(0.48, 0, 0),
+        "KEV": {"kev-9b": oklch_to_hex(0.80, 0.12, 250), "kev-8b": oklch_to_hex(0.80, 0.12, 250), "kev-4b": oklch_to_hex(0.62, 0.22, 258), "kev-0.8b": oklch_to_hex(0.50, 0.17, 258),
+                "kev-0.6b": oklch_to_hex(0.50, 0.17, 258), "kev-0.5b": oklch_to_hex(0.58, 0.10, 256), "kev-8b-qwen3": oklch_to_hex(0.80, 0.12, 250),
+                "kev-4b-qwen3": oklch_to_hex(0.62, 0.22, 258), "kev-0.6b-qwen3": oklch_to_hex(0.50, 0.17, 258)}}
 
 
 def display(name):
@@ -54,7 +62,13 @@ def display(name):
     return re.sub(r"^kev-(\d[\d.]*)b", lambda m: f"Kev-{m.group(1)}B", name)
 
 
-def use_style():
+def use_style(dark=False):
+    """Set rcParams. `dark=True` swaps the module palette in place (KEV is updated, the scalars rebound), so callers that need
+    the background or text colors after this call should read them as `chartstyle.BG` etc., not via `from chartstyle import BG`."""
+    global BG, TEXT, TEXT2, RULE, GRID, NEUTRAL
+    if dark:
+        BG, TEXT, TEXT2, RULE, GRID, NEUTRAL = (DARK[k] for k in ("BG", "TEXT", "TEXT2", "RULE", "GRID", "NEUTRAL"))
+        KEV.update(DARK["KEV"])
     for f in Path.home().joinpath("Library/Fonts").glob("Geist*.ttf"):
         try: font_manager.fontManager.addfont(str(f))
         except Exception: pass
@@ -66,7 +80,7 @@ def use_style():
         "font.family": "Geist" if "Geist" in have else "DejaVu Sans", "font.weight": "regular",
         "text.color": TEXT, "axes.labelcolor": TEXT2, "xtick.color": TEXT2, "ytick.color": TEXT,
         "axes.edgecolor": RULE, "axes.linewidth": 0.8, "axes.grid": False,
-        "figure.facecolor": "white", "savefig.facecolor": "white", "axes.facecolor": "white",
+        "figure.facecolor": BG, "savefig.facecolor": BG, "axes.facecolor": BG,
         "xtick.major.size": 0, "ytick.major.size": 0, "xtick.major.pad": 8, "ytick.major.pad": 10,
         "legend.frameon": False,
     })

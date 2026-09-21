@@ -42,6 +42,7 @@ Image has transformers 5 + fla; mounts `evals/` and `scripts/` at run time (no d
 - Always give the entrypoint (`::main`, `::benchmarks`): the file has several.
 
 ## Gotchas
+- A failed `bench`/`probe` leaves its output directory on the volume; relaunch under a new name (`-2`) or the next run fails with FileExistsError.
 - `RuntimeError: aclose(): asynchronous generator is already running` at the end of a detached run is noise; the result line follows it.
 - Report dicts must not gain top-level keys that collide with benchmark blocks (`unknowable`, `clean`, `tasks`).
 - Modal's HF cache volume (`kev-hf-cache`) persists base weights; first pull of a new base adds minutes.

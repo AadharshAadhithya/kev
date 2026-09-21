@@ -62,14 +62,15 @@ def main(bases: str, suite: str = "evals/v4/transfer-v4", tasks: str = "all", pr
 
 @app.function(image=image, gpu=os.environ.get("KEV_PROBE_GPU", "H100"), cpu=2, memory=(32768, 131072), retries=0, timeout=3600,
               volumes={"/runs": runs_volume, "/root/.cache/huggingface": hf_cache}, secrets=secrets)
-def bench(run, suite, name):
-    """kev.benchmark for a Hub checkpoint on any local suite directory (mounted at run time), written to /runs/bench/<name>."""
+def bench(run, suite, name, flags=""):
+    """kev.benchmark for a Hub checkpoint on any local suite directory (mounted at run time), written to /runs/bench/<name>.
+    flags: extra benchmark switches separated by spaces (e.g. "--date_facts")."""
     import os
     out = Path("/runs/bench") / name
     if out.exists(): raise FileExistsError(f"bench {name} exists")
     try:
         source = ["--data", f"/root/{suite}"] if suite.endswith(".jsonl") else ["--suite", f"/root/{suite}"]     # a .jsonl is a --data file (kev.data.load_records)
-        subprocess.run([sys.executable, "-m", "kev.benchmark", "--run", run, *source, "--out", str(out), "--device", "cuda"], check=True, cwd="/root", env={**os.environ, "PYTHONPATH": "/root"})
+        subprocess.run([sys.executable, "-m", "kev.benchmark", "--run", run, *source, "--out", str(out), "--device", "cuda", *flags.split()], check=True, cwd="/root", env={**os.environ, "PYTHONPATH": "/root"})
     finally:
         runs_volume.commit(); hf_cache.commit()
     return json.loads((out / "report.json").read_text())["clean"]
@@ -77,9 +78,9 @@ def bench(run, suite, name):
 
 @app.local_entrypoint()
 def benchmarks(jobs: str):
-    """jobs: comma-separated run@suite@name triples."""
-    triples = [j.split("@") for j in jobs.split(",")]
-    for (run, suite, name), result in zip(triples, bench.starmap(triples, return_exceptions=True)):
+    """jobs: comma-separated run@suite@name[@flags] entries; flags are extra kev.benchmark switches (e.g. --date_facts)."""
+    triples = [(j.split("@") + [""])[:4] for j in jobs.split(",")]
+    for (run, suite, name, _), result in zip(triples, bench.starmap(triples, return_exceptions=True)):
         if isinstance(result, Exception): print(f"{name}: FAILED {type(result).__name__}: {str(result)[:300]}"); continue
         target = ROOT / "runs" / name; subprocess.run([sys.executable, "-m", "modal", "volume", "get", "kev-runs", f"/bench/{name}", str(target.parent)], check=True)
         print(f"{name}: acc {result['acc']:.3f} brier {result['brier']:.3f}")

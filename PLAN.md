@@ -30,7 +30,7 @@ Deferred, in order: MLX serving for the hybrid on Mac (the release's one regress
 
 ## Results (2026-09-21, 02:30)
 
-Spend tonight ≈ $105 (probes $14, deltas 12 × ~$1.5, dense $5, benches ~$15, locked reads $8, five failed or duplicated 35B launches ~$18, two 35B trials $24). Budget authorization: ~$475 of $500 used. Working notes: `scratchpad.txt`.
+Spend tonight ≈ $105 (probes $14, deltas 12 × ~$1.5, dense $5, benches ~$15, locked reads $8, five failed or duplicated 35B launches ~$18, two 35B trials $24). Budget authorization: ~$475 of $500 used. Working notes were kept in `scratchpad.txt` (deleted; in git history up to f3bae08).
 
 | # | result | verdict |
 |---|---|---|

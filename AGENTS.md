@@ -115,9 +115,9 @@ Repo skills (`.agents/skills`, tracked in git):
 - `kev-verify`: how to prove a change has no regression (unit suites, weight-backed parity, worktree parity harness against main) and ship it as a stacked, reviewed, squash-merged PR.
 - `kev-pr-description`: how to write the PR title and body (the acdlite / sebmarkbage essay style, with a weak/strong pair from a real Kev PR). Read it before opening any PR.
 - `kev-modal-study`: launching, monitoring and pulling Modal studies, base probes, remote benchmarks and new-base smoke checks.
-- `thermonuclear-code-review`: how to apply the installed `thermo-nuclear-code-quality-review` standards to this repo; its table lists the canonical home of each shared rule.
+- `thermonuclear-code-review`: the strict structural review (standards adapted from cursor-team-kit's thermo-nuclear review, the approval bar, and the table of canonical homes for shared rules).
 
-Installed from other repos by `npx skills add` and pinned in `skills-lock.json` (`deslop`, `unslop`, `thermo-nuclear-code-quality-review` from cursor/plugins,
+Installed from other repos by `npx skills add` and pinned in `skills-lock.json` (`deslop`, `unslop` from cursor/plugins,
 `grill-me` from mattpocock/skills); `.agents/skills/modal/` is gitignored and reinstalled with `uv run modal skills install`.
 
 Published from this repo (`skills/kev-finetune`, `npx skills add jaredpalmer/kev@kev-finetune`): the user-facing fine-tuning skill (SKILL.md for agents,

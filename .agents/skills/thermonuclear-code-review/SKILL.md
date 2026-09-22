@@ -1,15 +1,63 @@
 ---
 name: thermonuclear-code-review
-description: Strict structural code review of a Kev branch or PR (duplication of canonical helpers, spaghetti growth, boundaries, missed code-judo simplifications). Use when asked to review a PR, audit a diff, or run a "thermonuclear" review on this repo.
+description: Extremely strict structural review of a Kev branch or PR (code-judo simplifications, spaghetti growth, files past 1k lines, boundaries, duplication of canonical helpers). Use when asked to review a PR, audit a diff, or run a "thermonuclear" or deep code quality review on this repo.
 ---
 
 # Thermonuclear review, Kev edition
 
-The standards are the installed `thermo-nuclear-code-quality-review` skill
-(`.agents/skills/thermo-nuclear-code-quality-review/SKILL.md`, from cursor-team-kit, model invocation disabled): be
-ambitious about structure, no spaghetti growth, no file crossing 1k lines, no thin wrappers or tri-state flags, logic in
-its canonical layer, and its approval bar. Read that file first. This skill adds what a reviewer needs to apply those
-standards to *this* repository.
+A review for implementation quality, not correctness: abstraction quality, maintainability, codebase health. Behaviour
+is assumed to be checked elsewhere (`kev-verify`). Be ambitious: do not stop at local cleanups. Look for the "code
+judo" move, a restructuring that keeps behaviour and makes the change dramatically smaller, more direct and more
+obvious, so that whole branches, helpers, modes or layers disappear. Prefer the version that feels inevitable in
+hindsight. Measure twice, cut once.
+
+The standards below are adapted from cursor-team-kit's `thermo-nuclear-code-quality-review` (once vendored next to
+this file); the second half is what a reviewer needs to apply them to this repository.
+
+## Standards
+
+1. **Be ambitious about structural simplification.** Ask of every meaningful change: can it be reframed so fewer
+   concepts, branches or helper layers are needed? Prefer deleting complexity to rearranging it. A refactor that moves
+   code around without reducing what a reader must hold in their head has not earned its diff.
+2. **No file crosses 1,000 lines because of a PR** without a very strong reason. Ask whether the file should be
+   decomposed first; extract modules or helpers instead of letting it sprawl. Waive only when the result is still
+   clearly organised.
+3. **No spaghetti growth.** New ad-hoc conditionals, scattered special cases, one-off booleans, nullable modes or
+   "temporary" branches inserted into unrelated flows are design problems, not style nits. Push the logic behind a
+   dedicated abstraction, typed model, dispatcher or module; reframe the state so the conditionals disappear rather
+   than get centralised.
+4. **Clean the design, do not just accept working code.** If behaviour can stay the same while the structure becomes
+   meaningfully cleaner, ask for the cleaner version. Prefer removing moving pieces over spreading the same complexity.
+5. **Direct, boring code over hacky or magical code.** Be skeptical of generic mechanisms hiding simple data-shape
+   assumptions. Flag thin wrappers, identity abstractions and pass-through helpers that add indirection without clarity;
+   the remedy is usually to delete the layer, not polish it.
+6. **Type and boundary cleanliness.** Question casts, `Any`/`unknown`, optional parameters and silent fallbacks that
+   paper over an unclear invariant. Prefer an explicit typed model or shared contract; make the boundary explicit so the
+   control flow gets simpler.
+7. **Logic in its canonical layer; reuse existing helpers.** Feature logic leaking into shared paths, implementation
+   details leaking through APIs, and bespoke near-duplicates of an existing utility are all blockers. Move the code to
+   the module that already owns the concept (table below).
+8. **Orchestration smells.** Independent work serialised for no reason, and related updates that can leave state
+   half-applied, are design smells when a cleaner atomic or parallel structure is obvious. Do not micro-optimise.
+
+Findings go in this priority order: structural regressions; missed code-judo simplifications; branching complexity;
+boundary / type-contract problems; file size and decomposition; modularity; legibility. Few high-conviction comments
+beat many nits. Be direct and demanding without being rude; if the code makes the codebase messier, say so, and if it
+missed a dramatic simplification, say that too. "Maybe rename this" is not feedback when the real issue is structural.
+
+Useful shapes: "this pushes the file past 1k lines; can we decompose it first?", "this adds another special case to an
+already busy flow; can it live behind its own abstraction?", "this looks like a bespoke helper for something we already
+have; can we reuse the canonical one?", "there is a code-judo move here; can we reframe so these branches disappear?",
+"this refactor moves complexity around but does not delete it; can the model itself be simpler?"
+
+### Approval bar
+
+Do not approve because behaviour seems correct. Approve when there is no clear structural regression, no visible path
+to a dramatically simpler implementation left untaken, no unjustified file-size explosion, no spaghetti growth from
+special-case branching, no hacky or magical abstraction, no wrapper / cast / optionality churn hiding the real design,
+and no boundary leak or canonical-helper duplication. Each of those is a presumptive blocker until the author justifies
+it. Otherwise leave explicit, actionable feedback and push for the cleaner decomposition. Say plainly when something is
+fine.
 
 ## How to run it here
 
@@ -22,8 +70,8 @@ standards to *this* repository.
    blocker, not a nit. `tests/test_conventions.py` enforces several rows.
 4. Ask for the parity evidence the `kev-verify` skill describes (bit-identical rows / weights against `main`) whenever the
    diff touches the model, loader, trainer, data converters or metrics. Green tests are not parity.
-5. Report findings in the standards' priority order with `file:line` references, then an explicit verdict against the
-   approval bar. Few high-conviction comments beat many nits. Say plainly when something is fine.
+5. Report findings in the priority order above with `file:line` references, then an explicit verdict against the
+   approval bar.
 
 ## Canonical helpers (reuse, do not re-derive)
 

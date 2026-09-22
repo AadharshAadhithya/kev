@@ -3152,5 +3152,49 @@
       "workload_oof",
       "ece"
     ]
+  },
+  {
+    "printed": "0.025",
+    "in": [
+      "README.md"
+    ],
+    "source": "runs/r4-mlx-parity-4b/report.json",
+    "path": [
+      "rows",
+      "max_dp"
+    ]
+  },
+  {
+    "printed": "0.0016",
+    "in": [
+      "README.md"
+    ],
+    "source": "runs/r4-mlx-parity-4b/report.json",
+    "path": [
+      "rows",
+      "mean_dp"
+    ]
+  },
+  {
+    "printed": "0.054",
+    "in": [
+      "README.md"
+    ],
+    "source": "runs/r4-mlx-parity-0.8b/report.json",
+    "path": [
+      "rows",
+      "max_dp"
+    ]
+  },
+  {
+    "printed": "0.0023",
+    "in": [
+      "README.md"
+    ],
+    "source": "runs/r4-mlx-parity-0.8b/report.json",
+    "path": [
+      "rows",
+      "mean_dp"
+    ]
   }
 ]

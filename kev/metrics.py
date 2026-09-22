@@ -187,15 +187,29 @@ def grouped_metrics(rows, key, temperature=1.0):
     return {name: metrics(group, temperature) for name, group in sorted(groups.items())}
 
 
-def fit_temperature(rows, aggregation="macro"):
+def tempered_row(row, temperature):
+    """The row as a calibrated predictor would have returned it: probabilities and logits at `temperature`, so metrics()
+    at T=1 scores it (per-row temperatures, e.g. out-of-fold, cannot go through metrics(rows, T))."""
+    return {**row, "p": probabilities_at_temperature(row, temperature).tolist(), "logits": _tempered_logits(row, temperature).tolist(),
+            "inference_temperature": temperature}
+
+
+def scored_rows(rows):
+    """The rows metrics are computed on: clean variants of knowable records."""
+    return [row for row in rows if row["variant"] == "clean" and row["source"] != "unknowable"]
+
+
+def fit_temperature(rows, aggregation="macro", points=81):
+    """Temperature minimizing the (micro or per-task macro) mean NLL over a `points`-point log grid on 0.25..4.
+    scripts/calibrate_checkpoint.py fits the released checkpoints with points=121."""
     if aggregation not in ("micro", "macro"):
         raise ValueError("invalid calibration aggregation")
-    clean = [row for row in rows if row["variant"] == "clean" and row["source"] != "unknowable"]
+    clean = scored_rows(rows)
     if not clean:
         raise ValueError("cannot fit temperature without labelled calibration rows")
     if any(row.get("inference_temperature", 1.0) != 1.0 for row in clean):
         raise ValueError("fit temperature on raw logits, not previously calibrated outputs")
-    candidates = np.exp(np.linspace(np.log(0.25), np.log(4), 81))
+    candidates = np.exp(np.linspace(np.log(0.25), np.log(4), points))
     weights = np.ones(len(clean))
     if aggregation == "macro":
         counts = defaultdict(int)
@@ -206,6 +220,66 @@ def fit_temperature(rows, aggregation="macro"):
     return float(candidates[int(np.argmin(losses))])
 
 
+def _source_groups(rows):
+    """dict[source, list[np.ndarray of row indices]]: one array per (source, group) cluster, in first-seen order."""
+    groups = defaultdict(list)
+    for i, row in enumerate(rows):
+        groups[(row["source"], row["group"])].append(i)
+    sources = defaultdict(list)
+    for (source, _), indices in groups.items():
+        sources[source].append(np.asarray(indices, dtype=int))
+    return sources
+
+
+def grouped_folds(rows, folds, seed):
+    """Fold id per row, disjoint in (source, group) so sibling questions and variants of one record never straddle
+    train/test, assigned round-robin within each source so every fold sees every source."""
+    units = sorted({(row["source"], row["group"]) for row in rows})
+    if len(units) < folds:
+        raise ValueError("fewer distinct (source, group) units than folds")
+    rng = np.random.default_rng(seed)
+    fold_of, offset = {}, 0
+    for source in sorted({source for source, _ in units}):
+        own = [unit for unit in units if unit[0] == source]
+        for i, j in enumerate(rng.permutation(len(own))):
+            fold_of[own[j]] = (offset + i) % folds
+        offset += len(own)
+    return np.asarray([fold_of[(row["source"], row["group"])] for row in rows])
+
+
+def cross_validated_temperature(rows, folds=5, seed=0, samples=1000, **fit_kwargs):
+    """Out-of-fold calibration report: each fold's temperature is fit on the other folds (fit_temperature(**fit_kwargs))
+    and applied to its held-out rows, which are then scored like any calibrated prediction. The bootstrap resamples
+    source-stratified groups (the unit paired_bootstrap uses) and reports raw vs out-of-fold ECE with a 95% interval on
+    the paired delta; `separated` is True when that interval excludes zero."""
+    if folds < 2 or samples < 1:
+        raise ValueError("folds must be >= 2 and samples >= 1")
+    clean = scored_rows(rows)
+    fold_id = grouped_folds(clean, folds, seed)
+    temperatures, oof = [], list(clean)
+    for fold in range(folds):
+        held = fold_id == fold
+        temperature = fit_temperature([row for row, out in zip(clean, held) if not out], **fit_kwargs)
+        temperatures.append(temperature)
+        for i in np.flatnonzero(held):
+            oof[i] = tempered_row(clean[i], temperature)
+    keys = ("n", "ece", "brier", "nll", "confident_error_rate", "coverage_at_5pct_error")
+    raw, out_of_fold = metrics(clean), metrics(oof)
+    correct = np.asarray([np.argmax(row["p"]) == row["label"] for row in clean])   # argmax is temperature-invariant
+    conf = np.asarray([[max(row["p"]) for row in rows] for rows in (clean, oof)])
+    sources = _source_groups(clean)
+    rng = np.random.default_rng(seed)
+    values = np.empty((samples, 2))
+    for s in range(samples):
+        drawn = np.concatenate([grouped[i] for grouped in sources.values() for i in rng.integers(0, len(grouped), size=len(grouped))])
+        values[s] = [ece(conf[0][drawn], correct[drawn]), ece(conf[1][drawn], correct[drawn])]
+    ci = {name: np.quantile(v, [0.025, 0.975]).tolist() for name, v in (("raw", values[:, 0]), ("out_of_fold", values[:, 1]), ("delta", values[:, 1] - values[:, 0]))}
+    return {"raw": {k: raw[k] for k in keys}, "out_of_fold": {k: out_of_fold[k] for k in keys}, "ece_ci95": ci,
+            "separated": bool(ci["delta"][1] < 0 or ci["delta"][0] > 0), "temperatures": temperatures,
+            "folds": folds, "seed": seed, "samples": samples, "groups": sum(len(v) for v in sources.values()),
+            "unit": "source-stratified (source, group); sibling questions and variants stay together"}
+
+
 def paired_bootstrap(candidate, reference, samples=1000, seed=0, metric="nll", aggregation="macro"):
     nonlinear = {"coverage_at_5pct_error", "coverage_at_1pct_error", "aurc", "ece"}   # recomputed on every resample
     additive = metric not in nonlinear                                                  # else a mean of _row_scores
@@ -214,9 +288,7 @@ def paired_bootstrap(candidate, reference, samples=1000, seed=0, metric="nll", a
 
     def index(rows):
         out = {}
-        for r in rows:
-            if r["variant"] != "clean" or r["source"] == "unknowable":
-                continue
+        for r in scored_rows(rows):
             key = r["id"], r["question"]
             if key in out:
                 raise ValueError("duplicate paired example")
@@ -227,17 +299,13 @@ def paired_bootstrap(candidate, reference, samples=1000, seed=0, metric="nll", a
     if not a or a.keys() != b.keys():
         raise ValueError("paired comparison requires identical complete clean examples")
     keys = sorted(a)
-    groups = defaultdict(list)
-    for i, key in enumerate(keys):
+    for key in keys:
         row, other = a[key], b[key]
         if row["keys"] != other["keys"] or row["label"] != other["label"]:
             raise ValueError("paired comparison labels or option order differ")
         if any(row[field] != other[field] for field in ("source", "group", "task", "type")):
             raise ValueError("paired comparison group or task metadata differ")
-        groups[(row["source"], row["group"])].append(i)
-    sources = defaultdict(list)
-    for (source, _), indices in groups.items():
-        sources[source].append(np.asarray(indices, dtype=int))
+    sources = _source_groups([a[key] for key in keys])
     task_names = np.asarray([a[key]["task"] for key in keys])
     statistics = []
     for indexed in (a, b):
@@ -268,6 +336,6 @@ def paired_bootstrap(candidate, reference, samples=1000, seed=0, metric="nll", a
         drawn = [units[i] for units in sources.values() for i in rng.integers(0, len(units), size=len(units))]
         values.append(delta(np.concatenate(drawn)))
     return {f"{aggregation}_{metric}_delta": delta(np.arange(len(keys))), "ci95": np.quantile(values, [0.025, 0.975]).tolist(),
-            "samples": samples, "groups": len(groups), "aggregation": aggregation,
+            "samples": samples, "groups": sum(len(v) for v in sources.values()), "aggregation": aggregation,
             "unit": "source-stratified original record; sibling questions stay together",
             "method": "paired cluster percentile bootstrap; full statistic recomputed in each resample"}

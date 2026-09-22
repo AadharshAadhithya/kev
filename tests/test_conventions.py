@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-SCANNED = ("kev", "scripts", "space", "tests", "modal_app.py", "modal_probe35.py")
+SCANNED = ("kev", "scripts", "space", "tests", "modal_app.py")
 
 RULES = [
     ("head.pt is read and written through kev.checkpoint (Meta, read_meta, write_meta)",
@@ -26,8 +26,8 @@ RULES = [
      r"\.read_text\(\)|\.write_text\((?![^\n]*encoding=)|json\.loads?\(open\(|encoding=None|(?<![\w.])open\((?![^\n]*encoding=)(?![^\n]*\"[rwax]b\")", {"kev/suite.py"}),
     ("suite manifests are read through kev.suite.read_manifest",
      r"manifest\.json\"\)\.read_text\(\)", {"kev/suite.py"}),
-    ("device selection, synchronize and empty_cache go through kev.device (the Space and the Qwen3.5 probe are CUDA-only one-offs)",
-     r"is_available\(\) else|torch\.(mps|cuda)\.(synchronize|empty_cache|current_allocated_memory|max_memory_allocated)\(", {"kev/device.py", "space/app.py", "modal_probe35.py"}),
+    ("device selection, synchronize and empty_cache go through kev.device (the Space is a CUDA-only one-off)",
+     r"is_available\(\) else|torch\.(mps|cuda)\.(synchronize|empty_cache|current_allocated_memory|max_memory_allocated)\(", {"kev/device.py", "space/app.py"}),
 ]
 
 

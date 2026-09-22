@@ -4,7 +4,10 @@
     uv run modal run modal_app.py::study --suite evals/decision-v1 \\
         --plan experiments/mbp-comparison.json --name mbp-comparison-v1     # N trials in parallel on H100s
     uv run modal run modal_app.py::evaluate --run jaredpalmer/kev-0.5b \\
-        --suite evals/transfer-v1 --name transfer-kev-v01-h100             # score a Hub checkpoint
+        --suite evals/transfer-v1 --name transfer-kev-v01-h100             # score a Hub checkpoint as a research trial
+    uv run modal run modal_app.py::base_probe --bases Qwen/Qwen3.5-9B-Base  # untrained-base rows (zero-shot letter logits)
+    uv run modal run modal_app.py::benchmarks --jobs run@suite-or-jsonl@name # kev.benchmark on suites or external .jsonl files
+    uv run modal run modal_app.py::smoke_base --base Qwen/X --revision sha   # does a new base fit? LoRA footprint, peak GB, step time
 
 The same `kev.experiment.execute_trial` runs here and on the MBP; only the device differs. Every trial records
 the local git commit (KEV_GIT_COMMIT), the suite hash, and the hashes of the kev/*.py files that were shipped, and
@@ -109,7 +112,6 @@ def run_trial(study, index, label, config, suite, expected_sources, git_commit, 
               volumes={RUNS_MOUNT: runs_volume, HF_MOUNT: hf_cache}, secrets=secrets)
 def run_locked_test(trial_path, name, suites, git_commit, redo_interrupted=False):
     """Read the locked test partitions ONCE for a promoted trial. Writes /runs/locked/<name>/... ; refuses to rerun."""
-    import json
     from kev.benchmark import evaluate_records
     from kev.checkpoint import LoadOptions
     from kev.predictors import LocalPredictor
@@ -154,22 +156,74 @@ def run_locked_test(trial_path, name, suites, git_commit, redo_interrupted=False
     return summary
 
 
-@app.function(image=image, gpu=GPU, cpu=2, memory=(32768, 65536), retries=0, timeout=3600,
-              volumes={RUNS_MOUNT: runs_volume, HF_MOUNT: hf_cache}, secrets=secrets)
-def run_base_probe(base, suite, name, tasks="all"):
-    """Untrained baseline: the base model's zero-shot letter-logit readout on a frozen suite's development partition
-    (scripts/base_mmlu_probe.py). Writes benchmark-compatible rows/report under /runs/probes/<name>."""
+def run_tool(cmd, out):
+    """Run a repo script/module inside the container against the mounted checkout, refusing to overwrite `out` on the
+    volume; returns the report's clean block. Shared by the probe and bench functions."""
     import subprocess as sp
-    out = Path(RUNS_MOUNT) / "probes" / name
     if out.exists():
-        raise FileExistsError(f"probe {name} exists")
+        raise FileExistsError(f"{out} exists on the volume")
     try:
-        sp.run([sys.executable, "/root/scripts/base_mmlu_probe.py", "--base", base, "--suite", f"/root/{suite}", "--tasks", tasks, "--device", "cuda", "--out", str(out)],
-               check=True, cwd="/root", env={**os.environ, "PYTHONPATH": "/root"})
+        sp.run([str(c) for c in cmd], check=True, cwd="/root", env={**os.environ, "PYTHONPATH": "/root"})
     finally:
         runs_volume.commit(); hf_cache.commit()
     from kev.suite import read_json
     return read_json(out / "report.json")["clean"]
+
+
+@app.function(image=image, gpu=GPU, cpu=2, memory=(32768, 131072), retries=0, timeout=3600,
+              volumes={RUNS_MOUNT: runs_volume, HF_MOUNT: hf_cache}, secrets=secrets)
+def run_base_probe(base, suite, name, tasks="all", prompt="plain", split="development", revision=None, adapter=None):
+    """Untrained baseline: the base model's zero-shot letter-logit readout on a frozen suite partition
+    (scripts/base_mmlu_probe.py; --adapter measures a Kev adapter through the same readout). Writes benchmark-compatible
+    rows/report under /runs/probes/<name>."""
+    out = Path(RUNS_MOUNT) / "probes" / name
+    cmd = [sys.executable, "/root/scripts/base_mmlu_probe.py", "--base", base, "--suite", f"/root/{suite}", "--tasks", tasks, "--device", "cuda", "--out", out, "--prompt", prompt, "--split", split]
+    if revision: cmd += ["--revision", revision]
+    if adapter: cmd += ["--adapter", adapter]
+    return run_tool(cmd, out)
+
+
+@app.function(image=image, gpu=GPU, cpu=2, memory=(32768, 131072), retries=0, timeout=3600,
+              volumes={RUNS_MOUNT: runs_volume, HF_MOUNT: hf_cache}, secrets=secrets)
+def run_bench(run, suite, name, flags=""):
+    """kev.benchmark for a checkpoint (Hub id or /runs path) on a suite's development partition or a --data .jsonl
+    (external evals), written to /runs/bench/<name>. flags: extra benchmark switches, e.g. "--date_facts"."""
+    out = Path(RUNS_MOUNT) / "bench" / name
+    source = ["--data", f"/root/{suite}"] if suite.endswith(".jsonl") else ["--suite", f"/root/{suite}"]
+    return run_tool([sys.executable, "-m", "kev.benchmark", "--run", run, *source, "--out", out, "--device", "cuda", *flags.split()], out)
+
+
+@app.function(image=image, gpu=GPU, cpu=2, memory=(32768, 131072), retries=0, timeout=2400,
+              volumes={RUNS_MOUNT: runs_volume, HF_MOUNT: hf_cache}, secrets=secrets)
+def run_smoke_base(base, revision):
+    """Does a base fit? Load it through DecisionModel with the Kev LoRA config, report the adapter size and which modules it
+    hit, run one training step on real records with gradient checkpointing, and report peak memory and steady step time."""
+    import time
+    import torch
+    from kev.data import materialize
+    from kev.device import allocated_bytes, sync
+    from kev.model import DecisionModel, load_tokenizer
+    from kev.suite import load_split
+    t0 = time.time(); tok = load_tokenizer(base, revision=revision)
+    m = DecisionModel(base, tok, "cuda", dtype=torch.bfloat16, lora=16, revision=revision)
+    m.lm.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False}); m.lm.config.use_cache = False; m.train()
+    trainable = [(n, p.numel()) for n, p in m.lm.named_parameters() if p.requires_grad]
+    recs = [materialize(r) for r in load_split("/root/evals/v7/decision-v7", "development")[:2]]
+    encs = [m.encode(tok, r, strict=True) for r in recs]
+
+    def step():
+        m.lm.zero_grad(set_to_none=True); m.head.zero_grad(set_to_none=True); ts = time.time()
+        with torch.autocast("cuda", dtype=torch.bfloat16): logits = m.forward_batch(encs)
+        loss = sum(torch.nn.functional.cross_entropy(z.float()[None], torch.tensor([q["label"]], device="cuda")) for zs, r in zip(logits, recs) for z, q in zip(zs, r["questions"]))
+        loss.backward(); sync("cuda")
+        return round(time.time() - ts, 2), loss.item()
+    torch.cuda.reset_peak_memory_stats(); t1 = time.time()
+    first, loss = step()                       # the first step pays Triton compilation
+    steady = [step()[0] for _ in range(3)]
+    return {"base": base, "hybrid": m.hybrid, "load_seconds": round(t1 - t0), "first_step_seconds": first, "steady_step_seconds_2_records": steady,
+            "questions_per_record": [len(r["questions"]) for r in recs], "trainable_params_M": round(sum(k for _, k in trainable) / 1e6, 1),
+            "lora_module_names": sorted({n.split(".lora_")[0].split(".")[-1] for n, _ in trainable}), "routed_expert_lora_params": sum(k for n, k in trainable if ".experts." in n),
+            "peak_gb": round(allocated_bytes("cuda") / 1e9, 1), "weights_gb": round(sum(p.numel() * p.element_size() for p in m.lm.parameters()) / 1e9, 1), "loss": round(loss, 3)}
 
 
 @app.function(image=image, gpu=GPU, cpu=2, memory=(32768, 65536), retries=0, timeout=3600,
@@ -194,14 +248,41 @@ def anchors(base: str, suite: str, name: str, revision: str = "", gpu: str = GPU
     print(f"spawned anchors {name}: call {call.object_id}; result lands at /runs/anchors/{name}.json on the volume")
 
 
+def pull_volume(remote, local_parent):
+    subprocess.run([sys.executable, "-m", "modal", "volume", "get", "kev-runs", remote, str(local_parent)], check=True)
+
+
 @app.local_entrypoint()
-def base_probe(base: str, name: str, suite: str = "evals/v4/transfer-v4", tasks: str = "all", gpu: str = GPU):
-    """e.g. --base Qwen/Qwen3-30B-A3B-Base --name qwen3-30b-a3b-transfer-v4"""
-    target = ROOT / "runs/probes" / name
-    if target.exists():
-        raise FileExistsError(f"{target} exists")
-    call = run_base_probe.with_options(gpu=gpu).spawn(base, suite, name, tasks)
-    print(f"spawned probe {name}: call {call.object_id}; pull with: modal volume get kev-runs /probes/{name} runs/probes/")
+def base_probe(bases: str, suite: str = "evals/v4/transfer-v4", tasks: str = "all", prompt: str = "plain", split: str = "development", revision: str = "", adapter: str = "", tag: str = "", gpu: str = GPU):
+    """Untrained-base rows (the same items as every README row). Names are derived (<base>-base[-semif][-<tag>]-<suite>[-<split>]);
+    results are pulled to runs/probes/<name>. e.g. KEV_GPU=H200 ... --bases Qwen/Qwen3.5-35B-A3B-Base --revision <sha>"""
+    jobs = []
+    for base in bases.split(","):
+        name = base.split("/")[-1].lower().replace(".", "") + ("-semif" if prompt == "semif" else "-base") + (f"-{tag}" if tag else "") + "-" + suite.split("/")[-1] + ("" if split == "development" else f"-{split}")
+        if (ROOT / "runs/probes" / name).exists(): print(f"skip {name}: exists locally"); continue
+        jobs.append((base, suite, name, tasks, prompt, split, revision or None, adapter or None))
+    for (base, _, name, *_), result in zip(jobs, run_base_probe.with_options(gpu=gpu).starmap(jobs, return_exceptions=True)):
+        if isinstance(result, Exception): print(f"{name}: FAILED {type(result).__name__}: {str(result)[:200]}"); continue
+        pull_volume(f"/probes/{name}", ROOT / "runs/probes")
+        print(f"{name}: acc {result['acc']:.3f} brier {result['brier']:.3f} conf-err {result['confident_error_rate']:.3f}")
+
+
+@app.local_entrypoint()
+def benchmarks(jobs: str, gpu: str = GPU):
+    """Score checkpoints on suites or --data .jsonl files: comma-separated run@suite@name[@flags] entries, e.g.
+    "jaredpalmer/kev-9b@evals/external/semif-v1@kev-9b-semif,/runs/X/00-trial-0/checkpoint@evals/v9/transfer-v9@x-v9@--date_facts".
+    Results are pulled to runs/<name>."""
+    entries = [(j.split("@") + [""])[:4] for j in jobs.split(",")]
+    for (run, suite, name, _), result in zip(entries, run_bench.with_options(gpu=gpu).starmap(entries, return_exceptions=True)):
+        if isinstance(result, Exception): print(f"{name}: FAILED {type(result).__name__}: {str(result)[:300]}"); continue
+        pull_volume(f"/bench/{name}", ROOT / "runs")
+        print(f"{name}: acc {result['acc']:.3f} brier {result['brier']:.3f}")
+
+
+@app.local_entrypoint()
+def smoke_base(base: str, revision: str, gpu: str = "H200"):
+    """Memory and step-time check for a base that has not been trained yet (LoRA footprint, which modules it hits, peak GB)."""
+    print(json.dumps(run_smoke_base.with_options(gpu=gpu).remote(base, revision), indent=1))
 
 
 class Job(NamedTuple):
@@ -288,8 +369,7 @@ def pull_study(study):
     if target.exists():
         raise FileExistsError(f"refusing to overwrite local study: {target}")
     target.parent.mkdir(exist_ok=True)
-    # `modal volume get <vol> /<study> runs/` recreates runs/<study>/... locally, checkpoints included (gitignored)
-    subprocess.run([sys.executable, "-m", "modal", "volume", "get", "kev-runs", f"/{study}", str(target.parent)], check=True)
+    pull_volume(f"/{study}", target.parent)   # recreates runs/<study>/... locally, checkpoints included (gitignored)
     subprocess.run([sys.executable, "-m", "kev.experiment", "--aggregate", "--out", str(target)], check=True, cwd=ROOT)
     return target
 
@@ -357,7 +437,7 @@ def locked_test(trial: str, name: str, decision: str = "evals/v4/decision-v4", t
     import shutil
     if target.exists(): shutil.rmtree(target)   # local copy only; the volume is the record
     target.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run([sys.executable, "-m", "modal", "volume", "get", "kev-runs", f"/locked/{name}", str(target.parent)], check=True)
+    pull_volume(f"/locked/{name}", target.parent)
     print(json.dumps({k: {"acc": v["clean"]["acc"], "brier": v["clean"]["brier"]} for k, v in summary["suites"].items()}, indent=1))
 
 

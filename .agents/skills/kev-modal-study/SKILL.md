@@ -1,11 +1,11 @@
 ---
 name: kev-modal-study
-description: Launch, monitor and pull Kev training studies, probes and benchmarks on Modal (modal_app.py, modal_probe35.py). Use when running trials, delta fine-tunes, base probes or remote evals for the Kev repo.
+description: Launch, monitor and pull Kev training studies, untrained-base probes, remote benchmarks and new-base smoke checks on Modal (modal_app.py). Use when running trials, delta fine-tunes, base probes, external evals or fit checks for the Kev repo.
 ---
 
 # Kev on Modal — study workflow
 
-All GPU work in this repo goes through two files. Never train large models locally (a 32 GB Mac swaps with an 8B in bf16 while Chrome is open).
+All GPU work in this repo goes through `modal_app.py`. Never train large models locally (a 32 GB Mac swaps with an 8B in bf16 while Chrome is open).
 
 ## Studies (training trials): `modal_app.py`
 
@@ -29,17 +29,21 @@ All GPU work in this repo goes through two files. Never train large models local
 
 Timing (H100, row-batched hybrid): 0.8B ≈ 20 min, 4B ≈ 60 min, 9B ≈ 90 min for the full v7 recipe; deltas (1 epoch over ~1k records + 2k replay) ≈ 10–20 min. Set `--timeout` with ≥ 50 % headroom; a timed-out container loses everything.
 
-## Probes and remote benchmarks: `modal_probe35.py`
+## Probes, remote benchmarks, fit checks (same file, ephemeral app: no deploy step)
 
-Image has transformers 5 + fla; mounts `evals/` and `scripts/` at run time (no deploy step). Run with `--detach` in the background and read the log.
+These run attached (`modal run`, not `deploy`): the container mounts this checkout's `kev/`, `evals/` and `scripts/`,
+results land on the `kev-runs` volume and are pulled automatically. Run with `--detach` for anything long and read the
+log; all three skip names that already exist locally / on the volume.
 
-- Untrained-base probe (zero-shot letter logits, same items as every README row):
-  `KEV_PROBE_GPU=H200 uv run modal run --detach modal_probe35.py::main --bases Qwen/X-Base --revision <sha> [--suite evals/v9/transfer-v9] [--prompt semif] [--adapter /runs/.../checkpoint --tag name]`
-  Output pulled to `runs/probes/<base>-base-<suite>/report.json`. Use H200 for ≥ 30B bf16.
-- Benchmark any checkpoint on any suite or `--data` JSONL (`run@suite@name` triples):
-  `uv run modal run --detach modal_probe35.py::benchmarks --jobs "jaredpalmer/kev-9b@evals/external/semif-v1@kev-9b-semif,/runs/X/00-trial-0/checkpoint@evals/v9/transfer-v9@x-v9"`
-  Output pulled to `runs/<name>/report.json`. Both entrypoints skip names that already exist locally / on the volume.
-- Always give the entrypoint (`::main`, `::benchmarks`): the file has several.
+- **Untrained-base probe** (zero-shot letter logits, same items as every README row; `scripts/base_mmlu_probe.py`):
+  `KEV_GPU=H200 uv run modal run --detach modal_app.py::base_probe --bases Qwen/X-Base --revision <sha> [--suite evals/v9/transfer-v9] [--prompt semif] [--split test] [--adapter /runs/.../checkpoint --tag name]`
+  Names are derived (`<base>-base[-semif][-<tag>]-<suite>[-<split>]`); output pulled to `runs/probes/<name>/report.json`. Use H200 for >= 30B bf16.
+- **Benchmark any checkpoint on any suite or `--data` JSONL** (`run@suite@name[@flags]` entries; flags are extra `kev.benchmark` switches):
+  `uv run modal run --detach modal_app.py::benchmarks --jobs "jaredpalmer/kev-9b@evals/external/semif-v1@kev-9b-semif,/runs/X/00-trial-0/checkpoint@evals/v9/transfer-v9@x-v9@--date_facts"`
+  Output pulled to `runs/<name>/report.json`. This is how the external evals (SemIf, MMLU-Pro sample) and delta benches were scored.
+- **Does a new base fit?** (LoRA footprint, which modules it hits, peak GB, steady step time on two real records):
+  `uv run modal run modal_app.py::smoke_base --base Qwen/X-Base --revision <sha> [--gpu H200]`
+- Always give the entrypoint (`::base_probe`, `::benchmarks`, `::smoke_base`): the file has several.
 
 ## Gotchas
 - If `study` dies locally with a transient error (e.g. `Authorization check failed`) the trials may already have been spawned on the deployed app: run `modal container list` before relaunching, and never relaunch under the same name (the trials refuse to overwrite `/runs/<name>/<trial>` and every copy fails). To kill a running trial use `FunctionCall.from_id(cid).cancel()` from the spawn.json; `modal container stop` only re-queues the input to a fresh container. Orphans without a spawn.json: `modal volume rm -r kev-runs /<name>` after they fail, then relaunch under a new name.
@@ -48,7 +52,7 @@ Image has transformers 5 + fla; mounts `evals/` and `scripts/` at run time (no d
 - Symptom "config=... printed, then nothing, and `Modal Client → Modal Worker Heartbeat attempt failed`" = the container is thrashing host memory (checkpoint staging). Check `run_trial`'s `memory=` against the checkpoint size (bf16 bytes ≈ 2 × params); big bases need ≥ weights + 20 GB.
 - Training progress is only visible via `modal container logs <ta-id>` (`modal container list` to find it); `modal app logs` shows the last ~50 lines across containers, and the volume's train.log is committed at the end.
 - Modal rate-limits app creation: launching more than ~3 detached `modal run`s within a minute fails with "App create rate limit exceeded" (the log shows it; nothing runs). Space launches ≥ 30 s apart or batch jobs into one `benchmarks` call.
-- A failed `bench`/`probe` leaves its output directory on the volume; relaunch under a new name (`-2`) or the next run fails with FileExistsError.
+- A failed `benchmarks`/`base_probe` job leaves its output directory on the volume; relaunch under a new name (`-2`, or `--tag`) or the next run fails with FileExistsError.
 - `RuntimeError: aclose(): asynchronous generator is already running` at the end of a detached run is noise; the result line follows it.
 - Report dicts must not gain top-level keys that collide with benchmark blocks (`unknowable`, `clean`, `tasks`).
 - Modal's HF cache volume (`kev-hf-cache`) persists base weights; first pull of a new base adds minutes.

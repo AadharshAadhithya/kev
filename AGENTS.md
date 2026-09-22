@@ -21,7 +21,7 @@ See README.md (deep dive) and docs/model-cards/ (one card per checkpoint: recipe
   needs `AI_GATEWAY_API_KEY` or `--provision-scope`; budget-capped). `kev.compare` pairs two result dirs (record-clustered
   bootstrap). Historical checkpoints (`runs/kev`, `runs/kev2`) overlap the suite's training data: exploratory only.
   `--ord_w` is now the ranked probability score (proper); the old |E[level]-y| term was removed. `--perm_kl`/`--ord_w` default 0.
-- Modal (default for anything beyond smoke): `modal_app.py`; `uv run modal run modal_app.py::{smoke,study,evaluate}`. Image = `uv_sync`
+- Modal (default for anything beyond smoke): `modal_app.py`; `uv run modal run modal_app.py::{smoke,study,evaluate,base_probe,benchmarks,smoke_base}` (probes, external-eval benches and new-base fit checks lived in `modal_probe35.py` until 2026-09-21; see the `kev-modal-study` skill). Image = `uv_sync`
   of pyproject/uv.lock (Linux torch wheel is CUDA) + `kev/` + `evals/`; Volumes `kev-hf-cache` (HF_HOME) and `kev-runs` (trial outputs,
   pulled to runs/<study> then ranked by `kev.experiment --aggregate`). `KEV_GPU` picks the GPU type (H100 default). Legacy checkpoints:
   Hub id, or `modal volume put kev-runs runs/<run> /legacy/<run>` then `--existing /runs/legacy/<run>`. Eval on CUDA is fp32-exact

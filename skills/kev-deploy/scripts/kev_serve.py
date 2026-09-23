@@ -2,36 +2,40 @@
 GET /v1/models), so existing Jev / TypeSafe clients only change their base URL.
 
     pip install modal && modal setup                                   # once: sign in to Modal (opens a browser)
-    modal deploy kev_serve.py                                          # Kev-4B on an L4 -> https://<workspace>--kev-api.modal.run
+    modal deploy kev_serve.py                                          # Kev-4B on an L40S -> https://<workspace>--kev-api.modal.run
     KEV_MODEL=jaredpalmer/kev-9b modal deploy kev_serve.py             # another model; the GPU follows the model
     KEV_API_KEY=$(openssl rand -hex 24) modal deploy kev_serve.py      # require Authorization: Bearer <key> (recommended)
     curl -L --max-time 900 https://<workspace>--kev-api.modal.run/v1/models -H "authorization: Bearer $KEV_API_KEY"   # wait for the cold start
     modal app stop kev                                                 # take it down
 
-Settings are read when you deploy: KEV_MODEL (any Kev checkpoint on the Hugging Face Hub, `repo` or `repo@revision`;
-default jaredpalmer/kev-4b), KEV_GPU (override the GPU), KEV_API_KEY (bearer auth; without it the URL is the only secret),
-HF_TOKEN (for a private checkpoint; if it is set in your shell it is uploaded as a Modal secret, so unset it for public
-checkpoints), KEV_MIN_CONTAINERS (1 keeps one container warm; default 0 scales to zero after 5 idle
-minutes), KEV_APP_NAME (default "kev"; one app per endpoint). The image installs the kev package at KEV_REF, the code the
-released checkpoints were measured with; weights and compiled kernels are cached on the `kev-hf-cache` volume, so only the
-first cold start downloads them. A request that waits longer than 150 s for a cold start gets an HTTP 303 to a result URL
-(Modal's web limit): follow redirects (`curl -L`) or warm the endpoint first.
+Settings are read when you deploy: KEV_MODEL (jaredpalmer/kev-0.8b, kev-4b or kev-9b, optionally `@revision`; default
+kev-4b), KEV_GPU (override the GPU list, comma-separated), KEV_API_KEY (bearer auth; without it the URL is the only
+secret), HF_TOKEN (only for a private checkpoint; if it is set in your shell it is uploaded as a Modal secret),
+KEV_MIN_CONTAINERS (1 keeps one container warm; default 0 scales to zero after 5 idle minutes), KEV_REGION (e.g. "us" or
+"us-east"; default anywhere with capacity, which can be another continent: Modal charges 1.15-1.75x for a pinned region),
+KEV_APP_NAME (default "kev"; one app per endpoint). The image installs the kev package at KEV_REF; weights, compiled kernels and their autotuning
+results are cached on the `kev-hf-cache` volume, so only the first cold start downloads and compiles them. A request that
+waits longer than 150 s for a cold start gets an HTTP 303 to a result URL (Modal's web limit): follow redirects
+(`curl -L`) or warm the endpoint first.
 """
 import os
 import time
 
 import modal
 
-KEV_REF = "557598fced1dada75dfbf36ed144dce309ac6ceb"   # github.com/jaredpalmer/kev commit whose kev package this endpoint runs
-# GPU preference lists (Modal takes the first with capacity). 9B: the fp32 LoRA merge needs 36 GB; 27B: 54 GB of bf16 weights.
-GPU_FOR = {"kev-0.8b": ["L4", "A10G", "L40S"], "kev-4b": ["L4", "A10G", "L40S"], "kev-9b": ["A100-80GB", "H100"], "kev-27b": ["H100", "H200"]}
+KEV_REF = "e9cfef03b8334179560cc113a23b79eb256477d7"   # github.com/jaredpalmer/kev commit whose kev package this endpoint runs
+# GPU preference lists (Modal takes the first with capacity), from runs/serving-*/report.json in the repo. An L4 is enough
+# for the 0.8B but runs out of compute on the 4B; the L40S is the cheapest GPU that answers the 4B in tens of milliseconds,
+# the H100 the fastest for the 4B and 9B. The A100 is slower than the L40S here and costs more.
+GPU_FOR = {"jaredpalmer/kev-0.8b": ["L4", "L40S"], "jaredpalmer/kev-4b": ["L40S", "H100"], "jaredpalmer/kev-9b": ["H100", "H200", "L40S"]}
 
 # Deploy-time settings travel in the image env, so the container evaluates this file with the same values.
-SETTINGS = {"KEV_MODEL": "jaredpalmer/kev-4b", "KEV_APP_NAME": "kev", "KEV_MIN_CONTAINERS": "0", "KEV_GPU": ""}
+SETTINGS = {"KEV_MODEL": "jaredpalmer/kev-4b", "KEV_APP_NAME": "kev", "KEV_MIN_CONTAINERS": "0", "KEV_GPU": "", "KEV_REGION": ""}
 SETTINGS = {k: os.environ.get(k, v) for k, v in SETTINGS.items()}
 MODEL = SETTINGS["KEV_MODEL"]
-NAME = MODEL.split("@")[0].split("/")[-1]                             # "kev-4b-support" (a fine-tune) gets kev-4b's GPUs
-GPU = SETTINGS["KEV_GPU"] or next((gpus for size, gpus in sorted(GPU_FOR.items(), key=lambda kv: -len(kv[0])) if NAME.startswith(size)), ["H100", "H200"])
+GPU = SETTINGS["KEV_GPU"].split(",") if SETTINGS["KEV_GPU"] else GPU_FOR.get(MODEL.split("@")[0])
+if not GPU:
+    raise SystemExit(f"no default GPU for {MODEL}; set KEV_GPU (e.g. KEV_GPU=H100)")
 # Secret values never go into the image: they ride in a Modal secret (present in the container's env, so this stays equal there).
 SECRET = {k: os.environ[k] for k in ("KEV_API_KEY", "HF_TOKEN") if os.environ.get(k)}
 
@@ -45,13 +49,17 @@ image = (
           "TRITON_CACHE_DIR": "/hf/triton-cache", **SETTINGS})
 )
 cache = modal.Volume.from_name("kev-hf-cache", create_if_missing=True)
-WARMUP = {"state": "Shoes arrived two weeks late and in the wrong size. Also I see two charges on my card.", "model": "kev-latest",
-          "questions": {"department": {"type": "choice", "instructions": "Which team should handle this?",
-                                       "criteria": {"returns": "Exchanges, refunds", "shipping": "Delivery, delays", "billing": "Charges, payments"}},
-                        "escalate": {"type": "noul", "instructions": "Does this need urgent human attention?"}}}
+QUESTIONS = {"department": {"type": "choice", "instructions": "Which team should handle this?",
+                            "criteria": {"returns": "Exchanges, refunds", "shipping": "Delivery, delays", "billing": "Charges, payments"}},
+             "escalate": {"type": "noul", "instructions": "Does this need urgent human attention?"},
+             "frustration": {"type": "score", "instructions": "How frustrated is the customer?", "criteria": ["Calm", "Frustrated", "Very angry"]}}
+# Warm-up at start: compile the kernels and capture CUDA graphs for states of a sentence to a few paragraphs (the state-pass
+# graphs do not depend on the questions). Other shapes run eagerly once, then replay graphs captured in the background.
+TICKET = "Shoes arrived two weeks late and in the wrong size. Also I see two charges on my card. "
+WARMUP = [{"state": TICKET * n, "model": "kev-latest", "questions": QUESTIONS} for n in (1, 4, 16)]
 
 
-@app.cls(image=image, gpu=GPU, cpu=2, memory=(16384, 131072), volumes={"/hf": cache}, secrets=[modal.Secret.from_dict(SECRET)] if SECRET else [],
+@app.cls(image=image, gpu=GPU, region=SETTINGS["KEV_REGION"].split(",") if SETTINGS["KEV_REGION"] else None, cpu=4, memory=(16384, 65536), volumes={"/hf": cache}, secrets=[modal.Secret.from_dict(SECRET)] if SECRET else [],
          min_containers=int(SETTINGS["KEV_MIN_CONTAINERS"]), scaledown_window=300, timeout=600, startup_timeout=1200)
 @modal.concurrent(max_inputs=8)
 class Kev:
@@ -62,12 +70,15 @@ class Kev:
         from kev.checkpoint import Checkpoint, LoadOptions
         from kev.serve import Server, app as api
         started = time.time()
-        ck = Checkpoint(MODEL)                                             # downloads from the Hub on the first cold start
-        tok, model = ck.load("cuda", LoadOptions(dtype=torch.bfloat16))    # the checkpoint's fitted temperature is applied automatically
-        api.state.server = Server(ck, tok, model, "cuda")
-        api.state.server.answer(SystemOneRequest.model_validate(WARMUP))   # compile the DeltaNet kernels now, not on the first request
+        ck = Checkpoint(MODEL)                                                             # downloads from the Hub on the first cold start
+        tok, model = ck.load("cuda", LoadOptions(dtype=torch.bfloat16, cuda_graphs=True))   # the checkpoint's fitted temperature is applied automatically
+        server = Server(ck, tok, model, "cuda")
+        for req in WARMUP:
+            server.answer(SystemOneRequest.model_validate(req))
+            with server.lock: model.graphs.capture_pending()   # now, not on a background thread during the first user requests
         cache.commit()
-        print(f"serving {MODEL} on {torch.cuda.get_device_name(0)} (temperature {model.head.temperature:.2f}, "
+        api.state.server = server
+        print(f"serving {MODEL} on {torch.cuda.get_device_name(0)} (temperature {model.head.temperature:.2f}, {model.graphs.captures} CUDA graphs, "
               f"auth {'on' if os.environ.get('KEV_API_KEY') else 'off'}), ready in {time.time() - started:.0f}s", flush=True)
         self.api = api
 

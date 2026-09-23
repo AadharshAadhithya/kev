@@ -16,11 +16,15 @@ The deploy prints `https://<your-workspace>--kev-api.modal.run`. Keep the key: r
 client = TypeSafeClient(api_key=KEV_API_KEY, base_url="https://<your-workspace>--kev-api.modal.run", model="kev-latest")
 ```
 
-| Model | Set | GPU | First request after idle |
-| --- | --- | --- | --- |
-| Kev-0.8B | `KEV_MODEL=jaredpalmer/kev-0.8b` | L4 | ~35 s (77 s the very first time) |
-| Kev-4B (default) | nothing | L4 | ~50 s |
-| Kev-9B | `KEV_MODEL=jaredpalmer/kev-9b` | A100-80GB or H100 | ~45 s (about 2 min the very first time) |
+| Model | Set | GPU ($/h while up) | Warm model time, 6 questions (new / repeated state) | First request after idle |
+| --- | --- | --- | --- | --- |
+| Kev-0.8B | `KEV_MODEL=jaredpalmer/kev-0.8b` | L4 (0.80) | 37 / 28 ms | ~40 s |
+| Kev-4B (default) | nothing | L40S (1.95) | 50 / 34 ms | ~35 s |
+| Kev-9B | `KEV_MODEL=jaredpalmer/kev-9b` | H100 (3.95) | 37 / 24 ms | ~55 s |
+
+The round trip adds the network and Modal's proxy (about 80-100 ms from the US to a us-east container with a kept-alive
+connection); `KEV_REGION=us` keeps the container near US callers. The very first deploy also downloads the weights and
+compiles kernels (1-2 minutes); later cold starts reuse the cache.
 
 `KEV_MIN_CONTAINERS=1` keeps it warm; `modal app stop kev` takes it down. With an agent, `npx skills add
 jaredpalmer/kev@kev-deploy` and ask it to deploy Kev; it follows [SKILL.md](SKILL.md). `modal skills install` adds

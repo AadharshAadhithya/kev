@@ -5,7 +5,7 @@ license: Apache-2.0
 compatibility: Requires Python 3.10+ and a Modal account (`pip install modal && modal setup`, free tier works for the small models). No GPU, no clone of the Kev repo, no Hugging Face account for the public checkpoints.
 metadata:
   author: jaredpalmer
-  version: "1.0"
+  version: "1.1"
   repository: https://github.com/jaredpalmer/kev
 ---
 
@@ -29,18 +29,21 @@ Modal's official skill and documentation, which helps with anything beyond this 
 
 ## 2. Pick the model
 
-| `KEV_MODEL` | GPU (automatic; fallbacks in parentheses) | Cold start, measured 2026-09-23 (first ever / weights cached) | Idle cost | When |
-| --- | --- | --- | --- | --- |
-| `jaredpalmer/kev-0.8b` | L4 (A10G, L40S) | 77 s / 33 s | $0 (scales to zero) | cheapest, prototyping |
-| `jaredpalmer/kev-4b` (default) | L4 (A10G, L40S) | ~2 min / 52 s | $0 | the default: best quality per dollar |
-| `jaredpalmer/kev-9b` | A100-80GB (H100) | 128 s / 42 s | $0 | best released accuracy |
+| `KEV_MODEL` | GPU (automatic; fallbacks in parentheses) | $/h while up | Model time, 6 questions (new / repeated state) | Cold start (cached weights) | When |
+| --- | --- | --- | --- | --- | --- |
+| `jaredpalmer/kev-0.8b` | L4 (L40S) | 0.80 | 37 / 28 ms | ~40 s | cheapest, prototyping |
+| `jaredpalmer/kev-4b` (default) | L40S (H100) | 1.95 | 50 / 34 ms (H100: 30 / 20 ms) | ~35 s | the default: best quality per dollar |
+| `jaredpalmer/kev-9b` | H100 (H200, L40S) | 3.95 | 37 / 24 ms (L40S: 80 / 53 ms) | ~55 s | best released accuracy |
 
-A warm container costs the GPU's hourly rate only while it is up (L4 about $0.80/h, A100-80GB about $2.50/h); after five
-idle minutes it scales to zero. `KEV_MIN_CONTAINERS=1` keeps one warm (no cold starts, pays the hourly rate all the time).
-Any Kev checkpoint on the Hub works (`you/kev-4b-support`, `repo@revision`); the GPU is picked by the name's size prefix
-(`kev-4b...` -> L4), anything else gets an H100 unless `KEV_GPU` says otherwise. A private checkpoint needs `HF_TOKEN` at
-deploy time; the file uploads `HF_TOKEN` as a Modal secret whenever it is set in the shell, so unset it for public ones.
-Checkpoints fine-tuned with the `kev-finetune` skill deploy the same way once published.
+Model time is the `latency_ms` the API returns (median of 20 requests, measured in the Kev repo: `runs/serving-*/report.json`).
+A new state is the normal call, since every ticket is a new state; a repeated state is served from a prefix cache. The very
+first cold start of an account also downloads the weights and compiles kernels (1-2 minutes); both are cached on the
+`kev-hf-cache` volume afterwards. Other GPUs work with `KEV_GPU` but are worse picks: an L4 runs out of compute on Kev-4B
+(6 questions: ~157 / 116 ms), and an A100 is slower than an L40S here and costs more.
+
+A warm container costs the GPU's hourly rate only while it is up; after five idle minutes it scales to zero.
+`KEV_MIN_CONTAINERS=1` keeps one warm (no cold starts, pays the hourly rate all the time). `@revision` pins a checkpoint
+revision (`jaredpalmer/kev-4b@v7-base`).
 
 ## 3. Deploy
 
@@ -54,8 +57,11 @@ KEV_MODEL=jaredpalmer/kev-4b modal deploy kev_serve.py    # prints the URL
 ```
 
 Settings are read at deploy time; redeploying with other values replaces the model behind the same URL.
-`KEV_APP_NAME=kev-support` gives a second, independent endpoint (`https://<workspace>--kev-support-api.modal.run`).
-`KEV_GPU=H100` overrides the GPU.
+`KEV_APP_NAME=kev-9b` gives a second, independent endpoint (`https://<workspace>--kev-9b-api.modal.run`).
+`KEV_GPU=H100` overrides the GPU list (comma-separated). `KEV_REGION=us` (or `us-east`, `eu`, ...) pins where the container
+runs: without it Modal takes the first region with a free GPU, which can be another continent (an unpinned Kev-4B landed in
+Frankfurt and added ~150 ms to every round trip from the US). A pinned region costs 1.15-1.75x on Modal; pin it near the
+callers for latency-sensitive use.
 
 ## 4. Verify
 
@@ -75,8 +81,13 @@ curl -s $KEV_URL/v1/systemone -H "authorization: Bearer $KEV_API_KEY" -H 'conten
 curl -s $KEV_URL/v1/models -H "authorization: Bearer $KEV_API_KEY"       # served checkpoint, base, temperature
 ```
 
-Expect per-question `probabilities` (calibrated by the checkpoint's own temperature), `choice` / `noul` / `score`,
-`latency_ms` (about 80-150 ms warm on an L4 for a short state). A request without the key must return 401.
+Expect per-question `probabilities` (calibrated by the checkpoint's own temperature), `choice` / `noul` / `score`, and
+`latency_ms`, the model time: tens of milliseconds warm (table above). The round trip adds the network and Modal's proxy,
+about 80-100 ms from a client in the US to a us-east container over a kept-alive connection, more with a new TLS
+connection per request, so reuse one HTTP client. The first request of a new shape (question set, state length) runs
+without a CUDA graph, about 2-4x slower; the server captures one in the background and later requests use it.
+`/v1/models` reports the served checkpoint, its temperature and the number of captured graphs. A request without the key
+must return 401.
 
 ## 5. Wire it in
 
@@ -108,6 +119,9 @@ modal volume delete kev-hf-cache   # optional: the cached weights (shared with k
 - **First request returns nothing or a 303**: the cold start is still running (weights download on the very first start,
   or Modal is still finding a GPU; `modal app logs kev` says "waiting to be scheduled"). Follow redirects (`curl -L`), use a
   longer client timeout, or deploy with `KEV_MIN_CONTAINERS=1`.
-- **CUDA out of memory on start**: the GPU is too small for that checkpoint; use the table above or `KEV_GPU=H100`.
+- **CUDA out of memory on start**: the GPU is too small for that checkpoint (Kev-9B needs ~18 GB, Kev-4B ~10 GB); use the
+  table above or `KEV_GPU=H100`.
+- **Slow round trips with fast `latency_ms`**: the container is far from the caller or every request opens a new
+  connection; set `KEV_REGION` and reuse the HTTP client.
 - **401 with the right key**: the key is fixed at deploy time; redeploy with the same `KEV_API_KEY` exported.
 - **Logs**: `modal app logs kev` shows the load line (`serving <model> on <GPU> ... ready in Ns`) and every request.

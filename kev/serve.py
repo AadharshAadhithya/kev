@@ -36,6 +36,7 @@ class Server:
     model: object
     device: str
     lock: threading.Lock = field(default_factory=threading.Lock)
+    capture_lock: threading.Lock = field(default_factory=threading.Lock)   # held by the one CUDA-graph capture thread
     prefix_cache: dict = field(default_factory=dict)   # (state token ids, option_isolation) -> prefix, in LRU order
     prefix_hits: int = 0
     prefix_misses: int = 0
@@ -70,7 +71,23 @@ class Server:
             else:
                 ps = self.model.probs(enc)
             sync(self.device); dt = time.time() - t
+        self.capture_graphs()
         return [p.tolist() for p in ps], {"tokens": len(enc["ids"]), "state_tokens": Ls, "latency_ms": round(dt * 1000, 1), "prefix_cache_hit": hit}
+
+    def capture_graphs(self):
+        """Capture the CUDA graphs for shapes this request ran eagerly (kev.cuda_graphs) on a background thread, one graph
+        per turn of the model lock: the request that met a new shape does not wait for its capture, and a request arriving
+        meanwhile waits for at most one (~0.4 s on an H100). At most one such thread at a time."""
+        graphs = getattr(self.model, "graphs", None)
+        if graphs is None or not graphs.pending or not self.capture_lock.acquire(blocking=False): return
+
+        def run():
+            try:
+                while graphs.pending:
+                    with self.lock: graphs.capture_pending(limit=1)
+            finally:
+                self.capture_lock.release()
+        threading.Thread(target=run, daemon=True).start()
 
     def answer(self, req):
         """The /v1/systemone response body for one request."""
@@ -153,6 +170,7 @@ def models():
             "release_date": s.release_date,
             "run": ck.requested, "base": meta.base, "lora": meta.lora, "device": s.device, "backend": s.model.backend, "dtype": s.model.dtype,
             "temperature": s.model.head.temperature,
+            "cuda_graphs": {"captured": graphs.captures, "kept": len(graphs.graphs)} if (graphs := getattr(s.model, "graphs", None)) else None,
             "prefix_cache": {"size": PREFIX_CACHE_SIZE, "min_state_tokens": s.prefix_min_tokens, "hits": s.prefix_hits,
                              "misses": s.prefix_misses, "cached_states": len(s.prefix_cache)}}
     return {"models": [{"name": name, **card} for name in MODEL_NAMES]}
@@ -170,6 +188,7 @@ def main():
     opts = LoadOptions.from_env()
     if dev == "mps" and opts.attn is None: opts = replace(opts, attn="sdpa")   # serving default on Apple GPUs (parity measured)
     if dev != "cpu" and opts.dtype is None: opts = replace(opts, dtype=torch.bfloat16)   # serving default: 2-4.5x faster than fp32 on an L4, same answers (LoadOptions.dtype); KEV_DTYPE=fp32 for the exact path
+    if dev == "cuda" and opts.cuda_graphs is None: opts = replace(opts, cuda_graphs=True)   # serving default: a pass is ~2,000 kernel launches, so replaying graphs cuts warm latency several-fold (kev.cuda_graphs); KEV_CUDA_GRAPHS=0 to decline
     if opts.backend is None: opts = replace(opts, backend="auto")   # serving default: MLX for the hybrid Qwen3.5 checkpoints on Apple Silicon (LoadOptions.backend); KEV_BACKEND=torch to decline
     ck = Checkpoint(run)
     tok, model = ck.load(dev, opts)

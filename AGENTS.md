@@ -91,6 +91,12 @@ Title Case sections, API tables, Authors + License); model cards are formal.
   the playground proxies :8009)
   - TypeSafe-compatible: `POST /v1/systemone`, `GET /v1/models` (model cards for `kev-latest` and `jev-latest`, plus device, dtype, temperature and prefix-cache stats), an `x-typesafe-request-id` header on every response, and bearer auth when `KEV_API_KEY` is set (unset = open server).
   - SDK: `TypeSafeClient(api_key="local", base_url="http://127.0.0.1:8009", model="kev-latest")`
+  - CUDA: bf16 + CUDA graphs by default (`kev/cuda_graphs.py`, `LoadOptions.cuda_graphs`, `KEV_CUDA_GRAPHS=0` to decline). A server pass
+    was kernel-launch bound (~60 ms on an H100 at any length); graphs replay bucketed passes (state left-padded, rows right-padded, masked
+    exactly; equal to eager up to bf16 reassociation), a new bucket runs eagerly and is captured on a background thread under the model lock.
+    Measure with `uv run modal run modal_app.py::serving --run <hub id> --gpu <GPU> --name <name>` (`scripts/serving_bench.py`: latency with
+    and without graphs, parity vs fp32; reports in `runs/serving-*`). `tests/test_model.py::test_cuda_graphs_match_eager` needs CUDA (run it on Modal).
+    Loading merges the fp32 adapter straight into bf16 weights (same bits as the old fp32 merge + cast), so Kev-9B needs ~17 GB, not 36 GB.
 - Extra endpoints for the demo: `POST /v1/systemone/permute` (one Choice under n option orders), `POST /v1/systemone/separate`
   (each question alone; packed-vs-separate comparison). `/v1/systemone` also returns `latency_ms`.
 - Web demo: `cd playground && npm run dev -- -p 3001` (:3000 is used by another project). Next 16 app router; `/kev/*` is

@@ -223,6 +223,7 @@ class DecisionModel(nn.Module):
         self.to(device)
 
     backend = "torch"           # kev.mlx_model.MLXDecisionModel is the other implementation of this scoring interface
+    graphs = None               # kev.cuda_graphs.CudaGraphs for the serving passes of a hybrid backbone on CUDA (LoadOptions.cuda_graphs)
 
     @property
     def prefix_min_tokens(self):
@@ -281,6 +282,8 @@ class DecisionModel(nn.Module):
         rows_per_pass at a time; training keeps one batch (its batches are small and autograd needs the whole graph anyway).
         With `cache`, the rows are branches continuing the cached state: the cache is replicated once per chunk (a copy,
         so the caller's prefix stays pristine) and the cached tokens are marked real in the attention mask."""
+        if cache is not None and self.graphs is not None and (out := self.graphs.branches(rows, cache, prefix_len)) is not None:
+            return out
         chunk = len(rows) if self.training else rows_per_pass([ids for ids, _ in rows], prefix_len)
         out = []
         for start in range(0, len(rows), chunk):
@@ -332,12 +335,16 @@ class DecisionModel(nn.Module):
         layout, minus the recomputed state)."""
         S, _, rows = rows_of(enc)
         hs = self._rows_hidden([(r["ids"], r["pos"]) for r in rows], cache=cache, prefix_len=len(S))
-        return [F.softmax(self.head(h[r["decide"]], h[torch.tensor(r["opts"], device=self.device)]), -1).cpu() for h, r in zip(hs, rows)]
+        ps = [F.softmax(self.head(h[r["decide"]], h[torch.tensor(r["opts"], device=self.device)]), -1) for h, r in zip(hs, rows)]
+        return list(torch.cat(ps).cpu().split([len(p) for p in ps]))   # one device sync for the request, not one per question
 
     @torch.no_grad()
     def prefix(self, enc):
-        """Run the state tokens only. Returns (n_state_tokens, kv cache, state hidden states [Ls, d])."""
+        """Run the state tokens only. Returns (n_state_tokens, kv cache, state hidden states [Ls, d]); the hidden states
+        are None when the pass ran as a CUDA graph (only the packed path reads them, and it never runs one)."""
         Ls = enc["seg"].count(0)
+        if self.graphs is not None and (cache := self.graphs.prefix(enc["ids"][:Ls], enc["pos"][:Ls])) is not None:
+            return Ls, cache, None
         ids = torch.tensor([enc["ids"][:Ls]], device=self.device); pos = torch.tensor([enc["pos"][:Ls]], device=self.device)
         # the cache must know the layer types (hybrid backbones keep recurrent + conv states per DeltaNet layer)
         out = self.lm(input_ids=ids, position_ids=pos, past_key_values=DynamicCache(config=self.lm.config), use_cache=True)

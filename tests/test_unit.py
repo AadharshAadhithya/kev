@@ -161,6 +161,7 @@ def test_checkpoint_meta_round_trip_and_defaults(tmp_path):
     assert opts == LoadOptions(dtype=torch.bfloat16, merge=False, attn="sdpa", lora_scale=0.5, temperature=1.0)
     assert LoadOptions.from_env({"KEV_DTYPE": "fp32"}).dtype is torch.float32   # explicit fp32 survives, so kev.serve's bf16 default can be declined
     assert LoadOptions.from_env({}).backend is None and LoadOptions.from_env({"KEV_BACKEND": "mlx"}).backend == "mlx"
+    assert [LoadOptions.from_env(e).cuda_graphs for e in ({}, {"KEV_CUDA_GRAPHS": "0"}, {"KEV_CUDA_GRAPHS": "1"})] == [None, False, True]   # an explicit 0 declines kev.serve's default
     with pytest.raises(ValueError, match="KEV_BACKEND"):
         LoadOptions.from_env({"KEV_BACKEND": "metal"})
 

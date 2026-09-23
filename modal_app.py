@@ -42,6 +42,7 @@ GPU = os.environ.get("KEV_GPU", "H100")   # H100 needs a payment method on the w
 
 def worker_environment(app_name, gpu, secret_name=None):
     env = {"HF_HOME": HF_MOUNT, "HF_HUB_DISABLE_PROGRESS_BARS": "1", "TOKENIZERS_PARALLELISM": "false", "PYTHONUNBUFFERED": "1",
+           "TRITON_CACHE_DIR": f"{HF_MOUNT}/triton-cache",   # compiled DeltaNet kernels and their autotuning results survive the container
            "KEV_APP_NAME": app_name, "KEV_GPU": gpu}
     if secret_name:
         env["KEV_HF_SECRET"] = secret_name
@@ -52,7 +53,7 @@ app = modal.App(APP_NAME)
 image = (
     modal.Image.debian_slim(python_version="3.13")
     .apt_install("git")
-    .uv_sync(uv_project_dir=str(ROOT), groups=[])           # exact locked deps; Linux torch wheels are the CUDA build
+    .uv_sync(uv_project_dir=str(ROOT), groups=[], extras=["serve"])   # exact locked deps (serve: kev.serve for serving_bench); Linux torch wheels are the CUDA build
     # Gated DeltaNet kernels for the Qwen3.5 hybrid backbones (transformers falls back to slow reference code without them)
     # fla refuses its gated chunk backward on Hopper with Triton 3.4-3.7.0 (incorrect results, fla#640); torch 2.8 pins 3.4
     .uv_pip_install("flash-linear-attention", "triton>=3.7.1")
@@ -156,9 +157,9 @@ def run_locked_test(trial_path, name, suites, git_commit, redo_interrupted=False
     return summary
 
 
-def run_tool(cmd, out):
+def run_tool(cmd, out, block="clean"):
     """Run a repo script/module inside the container against the mounted checkout, refusing to overwrite `out` on the
-    volume; returns the report's clean block. Shared by the probe and bench functions."""
+    volume; returns the report's `block` (None = the whole report). Shared by the probe, bench and serving functions."""
     import subprocess as sp
     if out.exists():
         raise FileExistsError(f"{out} exists on the volume")
@@ -167,7 +168,8 @@ def run_tool(cmd, out):
     finally:
         runs_volume.commit(); hf_cache.commit()
     from kev.suite import read_json
-    return read_json(out / "report.json")["clean"]
+    report = read_json(out / "report.json")
+    return report if block is None else report[block]
 
 
 @app.function(image=image, gpu=GPU, cpu=2, memory=(32768, 131072), retries=0, timeout=3600,
@@ -192,6 +194,21 @@ def run_bench(run, suite, name, flags=""):
     out = Path(RUNS_MOUNT) / "bench" / name
     source = ["--data", f"/root/{suite}"] if suite.endswith(".jsonl") else ["--suite", f"/root/{suite}"]
     return run_tool([sys.executable, "-m", "kev.benchmark", "--run", run, *source, "--out", out, "--device", "cuda", *flags.split()], out)
+
+
+@app.function(image=image, gpu=GPU, cpu=2, memory=(32768, 131072), retries=0, timeout=3600,
+              volumes={RUNS_MOUNT: runs_volume, HF_MOUNT: hf_cache}, secrets=secrets)
+def run_serving(run, name, flags=""):
+    """scripts/serving_bench.py (served latency with and without CUDA graphs, parity against fp32) -> /runs/serving/<name>."""
+    out = Path(RUNS_MOUNT) / "serving" / name
+    return run_tool([sys.executable, "/root/scripts/serving_bench.py", "--run", run, "--suite", "/root/evals/v7/decision-v7", "--out", out, *flags.split()], out, block=None)
+
+
+@app.local_entrypoint()
+def serving(run: str, name: str, gpu: str = GPU, flags: str = ""):
+    report = run_serving.with_options(gpu=gpu).remote(run, name, flags)
+    print(json.dumps(report, indent=1))
+    pull_volume(f"/serving/{name}", ROOT / "runs")
 
 
 @app.function(image=image, gpu=GPU, cpu=2, memory=(32768, 131072), retries=0, timeout=2400,

@@ -285,15 +285,27 @@ def base_probe(bases: str, suite: str = "evals/v4/transfer-v4", tasks: str = "al
         print(f"{name}: acc {result['acc']:.3f} brier {result['brier']:.3f} conf-err {result['confident_error_rate']:.3f}")
 
 
+# Per-read timeouts by suite (fp32 evaluation; a 9B on H100/H200). Long-state panels take over an hour for ~900 records of
+# 6k-token rows; one timeout for a mixed batch made every job carry the slowest one's admission bound (round 6).
+READ_TIMEOUTS = (("longstate", 7200), ("documents", 5400), ("transfer-v9", 3600))
+DEFAULT_READ_TIMEOUT = 1800
+
+
+def read_timeout(suite):
+    return next((t for key, t in READ_TIMEOUTS if key in suite), DEFAULT_READ_TIMEOUT)
+
+
 @app.local_entrypoint()
-def benchmarks(jobs: str, gpu: str = GPU, timeout: int = 3600):
+def benchmarks(jobs: str, gpu: str = GPU, timeout: int = 0):
     """Score checkpoints on suites or --data .jsonl files: comma-separated run@suite@name[@flags] entries, e.g.
     "jaredpalmer/kev-9b@evals/external/semif-v1@kev-9b-semif,/runs/X/00-trial-0/checkpoint@evals/v9/transfer-v9@x-v9@--date_facts".
-    Results are pulled to runs/<name>. Raise --timeout for long-state suites: fp32 evaluation of a 9B on 6k-token rows
-    takes over an hour for ~900 records."""
+    Results are pulled to runs/<name>. Each job gets its suite's timeout (READ_TIMEOUTS); --timeout N sets one for all
+    of them (raise it for a 27B, whose fp32 reads run about three times longer than a 9B's)."""
     entries = [(j.split("@") + [""])[:4] for j in jobs.split(",")]
-    for (run, suite, name, _), result in zip(entries, run_bench.with_options(gpu=gpu, timeout=timeout).starmap(entries, return_exceptions=True)):
-        if isinstance(result, Exception): print(f"{name}: FAILED {type(result).__name__}: {str(result)[:300]}"); continue
+    calls = [run_bench.with_options(gpu=gpu, timeout=timeout or read_timeout(suite)).spawn(*e) for e, suite in zip(entries, (e[1] for e in entries))]
+    for (run, suite, name, _), call in zip(entries, calls):
+        try: result = call.get()
+        except Exception as e: print(f"{name}: FAILED {type(e).__name__}: {str(e)[:300]}"); continue
         pull_volume(f"/bench/{name}", ROOT / "runs")
         print(f"{name}: acc {result['acc']:.3f} brier {result['brier']:.3f}")
 
@@ -383,12 +395,19 @@ def launch(suite, plan_path, name, gpu, existing=(), transfer=None, budget=20.0,
 
 
 def pull_study(study):
-    """Download a study directory from the runs volume into runs/<study> and rank it."""
+    """Download a study directory from the runs volume into runs/<study> and rank it. A study pulled before all its trials
+    finished gets only the trial directories it lacks (existing ones are never overwritten), then is re-ranked."""
     target = ROOT / "runs" / study
-    if target.exists():
-        raise FileExistsError(f"refusing to overwrite local study: {target}")
     target.parent.mkdir(exist_ok=True)
-    pull_volume(f"/{study}", target.parent)   # recreates runs/<study>/... locally, checkpoints included (gitignored)
+    if not target.exists():
+        pull_volume(f"/{study}", target.parent)   # recreates runs/<study>/... locally, checkpoints included (gitignored)
+    else:
+        missing = sorted(d for d in volume_names(f"/{study}")[0] if not (target / d).exists())
+        for d in missing: pull_volume(f"/{study}/{d}", target)
+        (target / "results.jsonl").unlink(missing_ok=True)   # derived from the trials' result.json; aggregate rebuilds it
+        partial = sorted(p.name for p in target.glob("*-trial-*") if p.is_dir() and not (p / "result.json").exists())
+        print(f"{study}: added {len(missing)} trial(s) {missing or ''}"
+              + (f"; local trial dirs without result.json (still running, or an interrupted download to delete and re-pull): {partial}" if partial else ""))
     subprocess.run([sys.executable, "-m", "kev.experiment", "--aggregate", "--out", str(target)], check=True, cwd=ROOT)
     return target
 

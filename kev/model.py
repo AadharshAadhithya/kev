@@ -4,6 +4,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from transformers import AutoModelForCausalLM, AutoTokenizer, DynamicCache
+from transformers.cache_utils import LinearAttentionCacheLayerMixin
 
 # Reuse existing rarely-used Qwen special tokens as delimiters (state, q, opt, /opt, decide) so no
 # embedding rows need to be added/trained; LoRA adapts their meaning.
@@ -280,8 +281,8 @@ class DecisionModel(nn.Module):
     def _rows_hidden(self, rows, cache=None, prefix_len=0):
         """Hidden states of causal token rows, one [L_i, d] tensor per row. In eval mode the rows go through the backbone
         rows_per_pass at a time; training keeps one batch (its batches are small and autograd needs the whole graph anyway).
-        With `cache`, the rows are branches continuing the cached state: the cache is replicated once per chunk (a copy,
-        so the caller's prefix stays pristine) and the cached tokens are marked real in the attention mask."""
+        With `cache`, the rows are branches continuing the cached state: in eager mode the cache is replicated once per
+        chunk, leaving the caller's prefix pristine, and the cached tokens are marked real in the attention mask."""
         if cache is not None and self.graphs is not None and (out := self.graphs.branches(rows, cache, prefix_len)) is not None:
             return out
         chunk = len(rows) if self.training else rows_per_pass([ids for ids, _ in rows], prefix_len)
@@ -291,7 +292,17 @@ class DecisionModel(nn.Module):
             ids, pos, att = self._pad_rows(part)
             past = {}
             if cache is not None:
-                replica = copy.deepcopy(cache); replica.reorder_cache(torch.zeros(len(part), dtype=torch.long, device=self.device))
+                replica = copy.copy(cache)
+                replica.layers = [copy.copy(layer) for layer in cache.layers]
+                for source, target in zip(cache.layers, replica.layers):
+                    if isinstance(source, LinearAttentionCacheLayerMixin):
+                        target.conv_states = source.conv_states.copy()
+                        target.recurrent_states = source.recurrent_states.copy()
+                        target.is_conv_states_initialized = source.is_conv_states_initialized.copy()
+                        target.is_recurrent_states_initialized = source.is_recurrent_states_initialized.copy()
+                        target.has_previous_state = source.has_previous_state.copy()
+                        target.conv_kernel_size = source.conv_kernel_size.copy()
+                replica.reorder_cache(torch.zeros(len(part), dtype=torch.long, device=self.device))
                 att = torch.cat([torch.ones((len(part), prefix_len), dtype=torch.long, device=self.device), att], 1)
                 past = {"past_key_values": replica, "use_cache": True}
             h = self.lm(input_ids=ids, position_ids=pos, attention_mask=att, **past).last_hidden_state.float()

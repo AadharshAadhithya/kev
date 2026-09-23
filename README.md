@@ -72,6 +72,18 @@ Example response from Kev-4B, running in bf16 on an Apple M5:
 
 The ticket mentions a return, a late delivery, and a billing problem, and the department probabilities say so. That is the point of getting probabilities back instead of a single label.
 
+### Host It on Modal
+
+To get your own HTTPS endpoint instead of a local server, you don't need this repo:
+
+```bash
+pip install modal && modal setup
+curl -LO https://raw.githubusercontent.com/jaredpalmer/kev/main/skills/kev-deploy/scripts/kev_serve.py
+KEV_API_KEY=$(openssl rand -hex 24) modal deploy kev_serve.py
+```
+
+That serves Kev-4B on an L4 at `https://<your-workspace>--kev-api.modal.run`, with the same API as above behind `Authorization: Bearer <key>`. It scales to zero when idle. `KEV_MODEL=jaredpalmer/kev-9b` picks another model, and the GPU follows. With a coding agent, `npx skills add jaredpalmer/kev@kev-deploy` does the same and wires the URL into your code; see [skills/kev-deploy](skills/kev-deploy/).
+
 ### Python
 
 The TypeSafe SDK is included in `uv sync --extra serve`:

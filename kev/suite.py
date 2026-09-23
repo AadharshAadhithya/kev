@@ -23,8 +23,11 @@ SERVING_CONTEXT = {"max_state": SERVE_MAX_STATE, "max_branch": SERVE_MAX_BRANCH,
 ADMISSION_BRANCH_HEADROOM = 64
 # Frozen suites are mirrored on the Hub. Manifests (with the sha256 of every partition) and the development/test
 # partitions live in git; large training partitions are fetched from this dataset on first use and verified against
-# the manifest, so the suite hash and every provenance record stay unchanged.
+# the manifest, so the suite hash and every provenance record stay unchanged. A suite whose partitions must never be
+# public (a held-out test set) names its own mirror in the manifest, {"mirror": {"dataset": ..., "revision": ...}},
+# usually the private PRIVATE_DATASET; only its manifest is in git, which publishes the hashes but not the text.
 SUITES_DATASET = "jaredpalmer/kev-suites"
+PRIVATE_DATASET = "jaredpalmer/kev-private-evals"
 SUITES_REVISION = "a88f56db5341397299137cb68775c2ea6e3f68cb"
 # programmatic policy sources (kev.study_v3 / kev.contrastive); the trainer's mix ablations treat them as one group
 SYNTHETIC_SOURCES = ("legacy_policy", "compositional", "contrastive")
@@ -113,16 +116,24 @@ def load_split(directory, split, allow_test=False):
 
 
 def fetch_partition(directory, filename):
-    """Download one partition of a frozen suite from the Hub mirror into place. The caller verifies the sha256."""
+    """Download one partition of a frozen suite from its Hub mirror into place: the manifest's own "mirror" if it names
+    one, else SUITES_DATASET@SUITES_REVISION. The caller verifies the sha256."""
     from huggingface_hub import hf_hub_download
+    from huggingface_hub.errors import GatedRepoError, RepositoryNotFoundError
     directory = Path(directory).resolve()
     evals_root = next((p for p in directory.parents if p.name == "evals"), None)
     if evals_root is None:
         raise FileNotFoundError(f"{directory / filename} is missing and is not under an evals/ tree")
     relative = directory.relative_to(evals_root) / filename
-    cached = hf_hub_download(SUITES_DATASET, str(relative), repo_type="dataset", revision=SUITES_REVISION)
+    mirror = read_manifest(directory).get("mirror")
+    repo, revision = (mirror["dataset"], mirror["revision"]) if mirror else (SUITES_DATASET, SUITES_REVISION)   # a named mirror pins its own revision
+    try:
+        cached = hf_hub_download(repo, str(relative), repo_type="dataset", revision=revision)
+    except (RepositoryNotFoundError, GatedRepoError) as e:   # a private mirror answers "not found" to anyone without access
+        raise PermissionError(f"{relative} is only in {repo}, which is missing or private to this account; `hf auth login` "
+                              "(or HF_TOKEN) with access to it, or ask for it") from e
     shutil.copyfile(cached, directory / filename)
-    print(f"fetched {relative} from {SUITES_DATASET}@{SUITES_REVISION[:10]}", flush=True)
+    print(f"fetched {relative} from {repo}@{revision[:10]}", flush=True)
 
 
 def case_copy(record, variant):

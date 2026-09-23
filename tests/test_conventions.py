@@ -39,6 +39,16 @@ def sources():
         yield from (p for p in ([path] if path.is_file() else sorted(path.rglob("*.py"))) if "__pycache__" not in p.parts and p != Path(__file__))
 
 
+def test_private_suites_keep_their_partitions_out_of_git():
+    """A manifest that names its own mirror (kev.suite: a held-out suite) publishes hashes only: no partition in git."""
+    import json, subprocess
+    tracked = set(subprocess.run(["git", "ls-files", "evals"], cwd=ROOT, capture_output=True, text=True, check=True).stdout.split())
+    for manifest in sorted((ROOT / "evals").rglob("manifest.json")):
+        if "mirror" not in json.loads(manifest.read_text(encoding="utf-8")): continue
+        leaked = [f for f in tracked if f.startswith(str(manifest.parent.relative_to(ROOT)) + "/") and f.endswith(".jsonl")]
+        assert not leaked, f"{manifest.parent} names a private mirror but tracks partitions: {leaked}"
+
+
 def test_published_claims_trace_to_committed_evidence():
     from scripts.verify_claims import verify
 

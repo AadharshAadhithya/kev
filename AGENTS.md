@@ -52,6 +52,12 @@ Title Case sections, API tables, Authors + License); model cards are formal.
   in `kev/suite.py: SUITES_REVISION`) and `load_split` fetches + verifies them on first use. After freezing a new suite:
   `hf upload jaredpalmer/kev-suites evals . --type dataset --include "*.jsonl" --include "*.json"`, bump
   `SUITES_REVISION`, gitignore the large partitions. Never modify a frozen file; new data = new version.
+  Held-out suites whose text must never be public (a private test set) keep only `manifest.json` in git and name their
+  own mirror in it, `"mirror": {"dataset": "jaredpalmer/kev-private-evals", "revision": "<commit sha>"}` (`kev.suite.PRIVATE_DATASET`,
+  a private dataset repo): freeze locally, `hf upload jaredpalmer/kev-private-evals evals . --type dataset --include "<suite path under evals/>/*.jsonl"` (e.g. `held/documents-v2/*.jsonl`),
+  write the returned commit into the manifest, gitignore the partitions. `load_split` fetches and hash-checks them for accounts with
+  access (`hf auth login` / `HF_TOKEN`; Modal images already carry a locally fetched copy under `evals/`) and raises a
+  PermissionError naming the repo for everyone else; `tests/test_conventions.py` fails if such a suite tracks a partition.
 - Modal (default for anything beyond smoke): `modal_app.py`; `uv run modal run modal_app.py::{smoke,study,pull,resume,
   locked_test,evaluate,base_probe,benchmarks,smoke_base,anchors}`; `uv run modal deploy modal_app.py` once so studies
   survive a disconnect. Image = `uv_sync` of pyproject/uv.lock (Linux torch wheel is CUDA) + `kev/` + `evals/`; Volumes

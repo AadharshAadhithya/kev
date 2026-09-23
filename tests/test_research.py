@@ -697,6 +697,29 @@ def test_missing_partition_is_fetched_and_verified(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="checksum"):
         S.load_split(evals, "train")
 
+def test_private_suite_fetches_from_its_own_mirror(tmp_path, monkeypatch):
+    import hashlib
+    from huggingface_hub.errors import RepositoryNotFoundError
+    from kev import suite as S
+    evals = tmp_path / "evals" / "held" / "docs-x"; evals.mkdir(parents=True)
+    payload = b'{"state": "s", "questions": {}, "_meta": {}}\n'
+    S.write_json(evals / "manifest.json", {"mirror": {"dataset": S.PRIVATE_DATASET, "revision": "abc123"},
+                                           "files": {"test.jsonl": {"sha256": hashlib.sha256(payload).hexdigest(), "records": 1}}})
+    served = tmp_path / "served.jsonl"; served.write_bytes(payload)
+    calls = []
+    def fake_download(repo, path, repo_type, revision):
+        calls.append((repo, path, repo_type, revision)); return str(served)
+    monkeypatch.setattr("huggingface_hub.hf_hub_download", fake_download)
+    assert len(S.load_split(evals, "test", allow_test=True)) == 1
+    assert calls == [(S.PRIVATE_DATASET, "held/docs-x/test.jsonl", "dataset", "abc123")]
+    # without access the Hub says "not found"; the loader says why, instead of a bare 404
+    (evals / "test.jsonl").unlink()
+    import httpx
+    def denied(*a, **k): raise RepositoryNotFoundError("404 Client Error", response=httpx.Response(404, request=httpx.Request("GET", "https://huggingface.co")))
+    monkeypatch.setattr("huggingface_hub.hf_hub_download", denied)
+    with pytest.raises(PermissionError, match="kev-private-evals"):
+        S.load_split(evals, "test", allow_test=True)
+
 def test_remote_predictor_maps_system_one_answers_and_retries(monkeypatch):
     import io, json
     from kev.predictors import RemotePredictor

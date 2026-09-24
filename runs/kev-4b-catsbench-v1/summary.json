@@ -1,0 +1,52 @@
+{
+  "model": "jaredpalmer/kev-4b",
+  "revision": "1da696f7938f77c4cdf5471e92fd342baff41778",
+  "suite": "evals/external/catsbench-v1",
+  "suite_sha256": "c3f64de23c9e024866378b1b57d4afb8b0e0158af7db0c9ab6e0e436f81556c1",
+  "device": "cuda",
+  "report": "report.json",
+  "families": {
+    "catsbench_forecast/direction": {
+      "n": 38,
+      "accuracy": 0.2631578947368421,
+      "majority_accuracy": 0.5789473684210527,
+      "nll": 2.4770765154199106
+    },
+    "catsbench_forecast/new_high": {
+      "n": 23,
+      "accuracy": 0.43478260869565216,
+      "majority_accuracy": 0.5217391304347826,
+      "nll": 0.8889098173300137
+    },
+    "catsbench_forecast/new_low": {
+      "n": 30,
+      "accuracy": 0.26666666666666666,
+      "majority_accuracy": 0.6333333333333333,
+      "nll": 1.2006565611761588
+    },
+    "catsbench_observation/direction": {
+      "n": 208,
+      "accuracy": 0.8557692307692307,
+      "majority_accuracy": 0.5240384615384616,
+      "nll": 0.41238335962585493
+    },
+    "catsbench_observation/maximum_position": {
+      "n": 317,
+      "accuracy": 0.48264984227129337,
+      "majority_accuracy": 0.41324921135646686,
+      "nll": 1.0285087354659461
+    },
+    "catsbench_observation/relative_change": {
+      "n": 303,
+      "accuracy": 0.7062706270627063,
+      "majority_accuracy": 0.3564356435643564,
+      "nll": 0.7684607001800875
+    },
+    "catsbench_observation/second_half_higher": {
+      "n": 31,
+      "accuracy": 0.7741935483870968,
+      "majority_accuracy": 0.5161290322580645,
+      "nll": 0.5572228063351324
+    }
+  }
+}

@@ -1,0 +1,117 @@
+{
+  "valid": true,
+  "errors": [],
+  "warnings": [
+    "forecast/direction: rarest observed label has only 1 examples"
+  ],
+  "records": 459,
+  "questions": 950,
+  "source_groups": 402,
+  "mode_records": {
+    "forecast": 61,
+    "observation": 398
+  },
+  "domains": {
+    "agriculture": 64,
+    "border crossing": 103,
+    "co2": 24,
+    "covid": 40,
+    "crime": 11,
+    "demography": 41,
+    "diet": 72,
+    "online retail": 43,
+    "road injuries": 36,
+    "walmart": 25
+  },
+  "duplicate_states": 0,
+  "task_families": {
+    "forecast/direction": {
+      "n": 38,
+      "labels": {
+        "decrease": 22,
+        "increase": 15,
+        "stable": 1
+      },
+      "majority_accuracy": 0.5789473684210527
+    },
+    "forecast/new_high": {
+      "n": 23,
+      "labels": {
+        "False": 11,
+        "True": 12
+      },
+      "majority_accuracy": 0.5217391304347826
+    },
+    "forecast/new_low": {
+      "n": 30,
+      "labels": {
+        "False": 11,
+        "True": 19
+      },
+      "majority_accuracy": 0.6333333333333333
+    },
+    "observation/direction": {
+      "n": 208,
+      "labels": {
+        "decrease": 87,
+        "increase": 109,
+        "stable": 12
+      },
+      "majority_accuracy": 0.5240384615384616
+    },
+    "observation/maximum_position": {
+      "n": 317,
+      "labels": {
+        "early": 102,
+        "late": 131,
+        "middle": 84
+      },
+      "majority_accuracy": 0.41324921135646686
+    },
+    "observation/relative_change": {
+      "n": 303,
+      "labels": {
+        "0": 108,
+        "1": 28,
+        "2": 29,
+        "3": 36,
+        "4": 102
+      },
+      "majority_accuracy": 0.3564356435643564
+    },
+    "observation/second_half_higher": {
+      "n": 31,
+      "labels": {
+        "False": 16,
+        "True": 15
+      },
+      "majority_accuracy": 0.5161290322580645
+    }
+  },
+  "baselines": {
+    "per_task_majority_micro": 0.43894736842105264,
+    "per_task_majority_macro": 0.5062674544152168
+  },
+  "proposals": {
+    "rows": 500,
+    "empty": 0,
+    "raw_parse_mismatches": 0,
+    "template_counts": {
+      "future_change": 5,
+      "future_direction": 40,
+      "future_new_high": 25,
+      "future_new_low": 37,
+      "observed_change": 365,
+      "observed_direction": 261,
+      "observed_extreme_position": 405,
+      "observed_monotonic_decrease": 14,
+      "observed_second_half_higher": 37
+    },
+    "models": [
+      "Qwen/Qwen3.8-27B"
+    ],
+    "revisions": [
+      "1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0"
+    ]
+  }
+}

@@ -1,0 +1,80 @@
+{
+  "version": 1,
+  "external": {
+    "repo": "https://huggingface.co/datasets/mhfisher/CaTSBench",
+    "revision": "63e35cded0d5a8e3a3fd87d487da267cf873a846",
+    "license": "MIT",
+    "source_split": "test",
+    "caption_kind": "human",
+    "sample": {
+      "seed": "catsbench-pilot-v1",
+      "candidates": 500,
+      "admitted_source_groups": 402
+    },
+    "selector": {
+      "model": "Qwen/Qwen3.8-27B",
+      "revision": "1d4bf0f2ff6012fd82039f2fa52739d0dd7c60c0",
+      "proposals": "proposals.jsonl",
+      "sha256": "9db47f688de5a93d74e443633c81ccf9e00b6340df3a76de557891ffb5db7adc"
+    },
+    "audit": {
+      "file": "audit.json",
+      "sha256": "cddf6066a7a4333e7186fcd43ac5c4341f1fc402eb72896b1d07e3a6422bfb64"
+    }
+  },
+  "base_revisions": {},
+  "dataset_revisions": {
+    "catsbench": "63e35cded0d5a8e3a3fd87d487da267cf873a846"
+  },
+  "holdout_sources": [],
+  "trainable_sources": [],
+  "eval_only_sources": [
+    "catsbench"
+  ],
+  "context": {
+    "max_state": 384,
+    "max_branch": 1024,
+    "max_packed": 2048,
+    "truncate": false
+  },
+  "files": {
+    "development.jsonl": {
+      "sha256": "c3f64de23c9e024866378b1b57d4afb8b0e0158af7db0c9ab6e0e436f81556c1",
+      "records": 459
+    },
+    "train.jsonl": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0
+    },
+    "calibration.jsonl": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0
+    },
+    "test.jsonl": {
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "records": 0
+    }
+  },
+  "eval_only": true,
+  "tasks": [
+    "catsbench_forecast",
+    "catsbench_observation"
+  ],
+  "protocol": {
+    "generator_version": 3,
+    "note": "Qwen selects registered task templates from human captions and indexed full series; labels are recomputed from numbers. Exact states are deduplicated, binary predicates use deterministic polarity, underpowered future_change and observed_monotonic_decrease templates are excluded, and kev.model.fits admits the released Kev training context. audit.json is the source-backed integrity and balance report.",
+    "qualitative_review": {
+      "sample": "first two generated examples in each of seven retained task families (14 total)",
+      "result": "direction deadband and extrema-third semantics were corrected; no remaining caption-template mismatch was found in the reviewed sample",
+      "limitation": "forecast/direction has one stable example in this 500-caption sample"
+    }
+  },
+  "baseline": {
+    "model": "jaredpalmer/kev-4b",
+    "revision": "1da696f7938f77c4cdf5471e92fd342baff41778",
+    "report": "runs/kev-4b-catsbench-v1/report.json",
+    "summary": "runs/kev-4b-catsbench-v1/summary.json",
+    "accuracy": 0.628421052631579,
+    "full_coverage": true
+  }
+}

@@ -72,8 +72,44 @@ The audit recomputes every label from the pinned source archive and verifies tha
 It reports no invalid records, duplicate states, caption leakage, or metadata-statistic leakage. The forecast-direction
 family has only one stable example, so per-class results for that family are preliminary.
 
-Kev-4B scores 62.8% overall accuracy on all 950 questions. It scores 66.2% on observation questions and 30.8% on
-forecast questions. The manifest identifies the exact checkpoint revision and report paths used for these numbers.
+## Initial results
+
+The initial run uses `jaredpalmer/kev-4b` at revision
+`1da696f7938f77c4cdf5471e92fd342baff41778`. It evaluates every record without truncation or rejection.
+
+| Split | Questions | Accuracy | NLL | ECE |
+| --- | ---: | ---: | ---: | ---: |
+| All | 950 | 62.8% | 0.855 | 0.093 |
+| Observation | 859 | 66.2% | 0.771 | 0.060 |
+| Forecast | 91 | 30.8% | 1.655 | 0.434 |
+
+Results by question family show where the model succeeds and fails. The majority column is the accuracy obtained by
+always predicting that family's most common label.
+
+| Question family | Questions | Kev-4B | Majority |
+| --- | ---: | ---: | ---: |
+| Forecast direction | 38 | 26.3% | 57.9% |
+| Forecast new high | 23 | 43.5% | 52.2% |
+| Forecast new low | 30 | 26.7% | 63.3% |
+| Observation direction | 208 | 85.6% | 52.4% |
+| Observation maximum position | 317 | 48.3% | 41.3% |
+| Observation relative change | 303 | 70.6% | 35.6% |
+| Observation second-half comparison | 31 | 77.4% | 51.6% |
+
+Kev-4B performs above the majority baseline on every observation family and below it on every forecast family. The
+forecast result also has poor calibration, with an ECE of 0.434. This first run therefore supports using observation and
+forecast questions as separate benchmark sections.
+
+The complete outputs are in [`baselines/kev-4b/report.json`](baselines/kev-4b/report.json) and
+[`baselines/kev-4b/summary.json`](baselines/kev-4b/summary.json). Reproduce the run from a Kev checkout with:
+
+```bash
+uv run python -m kev.benchmark \
+  --run jaredpalmer/kev-4b \
+  --suite evals/external/catsbench-v1 \
+  --out runs/kev-4b-catsbench-v1 \
+  --device cuda
+```
 
 ## License
 
